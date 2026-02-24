@@ -1,0 +1,4 @@
+runtimes:
+  ocaml:
+    type: OCaml
+    executable: /usr/bin/ocaml

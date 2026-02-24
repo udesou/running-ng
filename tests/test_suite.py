@@ -65,3 +65,35 @@ def test_dacapo_timing_iteration():
     fop_converge = c.get("benchmarks")["dacapo2006"][1]
     assert "-n 3" in fop.to_string(DummyRuntime("java"))
     assert "-converge" in fop_converge.to_string(DummyRuntime("java"))
+
+
+def test_ocaml_benchmark_suite():
+    c = Configuration({
+        "runtimes": {
+            "ocaml-system": {
+                "type": "OCaml",
+                "executable": "/usr/bin/ocaml"
+            }
+        },
+        "suites": {
+            "ocaml-demo": {
+                "type": "OCamlBenchmarkSuite",
+                "programs": {
+                    "hello": {
+                        "path": "/tmp/hello.ml",
+                        "ocaml_args": "-I +unix",
+                        "args": "foo bar"
+                    }
+                }
+            }
+        },
+        "benchmarks": {
+            "ocaml-demo": [
+                "hello"
+            ]
+        }
+    })
+    c.resolve_class()
+    hello = c.get("benchmarks")["ocaml-demo"][0]
+    ocaml = c.get("runtimes")["ocaml-system"]
+    assert "ocaml -I +unix /tmp/hello.ml foo bar" in hello.to_string(ocaml)

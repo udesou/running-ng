@@ -4,7 +4,7 @@ import subprocess
 import sys
 from time import sleep
 from typing import Any, List, Optional, Tuple, Union, Dict
-from running.runtime import D8, JavaScriptCore, OpenJDK, Runtime, DummyRuntime, SpiderMonkey
+from running.runtime import D8, JavaScriptCore, OCaml, OpenJDK, Runtime, DummyRuntime, SpiderMonkey
 from running.modifier import *
 from running.util import smart_quote, split_quoted
 from pathlib import Path
@@ -67,6 +67,12 @@ class Benchmark(object):
                 b.companion.extend(m.val)
             elif type(m) == EnvVar:
                 b.env_args[m.var] = m.val
+            elif type(m) == OCamlRunParam:
+                existing = b.env_args.get("OCAMLRUNPARAM")
+                if existing:
+                    b.env_args["OCAMLRUNPARAM"] = "{},{}".format(existing, m.val)
+                else:
+                    b.env_args["OCAMLRUNPARAM"] = m.val
             elif type(m) == ModifierSet:
                 logging.warning("ModifierSet should have been flattened")
         return b
@@ -257,5 +263,45 @@ class JavaScriptBenchmark(Benchmark):
         else:
             raise TypeError("{} is of type {}, and not a valid runtime for JavaScriptBenchmark".format(
                 runtime, type(runtime)))
+        cmd.extend(self.program_args)
+        return cmd
+
+
+class OCamlBenchmark(Benchmark):
+    def __init__(self, ocaml_args: List[str], program: str, program_args: List[str], **kwargs):
+        super().__init__(**kwargs)
+        self.ocaml_args = ocaml_args
+        self.program = program
+        self.program_args = program_args
+
+    def __str__(self) -> str:
+        return self.to_string(DummyRuntime("ocaml"))
+
+    def attach_modifiers(self, modifiers: List[Modifier]) -> 'OCamlBenchmark':
+        ob = super().attach_modifiers(modifiers)
+        for m in modifiers:
+            if self.suite_name in m.excludes:
+                if self.name in m.excludes[self.suite_name]:
+                    continue
+            if type(m) == ProgramArg:
+                ob.program_args.extend(m.val)
+            elif type(m) == JVMArg:
+                logging.warning("JVMArg not respected by OCamlBenchmark")
+            elif isinstance(m, JVMClasspathAppend) or type(m) == JVMClasspathPrepend:
+                logging.warning("JVMClasspath not respected by OCamlBenchmark")
+            elif type(m) == JSArg:
+                logging.warning("JSArg not respected by OCamlBenchmark")
+            elif type(m) == OCamlArg:
+                ob.ocaml_args.extend(m.val)
+        return ob
+
+    def get_full_args(self, runtime: Runtime) -> List[Union[str, Path]]:
+        if not isinstance(runtime, OCaml):
+            raise TypeError("{} is of type {}, and not a valid runtime for OCamlBenchmark".format(
+                runtime, type(runtime)))
+        cmd = super().get_full_args(runtime)
+        cmd.append(runtime.get_executable())
+        cmd.extend(self.ocaml_args)
+        cmd.append(self.program)
         cmd.extend(self.program_args)
         return cmd

@@ -1,0 +1,24 @@
+includes:
+  - "$RUNNING_NG_PACKAGE_DATA/base/runbms.yml"
+
+runtimes:
+  ocaml-system:
+    type: OCaml
+    executable: /usr/bin/ocaml
+
+suites:
+  ocaml-demo:
+    type: OCamlBenchmarkSuite
+    timeout: 30
+    programs:
+      hello:
+        path: /tmp/hello.ml
+        ocaml_args: ""
+        args: ""
+
+benchmarks:
+  ocaml-demo:
+    - hello
+
+configs:
+  - "ocaml-system"

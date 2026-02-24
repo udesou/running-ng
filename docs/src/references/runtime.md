@@ -21,3 +21,7 @@ tandem with
 ## `JavaScriptCore` (preview ⚠️)
 ### Keys
 `executable`: path to the `jsc` executable.
+
+## `OCaml` (preview ⚠️)
+### Keys
+`executable`: path to the OCaml runtime executable, such as `ocaml` or `ocamlrun`.

@@ -27,6 +27,24 @@ Multiple arguments are space separated.
 ### Description
 Specify arguments to a JavaScript runtime (e.g., `d8`), as opposed to the program.
 
+## `OCamlArg` (preview ⚠️)
+`OCaml` specific.
+### Keys
+`val`: a single string with [shell-like syntax](https://docs.python.org/3/library/shlex.html#shlex.split).
+Multiple arguments are space separated.
+
+### Description
+Specify arguments to an OCaml runtime (e.g., `-domain-count 4`), as opposed to the program.
+
+## `OCamlRunParam` (preview ⚠️)
+`OCaml` specific.
+### Keys
+`val`: a raw `OCAMLRUNPARAM` fragment (for example, `s=262144`).
+
+### Description
+Append one fragment to `OCAMLRUNPARAM`.
+Multiple `OCamlRunParam` modifiers are joined with commas in the order they appear in a config string.
+
 ## `JVMClasspathAppend`
 `JVM` specific.
 ### Keys

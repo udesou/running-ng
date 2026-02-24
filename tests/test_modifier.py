@@ -1,6 +1,7 @@
-from running.benchmark import JavaBenchmark
+from running.benchmark import JavaBenchmark, OCamlBenchmark
 from running.modifier import *
 from running.config import Configuration
+from running.runtime import OCaml
 
 
 def test_jvm_arg():
@@ -89,3 +90,32 @@ def test_modifier_set():
     mods = c.get("modifiers")["set_nested"].apply_value_opts(
         value_opts=["NoGC"]).flatten(c)
     assert len(mods) == 3
+
+
+def test_ocaml_arg():
+    o = OCamlArg(name="domains", val="-domain-count 4")
+    assert o.val == ["-domain-count", "4"]
+
+
+def test_ocamlrunparam():
+    p = OCamlRunParam(name="s", val="s=262144")
+    assert p.val == "s=262144"
+
+
+def test_ocaml_benchmark_with_ocaml_modifiers():
+    b = OCamlBenchmark(
+        ocaml_args=["-I", "+unix", "unix.cma"],
+        program="/tmp/binarytrees.ml",
+        program_args=["12"],
+        suite_name="ocaml-demo",
+        name="binarytrees"
+    )
+    b = b.attach_modifiers([
+        OCamlArg(name="domains", val="-domain-count 4"),
+        OCamlRunParam(name="s", val="s=262144"),
+        OCamlRunParam(name="o", val="o=80"),
+    ])
+    runtime = OCaml(name="ocaml-local", executable="/usr/bin/ocaml")
+    cmd = b.to_string(runtime)
+    assert "-domain-count 4" in cmd
+    assert "OCAMLRUNPARAM=s=262144,o=80" in cmd

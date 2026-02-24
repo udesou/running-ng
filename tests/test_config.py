@@ -89,3 +89,15 @@ def test_resolve_jvms():
     assert str(
         jdk8.executable) == "/usr/lib/jvm/adoptopenjdk-8-hotspot-amd64/bin/java"
     assert jdk8.release == 8
+
+
+def test_resolve_ocaml_runtime():
+    c = Configuration({"runtimes": {
+        "ocaml-system": {
+            "type": "OCaml",
+            "executable": "/usr/bin/ocaml"
+        }
+    }})
+    c.resolve_class()
+    ocaml = c.get("runtimes")["ocaml-system"]
+    assert str(ocaml.executable) == "/usr/bin/ocaml"

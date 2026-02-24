@@ -1,2 +1,3 @@
 includes:
   - "temurin.yml"
+  - "ocaml.yml"

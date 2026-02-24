@@ -20,6 +20,27 @@ programs:
 A possible use-case could use wrapper shell scripts around the benchmark to
 output timing and other information in a tab-separated table.
 
+## `OCamlBenchmarkSuite` (preview ⚠️)
+A `OCamlBenchmarkSuite` runs OCaml programs through an `OCaml` runtime.
+
+### Keys
+`programs`: a yaml dictionary of benchmarks in the format:
+```yaml
+programs:
+  <BM_NAME_1>:
+    path: /full/path/to/program.ml
+    ocaml_args: "optional runtime args before the program path"
+    args: "optional args passed to the program"
+```
+`ocaml_args` and `args` are optional and default to empty strings.
+
+`timeout`: optional timeout for one benchmark invocation in seconds.
+
+### Benchmark Specification
+Each benchmark can be either:
+- a string benchmark name, or
+- a dictionary with `name` and `bm_name` (and optional `timeout`).
+
 ## `DaCapo`
 [DaCapo benchmark suite](https://www.dacapobench.org/).
 ### Keys

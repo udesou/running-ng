@@ -1,0 +1,17 @@
+CONFIG: !!python/object/apply:pathlib.PosixPath
+- /Users/eduardo/Documents/OCaml-play/running-ng/src/running/config/binarytrees_gc_sweep_example.yml
+LOG_DIR: !!python/object/apply:pathlib.PosixPath
+- /Users/eduardo/Documents/OCaml-play/running-ng/gc-sweep-logs
+N: null
+dry_run: false
+id_prefix: null
+invocations: null
+minheap_multiplier: null
+n: []
+resume: null
+skip_oom: null
+skip_timeout: null
+slice: null
+verbose: false
+which: runbms
+workdir: null

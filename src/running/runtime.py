@@ -193,3 +193,28 @@ class JavaScriptCore(JavaScriptRuntime):
     def is_oom(self, output: bytes) -> bool:
         # FIXME not sure how to check for OOM for JavaScriptCore yet
         return False
+
+
+@register(Runtime)
+class OCaml(Runtime):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.executable: Path
+        self.executable = Path(kwargs["executable"])
+        if not self.executable.exists():
+            logging.warning("OCaml executable {} doesn't exist".format(self.executable))
+        self.executable = self.executable.absolute()
+    def get_executable(self) -> Path:
+        return self.executable
+
+    def get_heapsize_modifier(self, _size: int) -> Modifier:
+        raise NotImplementedError(
+            "Heap-size-based runs are not supported for OCaml runtime; use runbms with OCaml knobs via modifiers."
+        )
+
+    def is_oom(self, output: bytes) -> bool:
+        lower = output.lower()
+        for pattern in [b"out of memory", b"out_of_memory"]:
+            if pattern in lower:
+                return True
+        return False

@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-from running.benchmark import JavaBenchmark, BinaryBenchmark, Benchmark, JavaScriptBenchmark
+from running.benchmark import JavaBenchmark, BinaryBenchmark, Benchmark, JavaScriptBenchmark, OCamlBenchmark
 import logging
 from running.util import register, split_quoted
 
@@ -372,6 +372,54 @@ class Octane(BenchmarkSuite):
 
     def is_passed(self, output: bytes) -> bool:
         return b"PASSED" in output
+
+
+@register(BenchmarkSuite)
+class OCamlBenchmarkSuite(BenchmarkSuite):
+    def __init__(self, programs: Dict[str, Dict[str, str]], **kwargs):
+        super().__init__(**kwargs)
+        self.programs: Dict[str, Dict[str, Any]]
+        self.programs = {
+            k: {
+                "path": str(Path(v["path"])),
+                "ocaml_args": split_quoted(v.get("ocaml_args", "")),
+                "args": split_quoted(v.get("args", ""))
+            }
+            for k, v in programs.items()
+        }
+        self.timeout = kwargs.get("timeout")
+
+    def get_benchmark(self, bm_spec: Union[str, Dict[str, Any]]) -> 'OCamlBenchmark':
+        timeout = self.timeout
+        if type(bm_spec) is str:
+            bm_name = bm_spec
+            name = bm_spec
+        else:
+            assert type(bm_spec) is dict
+            if "bm_name" not in bm_spec or "name" not in bm_spec:
+                raise KeyError(
+                    "When a dictionary is used to specify an OCaml benchmark, you need to provide both `name` and `bm_name`")
+            bm_name = bm_spec["bm_name"]
+            name = bm_spec["name"]
+            if "timeout" in bm_spec:
+                timeout = bm_spec["timeout"]
+        return OCamlBenchmark(
+            ocaml_args=self.programs[bm_name]["ocaml_args"],
+            program=self.programs[bm_name]["path"],
+            program_args=self.programs[bm_name]["args"],
+            suite_name=self.name,
+            name=name,
+            timeout=timeout
+        )
+
+    def get_minheap(self, bm: Benchmark) -> int:
+        assert isinstance(bm, OCamlBenchmark)
+        logging.warning(
+            "minheap is not supported for OCamlBenchmarkSuite; use runbms sweeps with OCaml-specific modifiers")
+        return 0
+
+    def is_passed(self, _output: bytes) -> bool:
+        return True
 
 
 @register(BenchmarkSuite)

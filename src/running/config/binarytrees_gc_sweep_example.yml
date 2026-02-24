@@ -1,0 +1,58 @@
+includes:
+  - "$RUNNING_NG_PACKAGE_DATA/base/runbms.yml"
+
+overrides:
+  "invocations": 5
+  "remote_host": null
+
+runtimes:
+  ocaml-local:
+    type: OCaml
+    executable: "$HOME/Documents/Repositories/ocaml/ocaml"
+
+suites:
+  ocaml-binarytrees:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      binarytrees:
+        path: "$HOME/Documents/OCaml-play/binarytrees.ml"
+        ocaml_args: "-I +unix unix.cma"
+        args: "12"
+
+modifiers:
+  # Runtime metrics in stderr; captured by running-ng logs.
+  time_stats:
+    type: Wrapper
+    val: "/usr/bin/time -f \"%Uuser %Ssystem %eelapsed %PCPU (%Xavgtext+%Davgdata %Mmaxresident)k\""
+
+  # Optional, requires runtime_events_tools (`olly`) on PATH.
+  # olly_gc:
+  #   type: Wrapper
+  #   val: "olly gc-stats"
+
+  domains:
+    type: OCamlArg
+    val: "-domain-count {0}"
+  s:
+    type: OCamlRunParam
+    val: "s={0}"
+  o:
+    type: OCamlRunParam
+    val: "o={0}"
+  i:
+    type: OCamlRunParam
+    val: "i={0}"
+  a:
+    type: OCamlRunParam
+    val: "a={0}"
+
+benchmarks:
+  ocaml-binarytrees:
+    - binarytrees
+
+configs:
+  - "ocaml-local|time_stats|domains-1|s-262144|o-80|i-64|a-2"
+  - "ocaml-local|time_stats|domains-4|s-262144|o-80|i-64|a-2"
+  - "ocaml-local|time_stats|domains-1|s-524288|o-120|i-128|a-2"
+  - "ocaml-local|time_stats|domains-4|s-524288|o-120|i-128|a-2"
