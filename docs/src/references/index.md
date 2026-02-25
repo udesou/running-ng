@@ -54,6 +54,27 @@ the example above, we assume that both the `runtimes` and modifiers have been
 previously defined (in either the current configuration file or in an [`includes`
 file](#includes)).
 
+## `config_sweep`
+An optional YAML dictionary used by `runbms` to expand `configs` automatically.
+Each key is a modifier name and each value is a YAML list of value options.
+For each config string:
+- If a modifier from `config_sweep` is already present, that value is fixed.
+- If it is missing, `runbms` adds all values from `config_sweep`.
+- If multiple modifiers are missing, `runbms` takes their cartesian product.
+
+For example:
+```yaml
+configs:
+  - "ocaml-v5.4|time_stats|d-1|s-32768|o-40|i-32|a-1"
+  - "ocaml-v5.4|time_stats|d-1|s-32768|i-32|a-1"
+  - "ocaml-v5.4|time_stats|d-1|i-32|a-1"
+
+config_sweep:
+  s: [32768, 65536]
+  o: [40, 60, 80]
+```
+This expands to `1 + 3 + 6 = 10` configs.
+
 ## `includes`
 A YAML list of paths to YAML files that are to be included into the current
 configuration file for definitions of some keys.

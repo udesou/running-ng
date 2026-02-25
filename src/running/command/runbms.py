@@ -1,5 +1,6 @@
 import logging
 from typing import DefaultDict, Dict, List, Any, Optional, Set, Tuple, BinaryIO, TYPE_CHECKING
+from itertools import product
 from running.suite import BenchmarkSuite, is_dry_run
 from running.benchmark import Benchmark, SubprocessrExit
 from running.config import Configuration
@@ -27,6 +28,68 @@ skip_timeout: Optional[int]
 plugins: Dict[str, Any]
 resume: Optional[str]
 compress_logs: bool
+
+
+def get_modifier_name(mod_str: str) -> str:
+    return mod_str.strip().split("-", 1)[0].strip()
+
+
+def expand_configs(configs_raw: Any, config_sweep_raw: Any) -> List[str]:
+    if type(configs_raw) is not list:
+        raise TypeError("configs must be an array")
+    for c in configs_raw:
+        if type(c) is not str:
+            raise TypeError("configs must be an array of strings")
+
+    if config_sweep_raw is None:
+        return configs_raw
+    if type(config_sweep_raw) is not dict:
+        raise TypeError("config_sweep must be a dictionary")
+
+    sweep_entries: List[Tuple[str, List[Any]]] = []
+    for modifier_name, values in config_sweep_raw.items():
+        if type(modifier_name) is not str:
+            raise TypeError("config_sweep keys must be strings")
+        if type(values) is not list:
+            raise TypeError(
+                "config_sweep values must be arrays, got {} for '{}'".format(
+                    type(values).__name__, modifier_name
+                )
+            )
+        if len(values) == 0:
+            raise ValueError(
+                "config_sweep value array for '{}' is empty".format(modifier_name)
+            )
+        sweep_entries.append((modifier_name, values))
+
+    expanded_configs: List[str] = []
+    for c in configs_raw:
+        parts = [x.strip() for x in c.split("|")]
+        if len(parts) == 0 or parts[0] == "":
+            raise ValueError("Invalid config string '{}'".format(c))
+        runtime = parts[0]
+        modifiers = parts[1:]
+        existing_modifier_names = {get_modifier_name(m) for m in modifiers}
+
+        missing_entries = [
+            (modifier_name, values)
+            for modifier_name, values in sweep_entries
+            if modifier_name not in existing_modifier_names
+        ]
+
+        if len(missing_entries) == 0:
+            expanded_configs.append(c)
+            continue
+
+        for value_tuple in product(*[values for _, values in missing_entries]):
+            variable_modifiers = [
+                "{}-{}".format(modifier_name, value)
+                for (modifier_name, _), value in zip(missing_entries, value_tuple)
+            ]
+            expanded_configs.append(
+                "|".join([runtime] + modifiers + variable_modifiers)
+            )
+    return expanded_configs
 
 
 def setup_parser(subparsers):
@@ -412,7 +475,10 @@ def run(args):
         benchmarks = configuration.get("benchmarks")
         if benchmarks is None:
             benchmarks = {}
-        configs = configuration.get("configs")
+        configs = expand_configs(
+            configuration.get("configs"),
+            configuration.get("config_sweep")
+        )
         global remote_host
         remote_host = configuration.get("remote_host")
         if not is_dry_run() and remote_host is not None:
