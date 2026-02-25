@@ -15,5 +15,6 @@
     - [`fillin`](./commands/fillin.md)
 - [Cookbook](./cookbook/index.md)
     - [Performance Event Monitoring](./cookbook/perf_events.md)
+    - [OCaml Runtime Builds](./cookbook/ocaml_runtime_builds.md)
 - [Frequently Asked Questions](./faq.md)
 - [Changelog](./changelog.md)

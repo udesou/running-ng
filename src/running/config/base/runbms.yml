@@ -7,6 +7,9 @@ includes:
 invocations: 10
 # Can override with command line argument -m
 minheap_multiplier: 1.0
+# Compress each benchmark log to .log.gz after the run.
+# Set to false to keep plain .log files.
+compress_logs: true
 heap_range: 6
 spread_factor: 1
 remote_host: "squirrel.moma"

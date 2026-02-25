@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-from running.benchmark import JavaBenchmark, BinaryBenchmark, Benchmark, JavaScriptBenchmark, OCamlBenchmark
+from running.benchmark import JavaBenchmark, BinaryBenchmark, Benchmark, JavaScriptBenchmark, OCamlBenchmark, OCamlBuiltBinaryBenchmark
 import logging
 from running.util import register, split_quoted
 
@@ -378,15 +378,40 @@ class Octane(BenchmarkSuite):
 class OCamlBenchmarkSuite(BenchmarkSuite):
     def __init__(self, programs: Dict[str, Dict[str, str]], **kwargs):
         super().__init__(**kwargs)
+        always_build_default_raw = kwargs.get("always_build", False)
+        if not isinstance(always_build_default_raw, bool):
+            raise TypeError("OCamlBenchmarkSuite always_build must be boolean")
+        self.always_build_default = always_build_default_raw
         self.programs: Dict[str, Dict[str, Any]]
-        self.programs = {
-            k: {
+        self.programs = {}
+        for k, v in programs.items():
+            build_env_raw = v.get("build_env", {})
+            if not isinstance(build_env_raw, dict):
+                raise TypeError(
+                    "OCaml benchmark {} build_env must be a dictionary".format(k))
+            always_build_raw = v.get("always_build", self.always_build_default)
+            if not isinstance(always_build_raw, bool):
+                raise TypeError(
+                    "OCaml benchmark {} always_build must be boolean".format(k))
+            entry: Dict[str, Any] = {
                 "path": str(Path(v["path"])),
                 "ocaml_args": split_quoted(v.get("ocaml_args", "")),
-                "args": split_quoted(v.get("args", ""))
+                "args": split_quoted(v.get("args", "")),
+                "build_args": split_quoted(v.get("build_args", "")),
+                "build_env": {str(env_k): str(env_v) for env_k, env_v in build_env_raw.items()},
+                "always_build": always_build_raw,
             }
-            for k, v in programs.items()
-        }
+            if "build_script" in v:
+                benchmark_root = Path(v["path"]).resolve()
+                if benchmark_root.is_file():
+                    benchmark_root = benchmark_root.parent
+                build_script = Path(v["build_script"])
+                if not build_script.is_absolute():
+                    build_script = benchmark_root / build_script
+                entry["build_script"] = str(build_script.resolve())
+            if "binary" in v:
+                entry["binary"] = v["binary"]
+            self.programs[k] = entry
         self.timeout = kwargs.get("timeout")
 
     def get_benchmark(self, bm_spec: Union[str, Dict[str, Any]]) -> 'OCamlBenchmark':
@@ -403,17 +428,40 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
             name = bm_spec["name"]
             if "timeout" in bm_spec:
                 timeout = bm_spec["timeout"]
+        p = self.programs[bm_name]
+        program_path = Path(p["path"]).resolve()
+        use_build_mode = (
+            bool(p.get("build_script")) or
+            bool(p.get("binary")) or
+            bool(p.get("always_build")) or
+            program_path.is_dir()
+        )
+        if use_build_mode:
+            build_script = p.get("build_script")
+            return OCamlBuiltBinaryBenchmark(
+                benchmark_name=bm_name,
+                benchmark_dir=Path(p["path"]).resolve(),
+                build_script=Path(build_script).resolve() if build_script else None,
+                binary=p.get("binary"),
+                program_args=p["args"],
+                build_args=p["build_args"],
+                build_env=p["build_env"],
+                always_build=p["always_build"],
+                suite_name=self.name,
+                name=name,
+                timeout=timeout
+            )
         return OCamlBenchmark(
-            ocaml_args=self.programs[bm_name]["ocaml_args"],
-            program=self.programs[bm_name]["path"],
-            program_args=self.programs[bm_name]["args"],
+            ocaml_args=p["ocaml_args"],
+            program=p["path"],
+            program_args=p["args"],
             suite_name=self.name,
             name=name,
             timeout=timeout
         )
 
     def get_minheap(self, bm: Benchmark) -> int:
-        assert isinstance(bm, OCamlBenchmark)
+        assert isinstance(bm, (OCamlBenchmark, OCamlBuiltBinaryBenchmark))
         logging.warning(
             "minheap is not supported for OCamlBenchmarkSuite; use runbms sweeps with OCaml-specific modifiers")
         return 0

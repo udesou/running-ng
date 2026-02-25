@@ -55,6 +55,10 @@ class Benchmark(object):
         # also to type check https://mypy.readthedocs.io/en/stable/common_issues.html#variance
         return list(self.wrapper)
 
+    def prepare(self, _runtime: Runtime):
+        # Optional pre-run preparation hook. Most benchmarks do nothing.
+        return
+
     def attach_modifiers(self, modifiers: List[Modifier]) -> Any:
         b = deepcopy(self)
         for m in modifiers:
@@ -305,3 +309,134 @@ class OCamlBenchmark(Benchmark):
         cmd.append(self.program)
         cmd.extend(self.program_args)
         return cmd
+
+
+class OCamlBuiltBinaryBenchmark(Benchmark):
+    def __init__(
+        self,
+        benchmark_name: str,
+        benchmark_dir: Path,
+        build_script: Optional[Path],
+        binary: Optional[str],
+        program_args: List[str],
+        build_args: List[str],
+        build_env: Dict[str, str],
+        always_build: bool,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.benchmark_name = benchmark_name
+        self.benchmark_dir = benchmark_dir
+        self.build_script = build_script
+        self.binary = binary
+        self.program_args = program_args
+        self.build_args = build_args
+        self.build_env = build_env
+        self.always_build = always_build
+        self._binary_cache: Dict[str, Path] = {}
+
+    def __str__(self) -> str:
+        return self.to_string(DummyRuntime("ocaml-built"))
+
+    def attach_modifiers(self, modifiers: List[Modifier]) -> 'OCamlBuiltBinaryBenchmark':
+        ob = super().attach_modifiers(modifiers)
+        for m in modifiers:
+            if self.suite_name in m.excludes:
+                if self.name in m.excludes[self.suite_name]:
+                    continue
+            if type(m) == ProgramArg:
+                ob.program_args.extend(m.val)
+            elif type(m) == JVMArg:
+                logging.warning("JVMArg not respected by OCamlBuiltBinaryBenchmark")
+            elif isinstance(m, JVMClasspathAppend) or type(m) == JVMClasspathPrepend:
+                logging.warning("JVMClasspath not respected by OCamlBuiltBinaryBenchmark")
+            elif type(m) == JSArg:
+                logging.warning("JSArg not respected by OCamlBuiltBinaryBenchmark")
+            elif type(m) == OCamlArg:
+                logging.warning("OCamlArg not respected by OCamlBuiltBinaryBenchmark")
+        return ob
+
+    def _resolve_build_script(self) -> Path:
+        if self.build_script:
+            return self.build_script.resolve()
+        return (self.benchmark_dir / "{}.build.sh".format(self.benchmark_name)).resolve()
+
+    def _resolve_output_binary(self, runtime: OCaml) -> Path:
+        if self.binary:
+            raw_binary = self.binary.format(
+                benchmark=self.benchmark_name,
+                runtime=runtime.name
+            )
+        else:
+            raw_binary = "{}-{}".format(self.benchmark_name, runtime.name)
+        declared = Path(raw_binary)
+        if declared.is_absolute():
+            return declared.resolve()
+        return (self.benchmark_dir / declared).resolve()
+
+    def _run_build(self, runtime: OCaml, out_binary: Path):
+        if suite.is_dry_run():
+            return
+        if out_binary.exists() and not self.always_build:
+            logging.warning(
+                "OCaml binary %s already exists; skipping build. Set `always_build: true` to rebuild.",
+                out_binary
+            )
+            return
+        out_binary.parent.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        env.update(self.build_env)
+        env["OCAML_EXECUTABLE"] = str(runtime.get_executable())
+        env["OCAML_HOME"] = str(runtime.get_executable().resolve().parent.parent)
+        env["RUNNING_OCAML_OUTPUT"] = str(out_binary)
+        env["RUNNING_OCAML_BENCH_DIR"] = str(self.benchmark_dir)
+        env["RUNNING_OCAML_RUNTIME_NAME"] = runtime.name
+
+        build_script = self._resolve_build_script()
+        if not build_script.exists():
+            raise RuntimeError("Build script not found at {}".format(build_script))
+        cmd: List[str]
+        if build_script.suffix == ".sh":
+            cmd = ["bash", str(build_script)]
+        else:
+            cmd = [str(build_script)]
+        cmd.extend(self.build_args)
+        logging.info("Building OCaml benchmark %s with command: %s", self.name, " ".join(cmd))
+        subprocess.run(cmd, cwd=str(self.benchmark_dir), env=env, check=True)
+
+        if out_binary.exists():
+            return
+
+        raise RuntimeError(
+            "Build script completed but binary not found. "
+            "Expected RUNNING_OCAML_OUTPUT ({})".format(out_binary)
+        )
+
+    def _ensure_binary(self, runtime: OCaml) -> Path:
+        runtime_key = runtime.get_cache_key()
+        cached = self._binary_cache.get(runtime_key)
+        if cached and cached.exists() and not self.always_build:
+            return cached
+        out_binary = self._resolve_output_binary(runtime)
+        if suite.is_dry_run():
+            self._binary_cache[runtime_key] = out_binary
+            return out_binary
+        self._run_build(runtime, out_binary)
+        if not out_binary.exists():
+            raise RuntimeError("Output binary {} does not exist after build step".format(out_binary))
+        self._binary_cache[runtime_key] = out_binary
+        return out_binary
+
+    def get_full_args(self, runtime: Runtime) -> List[Union[str, Path]]:
+        if not isinstance(runtime, OCaml):
+            raise TypeError("{} is of type {}, and not a valid runtime for OCamlBuiltBinaryBenchmark".format(
+                runtime, type(runtime)))
+        cmd = super().get_full_args(runtime)
+        cmd.append(self._ensure_binary(runtime))
+        cmd.extend(self.program_args)
+        return cmd
+
+    def prepare(self, runtime: Runtime):
+        if not isinstance(runtime, OCaml):
+            return
+        self._ensure_binary(runtime)

@@ -42,7 +42,8 @@ def main():
 
     if args.get("dry_run") == True:
         set_dry_run(True)
-    with importlib.resources.path(__package__, "config") as config_path:
+    config_root = importlib.resources.files(__package__) / "config"
+    with importlib.resources.as_file(config_root) as config_path:
         os.environ["RUNNING_NG_PACKAGE_DATA"] = str(config_path)
         for m in MODULES:
             if m.run(args):

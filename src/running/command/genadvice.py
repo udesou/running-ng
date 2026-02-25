@@ -42,10 +42,29 @@ def cleanse(filename):
     subprocess.run(cmd)
 
 
+def parse_scenario(filename):
+    if filename.endswith(".log.gz"):
+        return filename[:-7]
+    if filename.endswith(".log"):
+        return filename[:-4]
+    raise ValueError("Unexpected log filename {}".format(filename))
+
+
+def get_log_path(scenario):
+    gz = os.path.join(advice_folder, "{}.log.gz".format(scenario))
+    if os.path.exists(gz):
+        return gz
+    plain = os.path.join(advice_folder, "{}.log".format(scenario))
+    if os.path.exists(plain):
+        return plain
+    raise FileNotFoundError("Cannot find log file for scenario {}".format(scenario))
+
+
 def select_best_invocation(scenario):
-    filename = "{}.log.gz".format(scenario)
+    filename = get_log_path(scenario)
     metrics = []
-    with gzip.open(os.path.join(advice_folder, filename)) as log_file:
+    opener = gzip.open if filename.endswith(".gz") else open
+    with opener(filename, "rb") as log_file:
         stats_blocks = extract_blocks(
             log_file, JikesRVM_HEADER, JikesRVM_FOOTER)
         for stats_block in stats_blocks:
@@ -75,9 +94,10 @@ def select_advice_file(scenario, best_invocation):
 
 
 def main():
-    scenario_logs = glob.glob(os.path.join(advice_folder, "*.log.gz"))
-    scenarios = [os.path.basename(s).replace(".log.gz", "")
-                 for s in scenario_logs]
+    scenario_logs = glob.glob(os.path.join(advice_folder, "*.log"))
+    scenario_logs.extend(glob.glob(os.path.join(advice_folder, "*.log.gz")))
+    scenarios = sorted(set([parse_scenario(os.path.basename(s))
+                            for s in scenario_logs]))
     print("Found scenarios {}".format(scenarios))
     for scenario in scenarios:
         print("Processing scenario {}".format(scenario))

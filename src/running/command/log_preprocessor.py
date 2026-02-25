@@ -2,7 +2,7 @@ from copy import deepcopy
 from pathlib import Path
 import gzip
 import enum
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, TextIO
 import functools
 import re
 from running.config import Configuration
@@ -187,13 +187,18 @@ def process_one_file(configuration: Configuration, original: Path, targetfile: P
     # XXX DO NOT COPY the content of the log file
     # Tab might not be preserved (especially around line breaks)
     # https://unix.stackexchange.com/questions/324676/output-tab-character-on-terminal-window
-    with gzip.open(original, "rt") as old:
-        with gzip.open(targetfile, "wt") as new:
+    old: TextIO
+    new: TextIO
+    old = gzip.open(original, "rt") if original.name.endswith(".gz") else original.open("rt")
+    with old:
+        new = gzip.open(targetfile, "wt") if targetfile.name.endswith(".gz") else targetfile.open("wt")
+        with new:
             new.writelines(process_lines(configuration, old.readlines()))
 
 
 def process(configuration: Configuration, source: Path, target: Path):
-    for file in source.glob("*.log.gz"):
+    files = list(source.glob("*.log")) + list(source.glob("*.log.gz"))
+    for file in files:
         process_one_file(configuration, file, target / file.name)
 
 

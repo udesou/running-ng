@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+import argparse
+import csv
+import re
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+
+LOG_GLOB = "binarytrees*.log"
+
+
+def _edges(vals: np.ndarray, log: bool) -> np.ndarray:
+    vals = np.asarray(vals, dtype=float)
+    if len(vals) == 1:
+        v = vals[0]
+        return np.array([v / 2.0, v * 2.0]) if log else np.array([v - 0.5, v + 0.5])
+
+    if log:
+        lv = np.log10(vals)
+        mids = (lv[:-1] + lv[1:]) / 2.0
+        e = np.empty(len(vals) + 1, dtype=float)
+        e[1:-1] = 10 ** mids
+        e[0] = 10 ** (lv[0] - (mids[0] - lv[0]))
+        e[-1] = 10 ** (lv[-1] + (lv[-1] - mids[-1]))
+        return e
+
+    mids = (vals[:-1] + vals[1:]) / 2.0
+    e = np.empty(len(vals) + 1, dtype=float)
+    e[1:-1] = mids
+    e[0] = vals[0] - (mids[0] - vals[0])
+    e[-1] = vals[-1] + (vals[-1] - mids[-1])
+    return e
+
+
+def _read_metric_int(text: str, metric: str) -> int:
+    m = re.search(rf"^{re.escape(metric)}:\s*(\d+)", text, re.M)
+    if not m:
+        raise ValueError(f"Missing metric: {metric}")
+    return int(m.group(1))
+
+
+def _read_elapsed(text: str) -> float:
+    m = re.search(r"([0-9]+\.[0-9]+)elapsed", text)
+    if not m:
+        raise ValueError("Missing elapsed")
+    return float(m.group(1))
+
+
+def _read_maxresident_kb(text: str) -> int:
+    m = re.search(r"([0-9]+)maxresident\)k", text)
+    if not m:
+        raise ValueError("Missing maxresident")
+    return int(m.group(1))
+
+
+def parse_log(path: Path) -> dict:
+    m = re.search(r"\.s-(\d+)\.o-(\d+)\.", path.name)
+    if not m:
+        raise ValueError(f"Cannot parse s/o from filename: {path.name}")
+    s, o = map(int, m.groups())
+
+    text = path.read_text()
+
+    row = {
+        "log_file": path.name,
+        "s": s,
+        "o": o,
+        "minor_collections": _read_metric_int(text, "minor_collections"),
+        "major_collections": _read_metric_int(text, "major_collections"),
+        "compactions": _read_metric_int(text, "compactions"),
+        "forced_major_collections": _read_metric_int(text, "forced_major_collections"),
+        "minor_words": _read_metric_int(text, "minor_words"),
+        "promoted_words": _read_metric_int(text, "promoted_words"),
+        "major_words": _read_metric_int(text, "major_words"),
+        "top_heap_words": _read_metric_int(text, "top_heap_words"),
+        "heap_words": _read_metric_int(text, "heap_words"),
+        "live_words": _read_metric_int(text, "live_words"),
+        "free_words": _read_metric_int(text, "free_words"),
+        "fragments": _read_metric_int(text, "fragments"),
+        "maxresident_kb": _read_maxresident_kb(text),
+        "elapsed_s": _read_elapsed(text),
+    }
+
+    row["maxresident_mb"] = row["maxresident_kb"] / 1024.0
+    row["promotion_rate"] = row["promoted_words"] / row["minor_words"] if row["minor_words"] else np.nan
+    row["major_per_minor"] = row["major_collections"] / row["minor_collections"] if row["minor_collections"] else np.nan
+    return row
+
+
+def parse_logs(logs_dir: Path, pattern: str) -> pd.DataFrame:
+    files = sorted(logs_dir.glob(pattern))
+    if not files:
+        raise SystemExit(f"No log files matching '{pattern}' in {logs_dir}")
+
+    rows = [parse_log(p) for p in files]
+    df = pd.DataFrame(rows).sort_values(["s", "o", "log_file"]).reset_index(drop=True)
+    return df
+
+
+def write_csv(df: pd.DataFrame, out_csv: Path) -> None:
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_csv, index=False, quoting=csv.QUOTE_MINIMAL)
+
+
+def heatmap_grid(
+    df: pd.DataFrame,
+    metric: str,
+    outpath: Path,
+    title: str,
+    logx: bool,
+    logz: bool,
+    agg: str,
+) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        raise SystemExit("matplotlib is required to generate plots. Install it in your environment.") from e
+
+    grid = df.pivot_table(index="o", columns="s", values=metric, aggfunc=agg)
+    grid = grid.sort_index(axis=0).sort_index(axis=1)
+
+    xs = grid.columns.to_numpy(dtype=float)
+    ys = grid.index.to_numpy(dtype=float)
+    z = grid.to_numpy(dtype=float)
+
+    xe = _edges(xs, log=logx)
+    ye = _edges(ys, log=False)
+
+    plt.figure()
+    if logz:
+        z_plot = np.where(z > 0, z, np.nan)
+        pcm = plt.pcolormesh(xe, ye, np.log10(z_plot), shading="auto")
+        plt.colorbar(pcm, label=f"log10({metric})")
+    else:
+        pcm = plt.pcolormesh(xe, ye, z, shading="auto")
+        plt.colorbar(pcm, label=metric)
+
+    if logx:
+        plt.xscale("log")
+
+    plt.xlabel("s (minor_heap_size)")
+    plt.ylabel("o (space_overhead)")
+    plt.title(title)
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+
+
+def tradeoff_scatter(df: pd.DataFrame, outpath: Path) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        raise SystemExit("matplotlib is required to generate plots. Install it in your environment.") from e
+
+    plt.figure()
+
+    s_vals = df["s"].to_numpy(dtype=float)
+    log_s = np.log10(np.maximum(s_vals, 1.0))
+    if np.nanmax(log_s) - np.nanmin(log_s) < 1e-9:
+        sizes = np.full_like(log_s, 80.0)
+    else:
+        sizes = 20.0 + 180.0 * (log_s - np.nanmin(log_s)) / (np.nanmax(log_s) - np.nanmin(log_s))
+
+    sc = plt.scatter(
+        df["maxresident_mb"].to_numpy(dtype=float),
+        df["elapsed_s"].to_numpy(dtype=float),
+        c=df["o"].to_numpy(dtype=float),
+        s=sizes,
+        alpha=0.75,
+    )
+    cb = plt.colorbar(sc)
+    cb.set_label("o (space_overhead)")
+
+    plt.xlabel("Max RSS (MB)")
+    plt.ylabel("Elapsed time (s)")
+    plt.title("Time vs RSS tradeoff (color=o, size=log(s))")
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=200)
+    plt.close()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description="Parse binarytrees logs, write gc_summary.csv, and produce heatmap/scatter plots."
+    )
+    ap.add_argument("logs_dir", help="Directory containing binarytrees*.log files")
+    ap.add_argument("--pattern", default=LOG_GLOB, help=f"Glob pattern inside logs_dir (default: {LOG_GLOB})")
+    ap.add_argument("--outdir", default=None, help="Output directory (default: logs_dir)")
+    ap.add_argument("--out-csv", default=None, help="CSV output path (default: <outdir>/gc_summary.csv)")
+    ap.add_argument("--agg", default="median", choices=["median", "mean", "min", "max"], help="Aggregation for heatmaps")
+    args = ap.parse_args()
+
+    logs_dir = Path(args.logs_dir)
+    if not logs_dir.is_dir():
+        raise SystemExit(f"Not a directory: {logs_dir}")
+
+    outdir = Path(args.outdir) if args.outdir else logs_dir
+    outdir.mkdir(parents=True, exist_ok=True)
+    out_csv = Path(args.out_csv) if args.out_csv else outdir / "gc_summary.csv"
+
+    df = parse_logs(logs_dir, args.pattern)
+    write_csv(df, out_csv)
+
+    metric_specs = [
+        ("elapsed_s", "Elapsed time (s) over (s,o)", False),
+        ("maxresident_mb", "Max RSS (MB) over (s,o)", False),
+        ("minor_collections", "Minor collections over (s,o)", True),
+        ("major_collections", "Major collections over (s,o)", True),
+        ("major_per_minor", "Major/Minor collections ratio over (s,o)", False),
+        ("minor_words", "Minor words over (s,o)", True),
+        ("promoted_words", "Promoted words over (s,o)", True),
+        ("promotion_rate", "Promotion rate over (s,o)", False),
+        ("major_words", "Major words over (s,o)", True),
+        ("top_heap_words", "Top heap words over (s,o)", True),
+        ("heap_words", "Heap words over (s,o)", True),
+        ("live_words", "Live words over (s,o)", True),
+        ("free_words", "Free words over (s,o)", True),
+        ("fragments", "Fragments over (s,o)", True),
+        ("forced_major_collections", "Forced major collections over (s,o)", False),
+        ("compactions", "Compactions over (s,o)", False),
+    ]
+
+    for metric, title, logz in metric_specs:
+        if metric not in df.columns:
+            continue
+        safe = re.sub(r"[^a-zA-Z0-9_]+", "_", metric).strip("_").lower()
+        heatmap_grid(
+            df,
+            metric=metric,
+            outpath=outdir / f"heatmap_{safe}.png",
+            title=title,
+            logx=True,
+            logz=logz,
+            agg=args.agg,
+        )
+
+    tradeoff_scatter(df, outdir / "scatter_time_vs_rss.png")
+
+    print(f"Wrote CSV: {out_csv}")
+    print(f"Wrote plots to: {outdir}")
+
+
+if __name__ == "__main__":
+    main()

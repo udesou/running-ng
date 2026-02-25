@@ -9,7 +9,8 @@ import socket
 from datetime import datetime
 from running.runtime import Runtime
 import tempfile
-import subprocess
+import gzip
+import shutil
 import os
 from running.command.fillin import fillin
 import math
@@ -25,6 +26,7 @@ skip_oom: Optional[int]
 skip_timeout: Optional[int]
 plugins: Dict[str, Any]
 resume: Optional[str]
+compress_logs: bool
 
 
 def setup_parser(subparsers):
@@ -148,7 +150,27 @@ def get_filename(bm: Benchmark, hfac: Optional[float], size: Optional[int], conf
 
 
 def get_filename_completed(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> str:
-    return "{}.gz".format(get_filename(bm, hfac, size, config))
+    log_filename = get_filename(bm, hfac, size, config)
+    if compress_logs:
+        return "{}.gz".format(log_filename)
+    return log_filename
+
+
+def get_filename_completed_candidates(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> List[str]:
+    log_filename = get_filename(bm, hfac, size, config)
+    gz_filename = "{}.gz".format(log_filename)
+    # Support resume across runs that may have changed compression settings.
+    if compress_logs:
+        return [gz_filename, log_filename]
+    return [log_filename, gz_filename]
+
+
+def compress_log_file(log_file: Path):
+    gz_file = Path("{}.gz".format(log_file))
+    with log_file.open("rb") as src:
+        with gzip.open(gz_file, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    log_file.unlink()
 
 
 def get_log_epilogue(runtime: Runtime, bm: Benchmark) -> str:
@@ -241,9 +263,9 @@ def run_one_benchmark(
                 print(".", end="", flush=True)
                 continue
             if resume:
-                log_filename_completed = get_filename_completed(
+                log_filename_completed_candidates = get_filename_completed_candidates(
                     bm, hfac, size, c)
-                if (log_dir / log_filename_completed).exists():
+                if any((log_dir / f).exists() for f in log_filename_completed_candidates):
                     print(config_index_to_chr(j), end="", flush=True)
                     continue
             log_filename = get_filename(bm, hfac, size, c)
@@ -287,11 +309,8 @@ def run_one_benchmark(
         p.end_benchmark(hfac, size, bm)
     for j, c in enumerate(configs):
         log_filename = get_filename(bm, hfac, size, c)
-        if not is_dry_run() and ever_ran[j]:
-            subprocess.check_call([
-                "gzip",
-                log_dir / log_filename
-            ])
+        if not is_dry_run() and compress_logs and ever_ran[j]:
+            compress_log_file(log_dir / log_filename)
     print()
 
 
@@ -379,6 +398,14 @@ def run(args):
         minheap_multiplier = configuration.get("minheap_multiplier")
         if args.get("minheap_multiplier"):
             minheap_multiplier = args.get("minheap_multiplier")
+        global compress_logs
+        raw_compress_logs = configuration.get("compress_logs")
+        if raw_compress_logs is None:
+            compress_logs = True
+        else:
+            if type(raw_compress_logs) is not bool:
+                raise TypeError("compress_logs must be a boolean")
+            compress_logs = raw_compress_logs
         heap_range = configuration.get("heap_range")
         spread_factor = configuration.get("spread_factor")
         suites = configuration.get("suites")
@@ -404,6 +431,23 @@ def run(args):
                 p.set_run_id(run_id)
                 p.set_runbms_dir(runbms_dir)
                 p.set_log_dir(log_dir)
+
+        # Pre-build benchmark artifacts per runtime so build/warning logs are not
+        # interleaved with per-invocation progress output.
+        runtime_by_config: Dict[str, Runtime] = {}
+        for c in configs:
+            runtime_by_config[c], _ = parse_config_str(configuration, c)
+        prepared: Set[Tuple[str, str, str]] = set()
+        for suite_name, bms in benchmarks.items():
+            _ = suites[suite_name]
+            for bm in bms:
+                for c in configs:
+                    runtime = runtime_by_config[c]
+                    key = (suite_name, bm.name, runtime.name)
+                    if key in prepared:
+                        continue
+                    bm.prepare(runtime)
+                    prepared.add(key)
 
         def run_hfacs(hfacs):
             logging.info("hfacs: {}".format(
