@@ -6,19 +6,21 @@ heap_range: 6
 spread_factor: 1
 
 runtimes:
-  ocaml-local:
-    type: OCaml
-    executable: "/home/udesou/.local/ocaml/bin/ocaml"
+  # ocaml-local:
+    # type: OCaml
+    # executable: "/home/udesou/.local/ocaml/bin/ocaml"
   # ocaml-global:
   #   type: OCaml
   #   executable: "/usr/bin/ocaml"
-  # ocaml-v5.4:
-  #   type: OCaml
-  #   version: "5.4.0"
+  ocaml-v5.4:
+    type: OCaml
+    version: "5.4.0"
+  ocaml-v4.14.3:
+    type: OCaml
+    version: "4.14.3"
   # ocaml-release:
   #   type: OCaml
   #   commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
-    
   
 suites:
   ocaml-binarytrees:
@@ -29,6 +31,44 @@ suites:
         path: "/home/udesou/benches/binarytrees"
         # optional: always_build: true
         args: "21"
+
+  sandmark-sequential:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      almabench:
+        path: "/home/udesou/benches/almabench"
+        args: ""
+      bdd:
+        path: "/home/udesou/benches/bdd"
+        args: ""
+      hamming:
+        path: "/home/udesou/benches/hamming"
+        # N: number of elements in the Hamming sequence to iterate over.
+        args: "500000"
+      soli:
+        path: "/home/udesou/benches/soli"
+        # nruns: number of solitaire solver runs.
+        args: "50"
+      kb:
+        path: "/home/udesou/benches/kb"
+        # Runs 100 iterations of Knuth-Bendix completion internally.
+        args: ""
+      kb_no_exc:
+        # Same as kb but without exceptions; build script is kb_no_exc.build.sh.
+        path: "/home/udesou/benches/kb"
+        args: ""
+      lexifi-g2pp:
+        # Multi-file benchmark; built with dune.
+        path: "/home/udesou/benches/lexifi-g2pp"
+        # If dune is not on PATH, set it explicitly:
+        # build_env:
+        #   DUNE_BIN: "/home/udesou/.opam/<switch>/bin/dune"
+        args: ""
+      zdd:
+        path: "/home/udesou/benches/zdd"
+        # words.txt must be passed as an absolute path since the run cwd is a temp dir.
+        args: "/home/udesou/benches/zdd/words.txt"
       markbench:
         path: "/home/udesou/benches/markbench"
         # Optional; default script is <benchmark>.build.sh in benchmark path.
@@ -68,11 +108,21 @@ modifiers:
     val: "a={0}"
 
 benchmarks:
-  ocaml-binarytrees:
+  # ocaml-binarytrees:
     # - binarytrees
-    - markbench
     # TODO: run the infer benchmark
     # - infer
+
+  sandmark-sequential:
+    - almabench
+    - bdd
+    - hamming
+    - soli
+    - kb
+    - kb_no_exc
+    - lexifi-g2pp
+    - zdd
+    - markbench
 
 configs:
   # Vary according to defaul values
@@ -92,9 +142,9 @@ configs:
   # d, i, a set to defaults: d=1, i=32, a=1.
   # Sweeps are generated from config_sweep for modifiers not already present.
   # These three lines produce 1 + 7 + 49 runs.
-  - "ocaml-local|time_stats"
+  # - "ocaml-local|time_stats"
   # - "ocaml-v5.4|time_stats|d-1|s-32768|i-32|a-1"
-  # - "ocaml-local|time_stats|d-1|i-32|a-1"
+  - "ocaml-v5.4|time_stats"
 
 config_sweep:
   s: [32768] #, 65536, 131072, 262144, 524288, 1048576, 2097152]
