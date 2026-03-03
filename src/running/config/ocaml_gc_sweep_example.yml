@@ -69,6 +69,30 @@ suites:
         path: "/home/udesou/benches/zdd"
         # words.txt must be passed as an absolute path since the run cwd is a temp dir.
         args: "/home/udesou/benches/zdd/words.txt"
+      fannkuchredux:
+        path: "/home/udesou/benches/fannkuchredux"
+        # N: permutation length. Compiled with -noassert -unsafe as in sandmark.
+        args: "11"
+      crout_decomposition:
+        path: "/home/udesou/benches/numerical-analysis"
+        args: ""
+      qr_decomposition:
+        path: "/home/udesou/benches/numerical-analysis"
+        args: ""
+      durand_kerner_aberth:
+        path: "/home/udesou/benches/numerical-analysis"
+        # Optional arg: percentage of coefficient array to use (default 100).
+        args: ""
+      fft:
+        path: "/home/udesou/benches/numerical-analysis"
+        # Optional arg: array size (default 1048576). Needs unix for timing.
+        args: ""
+      levinson_durbin:
+        path: "/home/udesou/benches/numerical-analysis"
+        args: ""
+      naive_multilayer:
+        path: "/home/udesou/benches/numerical-analysis"
+        args: ""
       markbench:
         path: "/home/udesou/benches/markbench"
         # Optional; default script is <benchmark>.build.sh in benchmark path.
@@ -122,6 +146,13 @@ benchmarks:
     - kb_no_exc
     - lexifi-g2pp
     - zdd
+    - fannkuchredux
+    - crout_decomposition
+    - qr_decomposition
+    - durand_kerner_aberth
+    - fft
+    - levinson_durbin
+    - naive_multilayer
     - markbench
 
 configs:
