@@ -36,15 +36,32 @@ class Configuration(object):
         For example, self.values["suites"] is a Dict[str, Dict[str, str]],
         where in the inner dictionary contains the string representation of a
         benchmark suite.
-        After this function returns, self.values["suites"] becomes a 
+        After this function returns, self.values["suites"] becomes a
         Dict[str, BenchmarkSuite].
 
         Change the KEY_CLASS_MAPPING to change which classes get resolved.
         """
+        configs_list = self.__items.get("configs")
+        if configs_list is not None:
+            used_runtimes = {
+                c.split('|')[0].strip()
+                for c in configs_list
+                if isinstance(c, str)
+            }
+        else:
+            used_runtimes = None
+
         for cls_name, cls in KEY_CLASS_MAPPING.items():
             if cls_name in self.__items:
-                self.__items[cls_name] = load_class(
-                    cls, self.__items[cls_name])
+                if cls_name == "runtimes" and used_runtimes is not None:
+                    self.__items[cls_name] = {
+                        k: cls.from_config(k, v)
+                        for k, v in self.__items[cls_name].items()
+                        if k in used_runtimes
+                    }
+                else:
+                    self.__items[cls_name] = load_class(
+                        cls, self.__items[cls_name])
         if "benchmarks" in self.__items:
             for suite_name, bms in self.__items["benchmarks"].items():
                 suite = self.__items["suites"][suite_name]
