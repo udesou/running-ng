@@ -18,9 +18,9 @@ runtimes:
   ocaml-v4.14.3:
     type: OCaml
     version: "4.14.3"
-  # ocaml-release:
-  #   type: OCaml
-  #   commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
+  ocaml-release:
+    type: OCaml
+    commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
   
 suites:
   ocaml-binarytrees:
@@ -102,6 +102,10 @@ suites:
         #   DUNE_BIN: "/home/udesou/.opam/<switch>/bin/dune"
         # Optional benchmark argument; defaults to 10 full_major cycles if empty.
         args: ""
+      sequence_cps:
+        path: "/home/udesou/benches/simple/sequence"
+        # N: sequence length; each run computes sum of squares of even elements.
+        args: "10000"
 
   sandmark-with-deps:
     type: OCamlBenchmarkSuite
@@ -116,6 +120,74 @@ suites:
         #   DUNE_BIN: "/home/udesou/.opam/<switch>/bin/dune"
         # edges.data is passed as an absolute path since the run cwd is a temp dir.
         args: "/home/udesou/benches/with_deps/graph500seq/edges.data"
+
+  # Benchmarks requiring external opam packages.
+  # Before running: opam install zarith num lwt decompress bigstringaf checkseum yojson camlp-streams
+  sandmark-with-packages:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      # --- benchmarksgame (needs zarith, str, unix) ---
+      binarytrees5:
+        path: "/home/udesou/benches/with_packages/benchmarksgame"
+        args: "21"
+      fasta3:
+        path: "/home/udesou/benches/with_packages/benchmarksgame"
+        args: "25000000"
+      fasta6:
+        path: "/home/udesou/benches/with_packages/benchmarksgame"
+        args: "25000000"
+      mandelbrot6:
+        path: "/home/udesou/benches/with_packages/benchmarksgame"
+        args: "16000"
+      nbody:
+        path: "/home/udesou/benches/with_packages/benchmarksgame"
+        args: "50000000"
+      pidigits5:
+        path: "/home/udesou/benches/with_packages/benchmarksgame"
+        args: "10000"
+      spectralnorm2:
+        path: "/home/udesou/benches/with_packages/benchmarksgame"
+        args: "5500"
+      # --- zarith (needs zarith, num) ---
+      zarith_fact:
+        path: "/home/udesou/benches/with_packages/zarith"
+        # factorial of 40, repeated 1_000_000 times
+        args: "40 1000000"
+      zarith_fib:
+        path: "/home/udesou/benches/with_packages/zarith"
+        # fibonacci of 40 using Zarith bignums
+        args: "Z 40"
+      zarith_pi:
+        path: "/home/udesou/benches/with_packages/zarith"
+        # number of pi digits to compute
+        args: "10000"
+      zarith_tak:
+        path: "/home/udesou/benches/with_packages/zarith"
+        # tak function using Zarith bignums, n=2500
+        args: "Z 2500"
+      # --- lwt-based (needs lwt, lwt.unix) ---
+      chameneos_redux_lwt:
+        path: "/home/udesou/benches/with_packages/chameneos"
+        # number of meetings
+        args: "600000"
+      thread_ring_lwt_mvar:
+        path: "/home/udesou/benches/with_packages/thread-lwt"
+        # number of ring-pass iterations
+        args: "20000"
+      thread_ring_lwt_stream:
+        path: "/home/udesou/benches/with_packages/thread-lwt"
+        args: "20000"
+      # --- decompress (needs bigstringaf, checkseum, decompress) ---
+      test_decompress:
+        path: "/home/udesou/benches/with_packages/decompress"
+        # default: 64 iterations, 32KB data; override with "<iterations> <data_size>"
+        args: ""
+      # --- yojson (needs yojson, camlp-streams) ---
+      ydump:
+        path: "/home/udesou/benches/with_packages/yojson"
+        # sample.json must be an absolute path since run cwd is a temp dir.
+        args: "-c /home/udesou/benches/with_packages/yojson/sample.json"
 
 modifiers:
   # Runtime metrics in stderr; captured by running-ng logs.
@@ -151,26 +223,46 @@ benchmarks:
     # TODO: run the infer benchmark
     # - infer
 
-  sandmark-sequential:
-    - almabench
-    - bdd
-    - hamming
-    - soli
-    - kb
-    - kb_no_exc
-    - lexifi-g2pp
-    - zdd
-    - fannkuchredux
-    - crout_decomposition
-    - qr_decomposition
-    - durand_kerner_aberth
-    - fft
-    - levinson_durbin
-    - naive_multilayer
-    - markbench
+  # sandmark-sequential:
+  #   - almabench
+  #   - bdd
+  #   - hamming
+  #   - soli
+  #   - kb
+  #   - kb_no_exc
+  #   - lexifi-g2pp
+  #   - zdd
+  #   - fannkuchredux
+  #   - crout_decomposition
+  #   - qr_decomposition
+  #   - durand_kerner_aberth
+  #   - fft
+  #   - levinson_durbin
+  #   - naive_multilayer
+  #   - markbench
+  #   - sequence_cps
 
-  sandmark-with-deps:
-    - graph500seq
+  # sandmark-with-deps:
+  #   - graph500seq
+
+  # Uncomment after installing required opam packages.
+  sandmark-with-packages:
+    # - binarytrees5
+    - fasta3
+  #   - fasta6
+  #   - mandelbrot6
+  #   - nbody
+  #   - pidigits5
+  #   - spectralnorm2
+  #   - zarith_fact
+  #   - zarith_fib
+  #   - zarith_pi
+  #   - zarith_tak
+  #   - chameneos_redux_lwt
+  #   - thread_ring_lwt_mvar
+  #   - thread_ring_lwt_stream
+  #   - test_decompress
+  #   - ydump
 
 configs:
   # Vary according to defaul values
@@ -192,7 +284,7 @@ configs:
   # These three lines produce 1 + 7 + 49 runs.
   # - "ocaml-local|time_stats"
   # - "ocaml-v5.4|time_stats|d-1|s-32768|i-32|a-1"
-  - "ocaml-v5.4|time_stats"
+  - "ocaml-release|time_stats"
 
 config_sweep:
   s: [32768] #, 65536, 131072, 262144, 524288, 1048576, 2097152]
