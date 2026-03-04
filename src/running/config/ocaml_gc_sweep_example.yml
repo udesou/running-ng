@@ -28,7 +28,7 @@ suites:
     timeout: 120
     programs:
       binarytrees:
-        path: "/home/udesou/benches/binarytrees"
+        path: "/home/udesou/benches/simple/binarytrees"
         # optional: always_build: true
         args: "21"
 
@@ -37,64 +37,64 @@ suites:
     timeout: 120
     programs:
       almabench:
-        path: "/home/udesou/benches/almabench"
+        path: "/home/udesou/benches/simple/almabench"
         args: ""
       bdd:
-        path: "/home/udesou/benches/bdd"
+        path: "/home/udesou/benches/simple/bdd"
         args: ""
       hamming:
-        path: "/home/udesou/benches/hamming"
+        path: "/home/udesou/benches/simple/hamming"
         # N: number of elements in the Hamming sequence to iterate over.
         args: "500000"
       soli:
-        path: "/home/udesou/benches/soli"
+        path: "/home/udesou/benches/simple/soli"
         # nruns: number of solitaire solver runs.
         args: "50"
       kb:
-        path: "/home/udesou/benches/kb"
+        path: "/home/udesou/benches/simple/kb"
         # Runs 100 iterations of Knuth-Bendix completion internally.
         args: ""
       kb_no_exc:
         # Same as kb but without exceptions; build script is kb_no_exc.build.sh.
-        path: "/home/udesou/benches/kb"
+        path: "/home/udesou/benches/simple/kb"
         args: ""
       lexifi-g2pp:
         # Multi-file benchmark; built with dune.
-        path: "/home/udesou/benches/lexifi-g2pp"
+        path: "/home/udesou/benches/simple/lexifi-g2pp"
         # If dune is not on PATH, set it explicitly:
         # build_env:
         #   DUNE_BIN: "/home/udesou/.opam/<switch>/bin/dune"
         args: ""
       zdd:
-        path: "/home/udesou/benches/zdd"
+        path: "/home/udesou/benches/simple/zdd"
         # words.txt must be passed as an absolute path since the run cwd is a temp dir.
-        args: "/home/udesou/benches/zdd/words.txt"
+        args: "/home/udesou/benches/simple/zdd/words.txt"
       fannkuchredux:
-        path: "/home/udesou/benches/fannkuchredux"
+        path: "/home/udesou/benches/simple/fannkuchredux"
         # N: permutation length. Compiled with -noassert -unsafe as in sandmark.
         args: "11"
       crout_decomposition:
-        path: "/home/udesou/benches/numerical-analysis"
+        path: "/home/udesou/benches/simple/numerical-analysis"
         args: ""
       qr_decomposition:
-        path: "/home/udesou/benches/numerical-analysis"
+        path: "/home/udesou/benches/simple/numerical-analysis"
         args: ""
       durand_kerner_aberth:
-        path: "/home/udesou/benches/numerical-analysis"
+        path: "/home/udesou/benches/simple/numerical-analysis"
         # Optional arg: percentage of coefficient array to use (default 100).
         args: ""
       fft:
-        path: "/home/udesou/benches/numerical-analysis"
+        path: "/home/udesou/benches/simple/numerical-analysis"
         # Optional arg: array size (default 1048576). Needs unix for timing.
         args: ""
       levinson_durbin:
-        path: "/home/udesou/benches/numerical-analysis"
+        path: "/home/udesou/benches/simple/numerical-analysis"
         args: ""
       naive_multilayer:
-        path: "/home/udesou/benches/numerical-analysis"
+        path: "/home/udesou/benches/simple/numerical-analysis"
         args: ""
       markbench:
-        path: "/home/udesou/benches/markbench"
+        path: "/home/udesou/benches/simple/markbench"
         # Optional; default script is <benchmark>.build.sh in benchmark path.
         # build_script: "markbench.build.sh"
         # Optional: if dune is not on PATH, point to it explicitly.
@@ -102,6 +102,20 @@ suites:
         #   DUNE_BIN: "/home/udesou/.opam/<switch>/bin/dune"
         # Optional benchmark argument; defaults to 10 full_major cycles if empty.
         args: ""
+
+  sandmark-with-deps:
+    type: OCamlBenchmarkSuite
+    timeout: 300
+    programs:
+      graph500seq:
+        path: "/home/udesou/benches/with_deps/graph500seq"
+        # Built with dune (multi-library). graph500seq.build.deps.sh generates
+        # edges.data once (runtime-independent) before the first binary build.
+        # If dune is not on PATH, set it explicitly:
+        # build_env:
+        #   DUNE_BIN: "/home/udesou/.opam/<switch>/bin/dune"
+        # edges.data is passed as an absolute path since the run cwd is a temp dir.
+        args: "/home/udesou/benches/with_deps/graph500seq/edges.data"
 
 modifiers:
   # Runtime metrics in stderr; captured by running-ng logs.
@@ -154,6 +168,9 @@ benchmarks:
     - levinson_durbin
     - naive_multilayer
     - markbench
+
+  sandmark-with-deps:
+    - graph500seq
 
 configs:
   # Vary according to defaul values
