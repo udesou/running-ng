@@ -322,6 +322,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         build_args: List[str],
         build_env: Dict[str, str],
         always_build: bool,
+        min_ocaml_major: Optional[int] = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -333,6 +334,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         self.build_args = build_args
         self.build_env = build_env
         self.always_build = always_build
+        self.min_ocaml_major = min_ocaml_major
         self._binary_cache: Dict[str, Path] = {}
 
     def __str__(self) -> str:
@@ -413,6 +415,15 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         )
 
     def _ensure_binary(self, runtime: OCaml) -> Path:
+        if self.min_ocaml_major is not None:
+            major = runtime.get_major_version()
+            if major < self.min_ocaml_major:
+                raise ValueError(
+                    "Benchmark {!r} requires OCaml >= {}.x, but runtime {!r} is OCaml {}.x. "
+                    "Use an OCaml 5+ runtime for multicore benchmarks.".format(
+                        self.name, self.min_ocaml_major, runtime.name, major
+                    )
+                )
         runtime_key = runtime.get_cache_key()
         cached = self._binary_cache.get(runtime_key)
         if cached and cached.exists() and not self.always_build:

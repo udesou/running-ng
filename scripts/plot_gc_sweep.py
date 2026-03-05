@@ -55,6 +55,13 @@ def _read_maxresident_kb(text: str) -> int:
     return int(m.group(1))
 
 
+def _read_olly_time_s(text: str, label: str) -> float:
+    m = re.search(rf"^{re.escape(label)}:\s*([0-9]+(?:\.[0-9]+)?)\s*$", text, re.M)
+    if not m:
+        raise ValueError(f"Missing olly metric: {label}")
+    return float(m.group(1))
+
+
 def parse_log(path: Path) -> dict:
     m = re.search(r"\.s-(\d+)\.o-(\d+)\.", path.name)
     if not m:
@@ -67,23 +74,50 @@ def parse_log(path: Path) -> dict:
         "log_file": path.name,
         "s": s,
         "o": o,
-        "minor_collections": _read_metric_int(text, "minor_collections"),
-        "major_collections": _read_metric_int(text, "major_collections"),
-        "compactions": _read_metric_int(text, "compactions"),
-        "forced_major_collections": _read_metric_int(text, "forced_major_collections"),
-        "minor_words": _read_metric_int(text, "minor_words"),
-        "promoted_words": _read_metric_int(text, "promoted_words"),
-        "major_words": _read_metric_int(text, "major_words"),
-        "top_heap_words": _read_metric_int(text, "top_heap_words"),
-        "heap_words": _read_metric_int(text, "heap_words"),
-        "live_words": _read_metric_int(text, "live_words"),
-        "free_words": _read_metric_int(text, "free_words"),
-        "fragments": _read_metric_int(text, "fragments"),
-        "maxresident_kb": _read_maxresident_kb(text),
-        "elapsed_s": _read_elapsed(text),
     }
 
-    row["maxresident_mb"] = row["maxresident_kb"] / 1024.0
+    # /usr/bin/time metrics (optional).
+    try:
+        row["elapsed_s"] = _read_elapsed(text)
+    except ValueError:
+        row["elapsed_s"] = np.nan
+    try:
+        row["maxresident_kb"] = _read_maxresident_kb(text)
+        row["maxresident_mb"] = row["maxresident_kb"] / 1024.0
+    except ValueError:
+        row["maxresident_kb"] = np.nan
+        row["maxresident_mb"] = np.nan
+
+    # olly gc-stats metrics (optional).
+    try:
+        row["olly_wall_time_s"] = _read_olly_time_s(text, "Wall time (s)")
+    except ValueError:
+        row["olly_wall_time_s"] = np.nan
+    try:
+        row["olly_gc_time_s"] = _read_olly_time_s(text, "GC time (s)")
+    except ValueError:
+        row["olly_gc_time_s"] = np.nan
+
+    # Optional OCaml GC metrics from Gc.print_stat (present for binarytrees, absent for markbench).
+    for metric in [
+        "minor_collections",
+        "major_collections",
+        "compactions",
+        "forced_major_collections",
+        "minor_words",
+        "promoted_words",
+        "major_words",
+        "top_heap_words",
+        "heap_words",
+        "live_words",
+        "free_words",
+        "fragments",
+    ]:
+        try:
+            row[metric] = _read_metric_int(text, metric)
+        except ValueError:
+            row[metric] = np.nan
+
     row["promotion_rate"] = row["promoted_words"] / row["minor_words"] if row["minor_words"] else np.nan
     row["major_per_minor"] = row["major_collections"] / row["minor_collections"] if row["minor_collections"] else np.nan
     return row
@@ -183,7 +217,7 @@ def tradeoff_scatter(df: pd.DataFrame, outpath: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Parse binarytrees logs, write gc_summary.csv, and produce heatmap/scatter plots."
+        description="Parse benchmark logs, write gc_summary.csv, and produce elapsed/RSS heatmaps."
     )
     ap.add_argument("logs_dir", help="Directory containing binarytrees*.log files")
     ap.add_argument("--pattern", default=LOG_GLOB, help=f"Glob pattern inside logs_dir (default: {LOG_GLOB})")
@@ -203,27 +237,27 @@ def main() -> None:
     df = parse_logs(logs_dir, args.pattern)
     write_csv(df, out_csv)
 
-    metric_specs = [
-        ("elapsed_s", "Elapsed time (s) over (s,o)", False),
-        ("maxresident_mb", "Max RSS (MB) over (s,o)", False),
-        ("minor_collections", "Minor collections over (s,o)", True),
-        ("major_collections", "Major collections over (s,o)", True),
-        ("major_per_minor", "Major/Minor collections ratio over (s,o)", False),
-        ("minor_words", "Minor words over (s,o)", True),
-        ("promoted_words", "Promoted words over (s,o)", True),
-        ("promotion_rate", "Promotion rate over (s,o)", False),
-        ("major_words", "Major words over (s,o)", True),
-        ("top_heap_words", "Top heap words over (s,o)", True),
-        ("heap_words", "Heap words over (s,o)", True),
-        ("live_words", "Live words over (s,o)", True),
-        ("free_words", "Free words over (s,o)", True),
-        ("fragments", "Fragments over (s,o)", True),
-        ("forced_major_collections", "Forced major collections over (s,o)", False),
-        ("compactions", "Compactions over (s,o)", False),
-    ]
+    has_olly = (
+        "olly_wall_time_s" in df.columns
+        and "olly_gc_time_s" in df.columns
+        and not df["olly_wall_time_s"].isna().all()
+        and not df["olly_gc_time_s"].isna().all()
+    )
+
+    if has_olly:
+        metric_specs = [
+            ("olly_wall_time_s", "Olly wall time (s) over (s,o)", False),
+            ("olly_gc_time_s", "Olly GC time (s) over (s,o)", False),
+            ("maxresident_mb", "Max RSS (MB) over (s,o)", False),
+        ]
+    else:
+        metric_specs = [
+            ("elapsed_s", "Elapsed time (s) over (s,o)", False),
+            ("maxresident_mb", "Max RSS (MB) over (s,o)", False),
+        ]
 
     for metric, title, logz in metric_specs:
-        if metric not in df.columns:
+        if metric not in df.columns or df[metric].isna().all():
             continue
         safe = re.sub(r"[^a-zA-Z0-9_]+", "_", metric).strip("_").lower()
         heatmap_grid(
@@ -235,8 +269,6 @@ def main() -> None:
             logz=logz,
             agg=args.agg,
         )
-
-    tradeoff_scatter(df, outdir / "scatter_time_vs_rss.png")
 
     print(f"Wrote CSV: {out_csv}")
     print(f"Wrote plots to: {outdir}")

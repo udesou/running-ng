@@ -107,6 +107,38 @@ suites:
         # N: sequence length; each run computes sum of squares of even elements.
         args: "10000"
 
+  multicore-effects:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 120
+    programs:
+      algorithmic_differentiation:
+        path: "/home/udesou/benches/multicore/multicore-effects"
+        args: "100"
+      rec_eff_fib:
+        path: "/home/udesou/benches/multicore/multicore-effects"
+        # args: <iters> <n>; default: 4 40 (output: 102334155)
+        args: ""
+      rec_seq_fib:
+        path: "/home/udesou/benches/multicore/multicore-effects"
+        # args: <iters> <n>; default: 4 40 (output: 102334155)
+        args: ""
+      rec_eff_tak:
+        path: "/home/udesou/benches/multicore/multicore-effects"
+        # args: <iters> <x> <y> <z>; default: 1 40 20 11 (output: 12)
+        args: ""
+      rec_seq_tak:
+        path: "/home/udesou/benches/multicore/multicore-effects"
+        # args: <iters> <x> <y> <z>; default: 1 40 20 11 (output: 12)
+        args: ""
+      rec_eff_ack:
+        path: "/home/udesou/benches/multicore/multicore-effects"
+        # args: <iters> <m> <n>; default: 2 3 11 (output: 16381)
+        args: ""
+      rec_seq_ack:
+        path: "/home/udesou/benches/multicore/multicore-effects"
+        # args: <iters> <m> <n>; default: 2 3 11 (output: 16381)
+        args: ""
+
   sandmark-with-deps:
     type: OCamlBenchmarkSuite
     timeout: 300
@@ -195,11 +227,11 @@ modifiers:
     type: Wrapper
     val: "/usr/bin/time -f \"%Uuser %Ssystem %eelapsed %PCPU (%Xavgtext+%Davgdata %Mmaxresident)k\""
 
-# TODO: add support for olly stats
-  # Optional, requires runtime_events_tools (`olly`) on PATH.
-  # olly_gc:
-  #   type: Wrapper
-  #   val: "olly gc-stats"
+  # Optional GC stats from runtime_events_tools (`olly`) in benchmark logs.
+  # Install with: opam install runtime_events_tools
+  olly_gc:
+    type: Wrapper
+    val: "olly gc-stats"
 
   # d:
   #   type: OCamlRunParam
@@ -246,9 +278,9 @@ benchmarks:
   #   - graph500seq
 
   # Uncomment after installing required opam packages.
-  sandmark-with-packages:
+  # sandmark-with-packages:
     # - binarytrees5
-    - fasta3
+    # - fasta3
   #   - fasta6
   #   - mandelbrot6
   #   - nbody
@@ -263,6 +295,18 @@ benchmarks:
   #   - thread_ring_lwt_stream
   #   - test_decompress
   #   - ydump
+
+  multicore-effects:
+    - algorithmic_differentiation
+  #   - rec_eff_fib
+  #   - rec_seq_fib
+  #   - rec_eff_tak
+  #   - rec_seq_tak
+  #   - rec_eff_ack
+  #   - rec_seq_ack
+
+  # sandmark-with-deps:
+  #   - graph500seq
 
 configs:
   # Vary according to defaul values
@@ -282,7 +326,9 @@ configs:
   # d, i, a set to defaults: d=1, i=32, a=1.
   # Sweeps are generated from config_sweep for modifiers not already present.
   # These three lines produce 1 + 7 + 49 runs.
-  # - "ocaml-local|time_stats"
+  # - "ocaml-local|time_stats|olly_gc"
+  # Enable for olly GC output in logs (requires `olly` on PATH):
+  # - "ocaml-local|time_stats|olly_gc"
   # - "ocaml-v5.4|time_stats|d-1|s-32768|i-32|a-1"
   - "ocaml-release|time_stats"
 

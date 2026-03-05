@@ -317,3 +317,26 @@ class OCaml(Runtime):
             if pattern in lower:
                 return True
         return False
+
+    def get_major_version(self) -> int:
+        """Return the OCaml major version as an integer (e.g. 5 for '5.4.0')."""
+        if self.version:
+            try:
+                return int(str(self.version).split(".")[0])
+            except (ValueError, IndexError):
+                raise ValueError(
+                    "Cannot parse major version from OCaml version string: {!r}".format(self.version)
+                )
+        # Fall back to querying the executable
+        result = subprocess.run(
+            [str(self.executable), "--version"],
+            capture_output=True, text=True, check=True
+        )
+        m = re.search(r"version\s+(\d+)\.", result.stdout)
+        if not m:
+            raise RuntimeError(
+                "Cannot detect OCaml major version from executable output: {!r}".format(
+                    result.stdout.strip()
+                )
+            )
+        return int(m.group(1))

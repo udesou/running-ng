@@ -471,6 +471,17 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
 
 
 @register(BenchmarkSuite)
+class OCamlMulticoreBenchmarkSuite(OCamlBenchmarkSuite):
+    """Like OCamlBenchmarkSuite but enforces OCaml >= 5 at build/run time."""
+
+    def get_benchmark(self, bm_spec: Union[str, Dict[str, Any]]) -> 'OCamlBenchmark':
+        bm = super().get_benchmark(bm_spec)
+        if isinstance(bm, OCamlBuiltBinaryBenchmark):
+            bm.min_ocaml_major = 5
+        return bm
+
+
+@register(BenchmarkSuite)
 class SPECjvm98(JavaBenchmarkSuite):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
