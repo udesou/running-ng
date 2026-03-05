@@ -28,7 +28,7 @@ Example:
 runtimes:
   ocaml-local:
     type: OCaml
-    executable: /home/udesou/.local/ocaml/bin/ocaml
+    executable: /path/to/ocaml/bin/ocaml
 
   ocaml-v5_4_0:
     type: OCaml
@@ -69,7 +69,7 @@ suites:
     timeout: 120
     programs:
       binarytrees:
-        path: /home/udesou/benches/binarytrees
+        path: ${RUNNING_BENCH_DIR}/binarytrees
         args: "21"
 ```
 
@@ -78,7 +78,7 @@ You can override convention if needed:
 ```yaml
 programs:
   binarytrees:
-    path: /home/udesou/benches/binarytrees
+    path: ${RUNNING_BENCH_DIR}/binarytrees
     build_script: custom.build.sh
     binary: custom-binary-{runtime}
 ```
@@ -106,7 +106,7 @@ Or per benchmark:
 ```yaml
 programs:
   binarytrees:
-    path: /home/udesou/benches/binarytrees
+    path: ${RUNNING_BENCH_DIR}/binarytrees
     always_build: true
 ```
 

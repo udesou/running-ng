@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional, Union
 from running.benchmark import JavaBenchmark, BinaryBenchmark, Benchmark, JavaScriptBenchmark, OCamlBenchmark, OCamlBuiltBinaryBenchmark
 import logging
 from running.util import register, split_quoted
+import os
 
 __DRY_RUN = False
 __DEFAULT_MINHEAP = 4096
@@ -61,8 +62,8 @@ class BinaryBenchmarkSuite(BenchmarkSuite):
         self.programs: Dict[str, Dict[str, Any]]
         self.programs = {
             k: {
-                'path': Path(v['path']),
-                'args': split_quoted(v['args'])
+                'path': Path(os.path.expandvars(v['path'])),
+                'args': split_quoted(os.path.expandvars(v['args']))
             }
             for k, v in programs.items()
         }
@@ -394,15 +395,15 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
                 raise TypeError(
                     "OCaml benchmark {} always_build must be boolean".format(k))
             entry: Dict[str, Any] = {
-                "path": str(Path(v["path"])),
+                "path": str(Path(os.path.expandvars(v["path"]))),
                 "ocaml_args": split_quoted(v.get("ocaml_args", "")),
-                "args": split_quoted(v.get("args", "")),
+                "args": split_quoted(os.path.expandvars(v.get("args", ""))),
                 "build_args": split_quoted(v.get("build_args", "")),
                 "build_env": {str(env_k): str(env_v) for env_k, env_v in build_env_raw.items()},
                 "always_build": always_build_raw,
             }
             if "build_script" in v:
-                benchmark_root = Path(v["path"]).resolve()
+                benchmark_root = Path(os.path.expandvars(v["path"])).resolve()
                 if benchmark_root.is_file():
                     benchmark_root = benchmark_root.parent
                 build_script = Path(v["build_script"])
