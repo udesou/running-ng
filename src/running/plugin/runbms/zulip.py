@@ -34,12 +34,17 @@ class Zulip(RunbmsPlugin):
         self.moma = Moma()
         self.last_message_id = None
         self.last_message_content = None
+        self.sent_reservation_message = False
 
     def send_message(self, content):
         message_data = copy.deepcopy(self.request)
+        reservation_msg = ""
+        if not self.sent_reservation_message:
+            reservation_msg = self.get_reservation_message()
+            self.sent_reservation_message = True
         message_data["content"] = "{}\n{}{}\n".format(
             self.run_id,
-            self.get_reservation_message(),
+            reservation_msg,
             content
         )
         try:

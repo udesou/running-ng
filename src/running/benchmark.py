@@ -1,7 +1,10 @@
 import errno
+import glob
 import logging
 import subprocess
 import sys
+import tempfile
+import time
 from time import sleep
 from typing import Any, List, Optional, Tuple, Union, Dict
 from running.runtime import D8, JavaScriptCore, OCaml, OpenJDK, Runtime, DummyRuntime, SpiderMonkey
@@ -39,6 +42,7 @@ class Benchmark(object):
             self.companion = split_quoted(companion)
         else:
             self.companion = []
+        self.perf_and_olly_attach: Optional[PerfAndOllyAttach] = None
         self.timeout = timeout
         # ignore the current working directory provided by commands like runbms or minheap
         # certain benchmarks expect to be invoked from certain directories
@@ -77,6 +81,8 @@ class Benchmark(object):
                     b.env_args["OCAMLRUNPARAM"] = "{},{}".format(existing, m.val)
                 else:
                     b.env_args["OCAMLRUNPARAM"] = m.val
+            elif type(m) == PerfAndOllyAttach:
+                b.perf_and_olly_attach = m
             elif type(m) == ModifierSet:
                 logging.warning("ModifierSet should have been flattened")
         return b
@@ -90,6 +96,124 @@ class Benchmark(object):
             ])
         )
 
+    def _run_with_perf_and_olly(
+        self,
+        cmd: List,
+        env_args: Dict[str, str],
+        cwd: Optional[Path],
+        modifier: 'PerfAndOllyAttach',
+    ) -> Tuple[bytes, bytes, SubprocessrExit]:
+        """Run benchmark with perf stat and olly gc-stats attached via a sync pipe.
+
+        Using SIGSTOP in preexec_fn deadlocks because Python's Popen blocks
+        reading the internal errpipe until the child calls exec() (which closes
+        the CLOEXEC fd). Instead, we block the child in preexec_fn by reading
+        from a pipe: parent gets the pid, starts observers, then closes the write
+        end so the child unblocks and proceeds to exec().
+        """
+        tmpdir = tempfile.mkdtemp()
+        env_args = env_args.copy()
+        env_args["OCAML_RUNTIME_EVENTS_START"] = "1"
+        env_args["OCAML_RUNTIME_EVENTS_DIR"] = tmpdir
+        env_args["OCAML_RUNTIME_EVENTS_PRESERVE"] = "1"
+
+        # Spawn a tiny Python wrapper as the child.  It blocks reading from
+        # sync_r, then os.execvp's into the real benchmark.  The PID is
+        # preserved through exec(), so perf and olly track it correctly.
+        #
+        # We cannot use preexec_fn for blocking because Popen.__init__ itself
+        # blocks reading its internal errpipe until the child calls exec().
+        # Any blocking inside preexec_fn therefore deadlocks Popen.
+        sync_r, sync_w = os.pipe()
+        sync_env = env_args.copy()
+        sync_env["_BENCH_SYNC_FD"] = str(sync_r)
+
+        # sys.argv in -c mode: ['-c', cmd[0], cmd[1], ...]
+        wrapper = (
+            "import os,sys; "
+            "fd=int(os.environ.pop('_BENCH_SYNC_FD')); "
+            "os.read(fd,1); os.close(fd); "
+            "os.execvp(sys.argv[1], sys.argv[1:])"
+        )
+        bench = subprocess.Popen(
+            ["python3", "-c", wrapper] + [str(c) for c in cmd],
+            env=sync_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            pass_fds=(sync_r,),
+            cwd=cwd,
+        )
+        pid = bench.pid
+        os.close(sync_r)
+
+        # Attach perf to the PID while the wrapper is blocked — perf follows exec()
+        perf_output = os.path.join(tmpdir, "perf.out")
+        perf_cmd = ["perf", "stat", "--inherit", "-p", str(pid), "-o", perf_output]
+        if modifier.perf_events:
+            perf_cmd.extend(["-e", ",".join(modifier.perf_events)])
+        perf_p = subprocess.Popen(perf_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        # Release: wrapper execs the benchmark, OCaml runtime starts, ring buffer is created
+        os.close(sync_w)
+
+        # Wait for any *.events file in tmpdir — we scan rather than looking for a specific
+        # PID because wrappers like /usr/bin/time fork a new child for the actual benchmark,
+        # so the OCaml process PID differs from bench.pid.
+        events_file = None
+        ocaml_pid = None
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            hits = glob.glob(os.path.join(tmpdir, "*.events"))
+            if hits:
+                events_file = hits[0]
+                ocaml_pid = int(os.path.basename(events_file)[:-len(".events")])
+                break
+            time.sleep(0.01)
+
+        if events_file is None:
+            logging.warning("No runtime events file found in %s; olly will not attach", tmpdir)
+            olly_p = None
+        else:
+            olly_p = subprocess.Popen(
+                ["olly", "gc-stats", "--attach", "{}:{}".format(tmpdir, ocaml_pid)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+
+        try:
+            bench_stdout, _ = bench.communicate(timeout=self.timeout)
+            subprocess_exit = SubprocessrExit.Normal
+        except subprocess.TimeoutExpired:
+            bench.kill()
+            bench_stdout, _ = bench.communicate()
+            subprocess_exit = SubprocessrExit.Timeout
+
+        # perf stat exits automatically when its target exits
+        try:
+            perf_p.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            perf_p.kill()
+            perf_p.wait()
+
+        companion_out = b""
+        if olly_p is not None:
+            try:
+                olly_stdout, _ = olly_p.communicate(timeout=30)
+                companion_out += olly_stdout
+            except subprocess.TimeoutExpired:
+                logging.warning("olly gc-stats did not exit after 30 seconds. Killing.")
+                olly_p.kill()
+                olly_stdout, _ = olly_p.communicate()
+                companion_out += olly_stdout
+
+        try:
+            with open(perf_output, "rb") as f:
+                companion_out += b"\n--- perf stat ---\n" + f.read()
+        except FileNotFoundError:
+            logging.warning("perf output file %s not found", perf_output)
+
+        return bench_stdout if bench_stdout else b"", companion_out, subprocess_exit
+
     def run(self, runtime: Runtime, cwd: Optional[Path] = None) -> Tuple[bytes, bytes, SubprocessrExit]:
         if suite.is_dry_run():
             print(
@@ -102,6 +226,11 @@ class Benchmark(object):
             cmd = [os.path.expandvars(x) for x in cmd]
             env_args = os.environ.copy()
             env_args.update(self.env_args)
+            effective_cwd = self.override_cwd if self.override_cwd else cwd
+
+            if self.perf_and_olly_attach is not None:
+                return self._run_with_perf_and_olly(cmd, env_args, effective_cwd, self.perf_and_olly_attach)
+
             companion_out = b""
             stdout: Optional[bytes]
             if self.companion:
@@ -115,7 +244,7 @@ class Benchmark(object):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     timeout=self.timeout,
-                    cwd=self.override_cwd if self.override_cwd else cwd
+                    cwd=effective_cwd,
                 )
                 subprocess_exit = SubprocessrExit.Normal
                 stdout = p.stdout

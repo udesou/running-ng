@@ -13,6 +13,8 @@ export RUNNING_BENCH_DIR="${RUNNING_BENCH_DIR:-$(cd "$ROOT_DIR/../benches" && pw
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/gc-sweep-logs}"
 CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/src/running/config/ocaml_gc_sweep_example.yml}"
 PYTHONPATH="$ROOT_DIR/src"
+OLLY_BIN="${OLLY_BIN:-$HOME/runtime_events_tools/_build/install/default/bin}"
+export PATH="$OLLY_BIN:$PATH"
 
 mkdir -p "$LOG_DIR"
 

@@ -163,3 +163,21 @@ class Companion(Modifier):
 
     def __str__(self) -> str:
         return "{} Companion {}".format(super().__str__(), self.val)
+
+
+@register(Modifier)
+class PerfAndOllyAttach(Modifier):
+    """Attach both perf stat and olly gc-stats to the benchmark process.
+
+    Uses SIGSTOP/SIGCONT to freeze the child after fork so both tools can
+    attach before any code runs. Requires olly on PATH and perf installed.
+
+    Optional `val`: extra perf stat -e events string, e.g. "cycles,instructions".
+    """
+    def __init__(self, value_opts=None, **kwargs):
+        super().__init__(value_opts, **kwargs)
+        val = self._kwargs.get("val", "")
+        self.perf_events: list = split_quoted(val) if val else []
+
+    def __str__(self) -> str:
+        return "{} PerfAndOllyAttach events={}".format(super().__str__(), self.perf_events)
