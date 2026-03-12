@@ -452,6 +452,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         build_env: Dict[str, str],
         always_build: bool,
         min_ocaml_major: Optional[int] = None,
+        required_runtime_hint: Optional[str] = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -464,6 +465,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         self.build_env = build_env
         self.always_build = always_build
         self.min_ocaml_major = min_ocaml_major
+        self.required_runtime_hint = required_runtime_hint
         self._binary_cache: Dict[str, Path] = {}
 
     def __str__(self) -> str:
@@ -553,6 +555,13 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
                         self.name, self.min_ocaml_major, runtime.name, major
                     )
                 )
+        if self.required_runtime_hint is not None:
+            logging.warning(
+                "Benchmark %r should only be run with %s. "
+                "Current runtime is %r. Build may fail if the runtime does not "
+                "provide the required APIs.",
+                self.name, self.required_runtime_hint, runtime.name
+            )
         runtime_key = runtime.get_cache_key()
         cached = self._binary_cache.get(runtime_key)
         if cached and cached.exists() and not self.always_build:

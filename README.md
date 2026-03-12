@@ -33,18 +33,28 @@ Each runtime is resolved by one of:
 - **`commit`** — same but checks out a specific commit hash
 - **`executable`** — uses a pre-built ocaml binary directly
 
+Use `repo` to point to a fork (default is `https://github.com/ocaml/ocaml.git`). For example, an OxCaml runtime:
+```yaml
+oxcaml:
+  type: OCaml
+  repo: "https://github.com/ocaml-flambda/flambda-backend.git"
+  commit: "<oxcaml-commit-hash>"
+```
+
 #### `suites` + `benchmarks` — What to run
 
-Suites define available programs (path, args, timeout). The `benchmarks` section selects which programs are actually active. Two suite types matter:
+Suites define available programs (path, args, timeout). The `benchmarks` section selects which programs are actually active. Three suite types:
 - **`OCamlBenchmarkSuite`** — sequential benchmarks (simple single-file or dune-built)
 - **`OCamlMulticoreBenchmarkSuite`** — same but enforces OCaml >= 5
+- **`OCamlOxcamlBenchmarkSuite`** — like multicore, but warns that an OxCaml runtime is required (for benchmarks using OxCaml-specific APIs like `Domain.Safe`)
 
 All paths in the config use `${RUNNING_BENCH_DIR}` which is expanded at runtime from the environment variable set by the launch script.
 
 #### `modifiers` — How to tweak runs
 
 - **`Wrapper`** (`time_stats`, `olly_gc`) — prepends commands like `/usr/bin/time` or `olly gc-stats` to the benchmark execution
-- **`OCamlRunParam`** (`s`, `o`, `a`) — templated values like `s={0}` that get expanded with values and concatenated into the `OCAMLRUNPARAM` env var (e.g. `OCAMLRUNPARAM="s=32768,o=40"`)
+- **`OCamlRunParam`** (`s`, `o`, `a`, `gc_verbose`) — templated values like `s={0}` that get expanded with values and concatenated into the `OCAMLRUNPARAM` env var (e.g. `OCAMLRUNPARAM="s=32768,o=40"`)
+- **`PerfAndOllyAttach`** (`perf_grp1`, `perf_grp2`, `perf_grp3`) — attaches both `perf stat` and `olly gc-stats` to the benchmark process simultaneously. Uses SIGSTOP/SIGCONT to freeze the child after fork so both tools can attach before any code runs. Requires `perf` and `olly` on PATH
 
 #### `configs` — Base configurations
 
@@ -107,6 +117,51 @@ The goal is to measure how OCaml GC tuning parameters affect performance:
 - **`a`** — allocation policy
 
 The sweep systematically explores this tradeoff space across all benchmarks, measuring the impact on GC frequency, runtime, and memory usage.
+
+### Hardware Performance Counters (`PerfAndOllyAttach`)
+
+The `PerfAndOllyAttach` modifier collects both `perf stat` hardware counters and `olly gc-stats` GC telemetry in a single benchmark run. It works by:
+
+1. Forking the benchmark process in a SIGSTOP state
+2. Attaching `perf stat -p <pid>` and `olly gc-stats -p <pid>` to the frozen process
+3. Sending SIGCONT to let the benchmark run
+4. Collecting both outputs when the benchmark exits
+
+Three pre-defined counter groups avoid PMU multiplexing (each fits in ~4 programmable + 3 fixed counters):
+
+| Modifier | Counters | Purpose |
+|---|---|---|
+| `perf_grp1` | task-clock, page-faults, cycles, instructions | Baseline IPC |
+| `perf_grp2` | task-clock, cycles, stalled-cycles-frontend, stalled-cycles-backend | Pipeline stalls |
+| `perf_grp3` | task-clock, cycles, cache-misses, LLC-load-misses, dTLB-load-misses, iTLB-load-misses | Cache/TLB hierarchy |
+
+Run one group at a time. Example config:
+```yaml
+configs:
+  - "ocaml-release|time_stats|perf_grp1|gc_verbose"
+```
+
+**Requirements:**
+- `perf` must be installed and accessible (check with `perf stat ls`)
+- `olly` must be on PATH (install via `opam install runtime_events_tools`, or set `OLLY_BIN` — the launch script prepends it to PATH)
+- `perf_event_paranoid` may need to be lowered: `sudo sysctl kernel.perf_event_paranoid=1`
+
+### Default Config
+
+The example config (`ocaml_gc_sweep_example.yml`) ships with this default:
+```yaml
+configs:
+  - "ocaml-release|time_stats|perf_grp1|gc_verbose"
+```
+
+This collects `/usr/bin/time` resource stats, baseline IPC perf counters, olly GC stats, and verbose GC output (`OCAMLRUNPARAM=v=0x400`) for every benchmark. The `config_sweep` then varies `s` (minor heap size) and `o` (space overhead) across the full parameter grid.
+
+### Analysing Results
+
+After a sweep, generate a CSV summary and plots:
+```bash
+python3 scripts/plot_gc_sweep.py gc-sweep-logs/<run-directory>
+```
 
 ## Development Setup
 

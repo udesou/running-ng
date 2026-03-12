@@ -5,13 +5,19 @@ minheap_multiplier: 1.0
 heap_range: 6
 spread_factor: 1
 
+
+# =============================================================================
+# Runtimes
+# =============================================================================
+# Each runtime resolves an OCaml compiler by version tag, commit hash, or
+# pre-built executable path.  The first build is cached under
+# /tmp/running-ng-ocaml-toolchains/ and reused for subsequent runs.
+#
+# Use `repo` to point to a fork (e.g. OxCaml).  Default repo is
+# https://github.com/ocaml/ocaml.git.
+
 runtimes:
-  # ocaml-local:
-    # type: OCaml
-    # executable: "/path/to/ocaml/bin/ocaml"
-  # ocaml-global:
-  #   type: OCaml
-  #   executable: "/usr/bin/ocaml"
+  # --- stock OCaml ---
   ocaml-v5.4:
     type: OCaml
     version: "5.4.0"
@@ -21,8 +27,33 @@ runtimes:
   ocaml-release:
     type: OCaml
     commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
-  
+
+  # --- OxCaml (Jane Street fork with Domain.Safe, prefetch intrinsics, etc.) ---
+  # Uncomment and set the commit/version for your OxCaml build:
+  # oxcaml:
+  #   type: OCaml
+  #   repo: "https://github.com/ocaml-flambda/flambda-backend.git"
+  #   commit: "<oxcaml-commit-hash>"
+
+  # --- pre-built executable ---
+  # ocaml-local:
+  #   type: OCaml
+  #   executable: "/path/to/ocaml/bin/ocaml"
+
+# =============================================================================
+# Suites
+# =============================================================================
+# Each suite defines the available programs (path, args, timeout).  The
+# `benchmarks` section below selects which programs are actually run.
+#
+# Suite types:
+#   OCamlBenchmarkSuite          — sequential benchmarks (any OCaml version)
+#   OCamlMulticoreBenchmarkSuite — enforces OCaml >= 5 at build time
+
 suites:
+  # ---------------------------------------------------------------------------
+  # simple/ — stdlib-only sequential benchmarks
+  # ---------------------------------------------------------------------------
   sandmark-sequential:
     type: OCamlBenchmarkSuite
     timeout: 120
@@ -35,38 +66,29 @@ suites:
         args: ""
       binarytrees:
         path: "${RUNNING_BENCH_DIR}/simple/binarytrees"
-        # optional: always_build: true
         args: "21"
       hamming:
         path: "${RUNNING_BENCH_DIR}/simple/hamming"
-        # N: number of elements in the Hamming sequence to iterate over.
         args: "500000"
       soli:
         path: "${RUNNING_BENCH_DIR}/simple/soli"
-        # nruns: number of solitaire solver runs.
         args: "50"
       kb:
         path: "${RUNNING_BENCH_DIR}/simple/kb"
-        # Runs 100 iterations of Knuth-Bendix completion internally.
         args: ""
       kb_no_exc:
-        # Same as kb but without exceptions; build script is kb_no_exc.build.sh.
         path: "${RUNNING_BENCH_DIR}/simple/kb"
         args: ""
       lexifi-g2pp:
-        # Multi-file benchmark; built with dune.
         path: "${RUNNING_BENCH_DIR}/simple/lexifi-g2pp"
-        # If dune is not on PATH, set it explicitly:
         # build_env:
         #   DUNE_BIN: "/path/to/.opam/<switch>/bin/dune"
         args: ""
       zdd:
         path: "${RUNNING_BENCH_DIR}/simple/zdd"
-        # words.txt must be passed as an absolute path since the run cwd is a temp dir.
         args: "${RUNNING_BENCH_DIR}/simple/zdd/words.txt"
       fannkuchredux:
         path: "${RUNNING_BENCH_DIR}/simple/fannkuchredux"
-        # N: permutation length. Compiled with -noassert -unsafe as in sandmark.
         args: "11"
       crout_decomposition:
         path: "${RUNNING_BENCH_DIR}/simple/numerical-analysis"
@@ -76,11 +98,9 @@ suites:
         args: ""
       durand_kerner_aberth:
         path: "${RUNNING_BENCH_DIR}/simple/numerical-analysis"
-        # Optional arg: percentage of coefficient array to use (default 100).
         args: ""
       fft:
         path: "${RUNNING_BENCH_DIR}/simple/numerical-analysis"
-        # Optional arg: array size (default 1048576). Needs unix for timing.
         args: ""
       levinson_durbin:
         path: "${RUNNING_BENCH_DIR}/simple/numerical-analysis"
@@ -90,238 +110,31 @@ suites:
         args: ""
       markbench:
         path: "${RUNNING_BENCH_DIR}/simple/markbench"
-        # Optional; default script is <benchmark>.build.sh in benchmark path.
-        # build_script: "markbench.build.sh"
-        # Optional: if dune is not on PATH, point to it explicitly.
-        # build_env:
-        #   DUNE_BIN: "/path/to/.opam/<switch>/bin/dune"
-        # Optional benchmark argument; defaults to 10 full_major cycles if empty.
         args: ""
       sequence_cps:
         path: "${RUNNING_BENCH_DIR}/simple/sequence"
-        # N: sequence length; each run computes sum of squares of even elements.
         args: "10000"
 
-  multicore-effects:
-    type: OCamlMulticoreBenchmarkSuite
-    timeout: 120
-    programs:
-      algorithmic_differentiation:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        args: "100"
-      rec_eff_fib:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        # args: <iters> <n>; default: 4 40 (output: 102334155)
-        args: ""
-      rec_seq_fib:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        # args: <iters> <n>; default: 4 40 (output: 102334155)
-        args: ""
-      rec_eff_tak:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        # args: <iters> <x> <y> <z>; default: 1 40 20 11 (output: 12)
-        args: ""
-      rec_seq_tak:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        # args: <iters> <x> <y> <z>; default: 1 40 20 11 (output: 12)
-        args: ""
-      rec_eff_ack:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        # args: <iters> <m> <n>; default: 2 3 11 (output: 16381)
-        args: ""
-      rec_seq_ack:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        # args: <iters> <m> <n>; default: 2 3 11 (output: 16381)
-        args: ""
-
-  multicore-structures:
-    type: OCamlMulticoreBenchmarkSuite
-    timeout: 120
-    programs:
-      test_queue_sequential:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
-        # args: <items>
-        args: "1000000"
-      test_queue_parallel:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
-        # args: <items>
-        args: "1000000"
-      test_stack_sequential:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
-        # args: <items>
-        args: "1000000"
-      test_stack_parallel:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
-        # args: <items>
-        args: "1000000"
-      test_spsc_queue_sequential:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
-        # args: <items> (repeated 1000 times internally)
-        args: "1000"
-      test_spsc_queue_parallel:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
-        # args: <items>
-        args: "1000000"
-      test_spsc_queue_pingpong_parallel:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
-        # args: <num_threads> <num_messages>
-        args: "4 100000"
-
-  multicore-numerical:
-    type: OCamlMulticoreBenchmarkSuite
-    timeout: 180
-    programs:
-      # --- multicore variants ---
-      mandelbrot6_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <width>
-        args: "4 200"
-      nbody_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <n> <num_bodies>
-        args: "4 500 1024"
-      floyd_warshall_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <n>
-        args: "4 512"
-      game_of_life_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <n_times> <board_size>
-        args: "4 10 1024"
-      binarytrees5_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <max_depth>
-        args: "4 21"
-      spectralnorm2_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <n>
-        args: "4 2000"
-      fannkuchredux_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <workers> <n>
-        args: "4 11"
-      quicksort_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <n>
-        args: "4 2000000"
-      mergesort_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <n>
-        args: "4 1000000"
-      matrix_multiplication_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <size>
-        args: "4 512"
-      matrix_multiplication_tiling_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <size>; size must be a multiple of tile size (64)
-        args: "4 512"
-      LU_decomposition_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <mat_size>
-        args: "4 1200"
-      nqueens_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <board_size>
-        args: "4 13"
-      evolutionary_algorithm_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <num_domains> <n> <lambda>
-        args: "4 1000 1000"
-      # --- sequential baselines ---
-      nbody:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <n> <num_bodies>
-        args: "500 1024"
-      floyd_warshall:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <n>
-        args: "512"
-      game_of_life:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <n_times> <board_size>
-        args: "10 1024"
-      quicksort:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <n>
-        args: "2000000"
-      mergesort:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <n>
-        args: "1000000"
-      matrix_multiplication:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <size>
-        args: "512"
-      LU_decomposition:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <mat_size>
-        args: "1200"
-      nqueens:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <board_size>
-        args: "13"
-      evolutionary_algorithm:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
-        # args: <n> <lambda>
-        args: "1000 1000"
-
-  multicore-grammatrix:
-    type: OCamlMulticoreBenchmarkSuite
-    timeout: 120
-    programs:
-      grammatrix:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix"
-        # args: <ncores> <input_file>; input_file must be absolute (run cwd is a temp dir)
-        args: "1 ${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix/data/tox21_nrar_ligands_std_rand_01.csv"
-      grammatrix_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix"
-        # args: <num_domains> <chunk_size> <input_file>
-        args: "4 16 ${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix/data/tox21_nrar_ligands_std_rand_01.csv"
-
-  multicore-minilight:
-    type: OCamlMulticoreBenchmarkSuite
-    # minilight renders progressively until the iteration count in the scene file; use timeout to cap it.
-    timeout: 30
-    programs:
-      minilight_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/multicore-minilight"
-        # args: <scene_file>; roomfront.ml.txt is bundled; output PPM written alongside the scene file
-        args: "${RUNNING_BENCH_DIR}/multicore/multicore-minilight/roomfront.ml.txt"
-
-  # graph500par: edges.data is generated automatically by graph500par.build.deps.sh
-  # (called from kernel1_run_multicore.build.sh) the first time the benchmark is built.
-  # Scale=14, edgefactor=16 (matching run args); file is reused across runtime builds.
-  graph500par:
-    type: OCamlMulticoreBenchmarkSuite
-    timeout: 300
-    programs:
-      kernel1_run_multicore:
-        path: "${RUNNING_BENCH_DIR}/multicore/graph500par"
-        # args: [-ndomains N] EDGE_LIST_FILE
-        args: "-ndomains 4 ${RUNNING_BENCH_DIR}/multicore/graph500par/edges.data"
-
+  # ---------------------------------------------------------------------------
+  # with_deps/ — benchmarks needing dune multi-library builds or generated data
+  # ---------------------------------------------------------------------------
   sandmark-with-deps:
     type: OCamlBenchmarkSuite
     timeout: 300
     programs:
       graph500seq:
         path: "${RUNNING_BENCH_DIR}/with_deps/graph500seq"
-        # Built with dune (multi-library). graph500seq.build.deps.sh generates
-        # edges.data once (runtime-independent) before the first binary build.
-        # If dune is not on PATH, set it explicitly:
-        # build_env:
-        #   DUNE_BIN: "/path/to/.opam/<switch>/bin/dune"
-        # edges.data is passed as an absolute path since the run cwd is a temp dir.
         args: "${RUNNING_BENCH_DIR}/with_deps/graph500seq/edges.data"
 
-  # Benchmarks requiring external opam packages.
-  # Before running: opam install zarith num lwt decompress bigstringaf checkseum yojson camlp-streams
+  # ---------------------------------------------------------------------------
+  # with_packages/ — benchmarks needing external opam packages
+  # Packages are auto-installed by each build script (no manual setup needed).
+  # ---------------------------------------------------------------------------
   sandmark-with-packages:
     type: OCamlBenchmarkSuite
     timeout: 120
     programs:
-      # --- benchmarksgame (needs zarith, str, unix) ---
+      # benchmarksgame (needs zarith, str, unix)
       binarytrees5:
         path: "${RUNNING_BENCH_DIR}/with_packages/benchmarksgame"
         args: "21"
@@ -343,105 +156,295 @@ suites:
       spectralnorm2:
         path: "${RUNNING_BENCH_DIR}/with_packages/benchmarksgame"
         args: "5500"
-      # --- zarith (needs zarith, num) ---
+      # zarith (needs zarith, num)
       zarith_fact:
         path: "${RUNNING_BENCH_DIR}/with_packages/zarith"
-        # factorial of 40, repeated 1_000_000 times
         args: "40 1000000"
       zarith_fib:
         path: "${RUNNING_BENCH_DIR}/with_packages/zarith"
-        # fibonacci of 40 using Zarith bignums
         args: "Z 40"
       zarith_pi:
         path: "${RUNNING_BENCH_DIR}/with_packages/zarith"
-        # number of pi digits to compute
         args: "10000"
       zarith_tak:
         path: "${RUNNING_BENCH_DIR}/with_packages/zarith"
-        # tak function using Zarith bignums, n=2500
         args: "Z 2500"
-      # --- lwt-based (needs lwt, lwt.unix) ---
+      # lwt-based (needs lwt, lwt.unix)
       chameneos_redux_lwt:
         path: "${RUNNING_BENCH_DIR}/with_packages/chameneos"
-        # number of meetings
         args: "600000"
       thread_ring_lwt_mvar:
         path: "${RUNNING_BENCH_DIR}/with_packages/thread-lwt"
-        # number of ring-pass iterations
         args: "20000"
       thread_ring_lwt_stream:
         path: "${RUNNING_BENCH_DIR}/with_packages/thread-lwt"
         args: "20000"
-      # --- decompress (needs bigstringaf, checkseum, decompress) ---
+      # decompress (needs bigstringaf, checkseum, decompress)
       test_decompress:
         path: "${RUNNING_BENCH_DIR}/with_packages/decompress"
-        # default: 64 iterations, 32KB data; override with "<iterations> <data_size>"
         args: ""
-      # --- yojson (needs yojson, camlp-streams) ---
+      # yojson (needs yojson, camlp-streams)
       ydump:
         path: "${RUNNING_BENCH_DIR}/with_packages/yojson"
-        # sample.json must be an absolute path since run cwd is a temp dir.
         args: "-c ${RUNNING_BENCH_DIR}/with_packages/yojson/sample.json"
 
+  # ---------------------------------------------------------------------------
+  # multicore/ — OCaml 5+ benchmarks (effects, domains, domainslib)
+  # ---------------------------------------------------------------------------
+  multicore-effects:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 120
+    programs:
+      algorithmic_differentiation:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: "100"
+      rec_eff_fib:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_seq_fib:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_eff_tak:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_seq_tak:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_eff_ack:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_seq_ack:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+
+  multicore-structures:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 120
+    programs:
+      test_queue_sequential:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
+        args: "1000000"
+      test_queue_parallel:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
+        args: "1000000"
+      test_stack_sequential:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
+        args: "1000000"
+      test_stack_parallel:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
+        args: "1000000"
+      test_spsc_queue_sequential:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
+        args: "1000"
+      test_spsc_queue_parallel:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
+        args: "1000000"
+      test_spsc_queue_pingpong_parallel:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
+        args: "4 100000"
+
+  multicore-numerical:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 180
+    programs:
+      # multicore variants (first arg is always num_domains)
+      mandelbrot6_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 200"
+      nbody_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 500 1024"
+      floyd_warshall_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 512"
+      game_of_life_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 10 1024"
+      binarytrees5_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 21"
+      spectralnorm2_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 2000"
+      fannkuchredux_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 11"
+      quicksort_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 2000000"
+      mergesort_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 1000000"
+      matrix_multiplication_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 512"
+      matrix_multiplication_tiling_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 512"
+      LU_decomposition_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 1200"
+      nqueens_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 13"
+      evolutionary_algorithm_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "4 1000 1000"
+      # sequential baselines
+      nbody:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "500 1024"
+      floyd_warshall:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "512"
+      game_of_life:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "10 1024"
+      quicksort:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "2000000"
+      mergesort:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "1000000"
+      matrix_multiplication:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "512"
+      LU_decomposition:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "1200"
+      nqueens:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "13"
+      evolutionary_algorithm:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
+        args: "1000 1000"
+
+  multicore-grammatrix:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 120
+    programs:
+      grammatrix:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix"
+        args: "1 ${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix/data/tox21_nrar_ligands_std_rand_01.csv"
+      grammatrix_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix"
+        args: "4 16 ${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix/data/tox21_nrar_ligands_std_rand_01.csv"
+
+  multicore-minilight:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 30
+    programs:
+      minilight_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-minilight"
+        args: "${RUNNING_BENCH_DIR}/multicore/multicore-minilight/roomfront.ml.txt"
+
+  graph500par:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 300
+    programs:
+      kernel1_run_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/graph500par"
+        args: "-ndomains 4 ${RUNNING_BENCH_DIR}/multicore/graph500par/edges.data"
+
+  # ---------------------------------------------------------------------------
+  # OxCaml-only benchmarks (require the Jane Street OxCaml compiler fork)
+  # WARNING: These benchmarks use OxCaml-specific APIs (Domain.Safe, prefetch
+  # intrinsics, etc.) and will fail to compile with stock OCaml.  Use an
+  # `oxcaml` runtime (see runtimes section above).
+  # ---------------------------------------------------------------------------
+  oxcaml-prefetch:
+    type: OCamlOxcamlBenchmarkSuite
+    timeout: 30
+    programs:
+      oxcaml_prefetch:
+        path: "${RUNNING_BENCH_DIR}/multicore/oxcaml-prefetch"
+        args: ""
+
+# =============================================================================
+# Modifiers
+# =============================================================================
+# Modifiers tweak how benchmarks are executed.  They are referenced by name
+# in the pipe-separated config strings (e.g. "ocaml-release|time_stats|s-32768").
+
 modifiers:
-  # Runtime metrics in stderr; captured by running-ng logs.
+  # --- wrappers (prepend commands to the benchmark invocation) ---
   time_stats:
     type: Wrapper
     val: "/usr/bin/time -f \"%Uuser %Ssystem %eelapsed %PCPU (%Xavgtext+%Davgdata %Mmaxresident)k\""
-
-  # Optional GC stats from runtime_events_tools (`olly`) in benchmark logs.
-  # Install with: opam install runtime_events_tools
   olly_gc:
     type: Wrapper
     val: "olly gc-stats"
 
-  # d:
-  #   type: OCamlRunParam
-  #   val: "d={0}"
+  # --- perf + olly attach (PerfAndOllyAttach) ---
+  # Uses SIGSTOP/SIGCONT to freeze the child so both perf stat and olly
+  # gc-stats can attach before any code runs.  Requires `perf` and `olly`
+  # on PATH.
+  #
+  # Run one group at a time to avoid PMU multiplexing.  Each group fits
+  # within ~4 programmable + 3 fixed hardware counters.
+  #
+  # Group 1: baseline IPC (fixed counters + software events)
+  perf_grp1:
+    type: PerfAndOllyAttach
+    val: "task-clock,page-faults,cycles,instructions"
+  # Group 2: pipeline stalls
+  perf_grp2:
+    type: PerfAndOllyAttach
+    val: "task-clock,cycles,stalled-cycles-frontend,stalled-cycles-backend"
+  # Group 3: cache / TLB hierarchy
+  perf_grp3:
+    type: PerfAndOllyAttach
+    val: "task-clock,cycles,cache-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses"
+
+  # --- GC run parameters (set via OCAMLRUNPARAM) ---
+  gc_verbose:
+    type: OCamlRunParam
+    val: "v=0x400"
   s:
     type: OCamlRunParam
     val: "s={0}"
   o:
     type: OCamlRunParam
     val: "o={0}"
-  # i:
-  #   type: OCamlRunParam
-  #   val: "i={0}"
   a:
     type: OCamlRunParam
     val: "a={0}"
 
+# =============================================================================
+# Benchmarks — which programs to actually run
+# =============================================================================
+# Uncomment / comment suites and individual programs as needed.  The default
+# below enables all stock-OCaml benchmarks.  OxCaml-only and with_packages
+# suites are commented out since they require extra setup.
+
 benchmarks:
-  # benchmark-external:
-    # TODO: run the infer benchmark
-    # - infer
+  sandmark-sequential:
+    - almabench
+    - bdd
+    - binarytrees
+    - hamming
+    - soli
+    - kb
+    - kb_no_exc
+    - lexifi-g2pp
+    - zdd
+    - fannkuchredux
+    - crout_decomposition
+    - qr_decomposition
+    - durand_kerner_aberth
+    - fft
+    - levinson_durbin
+    - naive_multilayer
+    - markbench
+    - sequence_cps
 
-  # sandmark-sequential:
-  #   - almabench
-  #   - bdd
-  #   - hamming
-  #   - soli
-  #   - kb
-  #   - kb_no_exc
-  #   - lexifi-g2pp
-  #   - zdd
-  #   - fannkuchredux
-  #   - crout_decomposition
-  #   - qr_decomposition
-  #   - durand_kerner_aberth
-  #   - fft
-  #   - levinson_durbin
-  #   - naive_multilayer
-  #   - markbench
-  #   - sequence_cps
+  sandmark-with-deps:
+    - graph500seq
 
-  # sandmark-with-deps:
-  #   - graph500seq
-
-  # Uncomment after installing required opam packages.
+  # Packages are auto-installed by each build script; just uncomment to enable.
   # sandmark-with-packages:
-    # - binarytrees5
-    # - fasta3
+  #   - binarytrees5
+  #   - fasta3
   #   - fasta6
   #   - mandelbrot6
   #   - nbody
@@ -459,88 +462,78 @@ benchmarks:
 
   multicore-effects:
     - algorithmic_differentiation
-  #   - rec_eff_fib
-  #   - rec_seq_fib
-  #   - rec_eff_tak
-  #   - rec_seq_tak
-  #   - rec_eff_ack
-  #   - rec_seq_ack
+    - rec_eff_fib
+    - rec_seq_fib
+    - rec_eff_tak
+    - rec_seq_tak
+    - rec_eff_ack
+    - rec_seq_ack
 
-  # multicore-structures:
-  #   - test_queue_sequential
-  #   - test_queue_parallel
-  #   - test_stack_sequential
-  #   - test_stack_parallel
-  #   - test_spsc_queue_sequential
-  #   - test_spsc_queue_parallel
-  #   - test_spsc_queue_pingpong_parallel
+  multicore-structures:
+    - test_queue_sequential
+    - test_queue_parallel
+    - test_stack_sequential
+    - test_stack_parallel
+    - test_spsc_queue_sequential
+    - test_spsc_queue_parallel
+    - test_spsc_queue_pingpong_parallel
 
-  # multicore-numerical:
-  #   - mandelbrot6_multicore
-  #   - nbody_multicore
-  #   - floyd_warshall_multicore
-  #   - game_of_life_multicore
-  #   - binarytrees5_multicore
-  #   - spectralnorm2_multicore
-  #   - fannkuchredux_multicore
-  #   - quicksort_multicore
-  #   - mergesort_multicore
-  #   - matrix_multiplication_multicore
-  #   - matrix_multiplication_tiling_multicore
-  #   - LU_decomposition_multicore
-  #   - nqueens_multicore
-  #   - evolutionary_algorithm_multicore
-  #   - nbody
-  #   - floyd_warshall
-  #   - game_of_life
-  #   - quicksort
-  #   - mergesort
-  #   - matrix_multiplication
-  #   - LU_decomposition
-  #   - nqueens
-  #   - evolutionary_algorithm
+  multicore-numerical:
+    - mandelbrot6_multicore
+    - nbody_multicore
+    - floyd_warshall_multicore
+    - game_of_life_multicore
+    - binarytrees5_multicore
+    - spectralnorm2_multicore
+    - fannkuchredux_multicore
+    - quicksort_multicore
+    - mergesort_multicore
+    - matrix_multiplication_multicore
+    - matrix_multiplication_tiling_multicore
+    - LU_decomposition_multicore
+    - nqueens_multicore
+    - evolutionary_algorithm_multicore
+    - nbody
+    - floyd_warshall
+    - game_of_life
+    - quicksort
+    - mergesort
+    - matrix_multiplication
+    - LU_decomposition
+    - nqueens
+    - evolutionary_algorithm
 
-  # multicore-grammatrix:
-  #   - grammatrix
-  #   - grammatrix_multicore
+  multicore-grammatrix:
+    - grammatrix
+    - grammatrix_multicore
 
-  # multicore-minilight:
-  #   - minilight_multicore
+  multicore-minilight:
+    - minilight_multicore
 
-  # graph500par:
-  #   - kernel1_run_multicore
+  graph500par:
+    - kernel1_run_multicore
 
-  # sandmark-with-deps:
-  #   - graph500seq
+  # OxCaml-only — requires an `oxcaml` runtime; will fail with stock OCaml.
+  # oxcaml-prefetch:
+  #   - oxcaml_prefetch
+
+# =============================================================================
+# Configs & Sweep
+# =============================================================================
+# Config strings: "runtime|modifier1|modifier2|..."
+# config_sweep generates the cross-product of sweep values for any modifier
+# NOT already present in the base config.
 
 configs:
-  # Vary according to defaul values
-  # s - minor heap size (words). default: 262144 (256k words)
-  # o - space overhead (%). default: 120
-
-  # initial idea (but can be user defined)
-  # vary s ∈ {32k, 64k, 128k, 256k, 512k, 1M, 2M}
-  # vary o ∈ {40, 60, 80, 100, 120, 150, 200}
-
-  # we could also do a two-step approach
-  # s: {64k, 128k, 256k, 512k, 1M}
-  # o: {60, 80, 120, 150, 200}
-  # and then explore further refining against the best area
-  # which would be particularly useful for long running benchmarks
-
-  # d, i, a set to defaults: d=1, i=32, a=1.
-  # Sweeps are generated from config_sweep for modifiers not already present.
-  # These three lines produce 1 + 7 + 49 runs.
-  # - "ocaml-local|time_stats|olly_gc"
-  # Enable for olly GC output in logs (requires `olly` on PATH):
-  # - "ocaml-local|time_stats|olly_gc"
-  # - "ocaml-v5.4|time_stats|d-1|s-32768|i-32|a-1"
-  - "ocaml-release|time_stats"
+  - "ocaml-release|time_stats|perf_grp1|gc_verbose"
 
 config_sweep:
-  s: [32768] #, 65536, 131072, 262144, 524288, 1048576, 2097152]
-  o: [40] #, 60, 80, 100, 120, 150, 200]
+  s: [32768, 65536, 131072, 262144, 524288, 1048576, 2097152]
+  o: [40, 60, 80, 100, 120, 150, 200]
 
+# =============================================================================
+# Notes from previous sweep runs
+# =============================================================================
 # Observed from gc-sweep-logs/obelisk-2026-02-24-Tue-230709 (single run per point):
 # 1) Increasing o reduces GC frequency and runtime, but raises peak memory.
 #    - At s=262144: o=10 -> 80

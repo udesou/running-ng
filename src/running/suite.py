@@ -483,6 +483,23 @@ class OCamlMulticoreBenchmarkSuite(OCamlBenchmarkSuite):
 
 
 @register(BenchmarkSuite)
+class OCamlOxcamlBenchmarkSuite(OCamlMulticoreBenchmarkSuite):
+    """Like OCamlMulticoreBenchmarkSuite but warns that an OxCaml runtime is required.
+
+    Benchmarks in this suite use OxCaml-specific APIs (e.g. Domain.Safe,
+    prefetch intrinsics) that are not available in stock OCaml.
+    """
+
+    def get_benchmark(self, bm_spec: Union[str, Dict[str, Any]]) -> 'OCamlBenchmark':
+        bm = super().get_benchmark(bm_spec)
+        if isinstance(bm, OCamlBuiltBinaryBenchmark):
+            bm.required_runtime_hint = (
+                "an OxCaml runtime (uses OxCaml-specific APIs like Domain.Safe)"
+            )
+        return bm
+
+
+@register(BenchmarkSuite)
 class SPECjvm98(JavaBenchmarkSuite):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
