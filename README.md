@@ -33,20 +33,22 @@ Each runtime is resolved by one of:
 - **`commit`** — same but checks out a specific commit hash
 - **`executable`** — uses a pre-built ocaml binary directly
 
-Use `repo` to point to a fork (default is `https://github.com/ocaml/ocaml.git`). For example, an OxCaml runtime:
+Use `repo` to point to a fork (default is `https://github.com/ocaml/ocaml.git`). Additional build parameters: `configure_args` (extra args for `./configure`) and `make_targets` (default `["world.opt"]`).
+
+For OxCaml (Jane Street's fork), use `type: OxCaml` — it handles the different build system automatically (`autoconf`, `--enable-runtime5`, Dune-based `make install`) and builds a stock OCaml 5.4.0 bootstrap compiler if needed (OxCaml's configure requires OCaml 5.4.x):
 ```yaml
-oxcaml:
-  type: OCaml
-  repo: "https://github.com/ocaml-flambda/flambda-backend.git"
+oxcaml-release:
+  type: OxCaml
   commit: "<oxcaml-commit-hash>"
 ```
+The default repo is `https://github.com/oxcaml/oxcaml.git`; override with `repo` if needed. Additional parameters: `configure_args` (extra args for `./configure`), `bootstrap_version` (stock OCaml version for bootstrapping, default `"5.4.0"`).
 
 #### `suites` + `benchmarks` — What to run
 
 Suites define available programs (path, args, timeout). The `benchmarks` section selects which programs are actually active. Three suite types:
 - **`OCamlBenchmarkSuite`** — sequential benchmarks (simple single-file or dune-built)
 - **`OCamlMulticoreBenchmarkSuite`** — same but enforces OCaml >= 5
-- **`OCamlOxcamlBenchmarkSuite`** — like multicore, but warns that an OxCaml runtime is required (for benchmarks using OxCaml-specific APIs like `Domain.Safe`)
+- **`OCamlOxcamlBenchmarkSuite`** — like multicore, but **fails** if the runtime is not `type: OxCaml` (for benchmarks using OxCaml-specific APIs like `Domain.Safe`)
 
 All paths in the config use `${RUNNING_BENCH_DIR}` which is expanded at runtime from the environment variable set by the launch script.
 

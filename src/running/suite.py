@@ -484,10 +484,11 @@ class OCamlMulticoreBenchmarkSuite(OCamlBenchmarkSuite):
 
 @register(BenchmarkSuite)
 class OCamlOxcamlBenchmarkSuite(OCamlMulticoreBenchmarkSuite):
-    """Like OCamlMulticoreBenchmarkSuite but warns that an OxCaml runtime is required.
+    """Like OCamlMulticoreBenchmarkSuite but requires an OxCaml runtime.
 
     Benchmarks in this suite use OxCaml-specific APIs (e.g. Domain.Safe,
-    prefetch intrinsics) that are not available in stock OCaml.
+    prefetch intrinsics) that are not available in stock OCaml. Builds will
+    fail with a clear error if the runtime is not 'type: OxCaml'.
     """
 
     def get_benchmark(self, bm_spec: Union[str, Dict[str, Any]]) -> 'OCamlBenchmark':

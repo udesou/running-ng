@@ -7,7 +7,7 @@ import tempfile
 import time
 from time import sleep
 from typing import Any, List, Optional, Tuple, Union, Dict
-from running.runtime import D8, JavaScriptCore, OCaml, OpenJDK, Runtime, DummyRuntime, SpiderMonkey
+from running.runtime import D8, JavaScriptCore, OCaml, OxCaml, OpenJDK, Runtime, DummyRuntime, SpiderMonkey
 from running.modifier import *
 from running.util import smart_quote, split_quoted
 from pathlib import Path
@@ -555,12 +555,12 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
                         self.name, self.min_ocaml_major, runtime.name, major
                     )
                 )
-        if self.required_runtime_hint is not None:
-            logging.warning(
-                "Benchmark %r should only be run with %s. "
-                "Current runtime is %r. Build may fail if the runtime does not "
-                "provide the required APIs.",
-                self.name, self.required_runtime_hint, runtime.name
+        if self.required_runtime_hint is not None and not isinstance(runtime, OxCaml):
+            raise ValueError(
+                "Benchmark {!r} requires {}, but runtime {!r} is not an OxCaml runtime. "
+                "Use a 'type: OxCaml' runtime in your config.".format(
+                    self.name, self.required_runtime_hint, runtime.name
+                )
             )
         runtime_key = runtime.get_cache_key()
         cached = self._binary_cache.get(runtime_key)

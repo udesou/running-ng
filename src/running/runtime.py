@@ -222,27 +222,25 @@ class OCaml(Runtime):
         return "runtime-{}".format(digest)
 
     @staticmethod
-    def _run_checked(cmd: List[str], cwd: Optional[Path] = None):
+    def _run_checked(cmd: List[str], cwd: Optional[Path] = None, env: Optional[Dict[str, str]] = None):
         logging.info("Running command: %s", " ".join(cmd))
-        subprocess.run(cmd, check=True, cwd=str(cwd) if cwd else None)
+        subprocess.run(cmd, check=True, cwd=str(cwd) if cwd else None, env=env)
 
     @staticmethod
-    def _resolve_or_build_executable(kwargs: Dict[str, Any]) -> Path:
+    def _clone_and_checkout(kwargs: Dict[str, Any]):
+        """Clone/fetch the repo and check out the right ref.
+
+        Returns (source_dir, install_dir, built_executable, jobs) or
+        raises if the executable is already cached (via the returned Path).
+        """
         executable = kwargs.get("executable")
         version = kwargs.get("version")
         commit = kwargs.get("commit", kwargs.get("hash"))
         repo = kwargs.get("repo", "https://github.com/ocaml/ocaml.git")
-        configure_args = kwargs.get("configure_args", [])
-        make_targets = kwargs.get("make_targets", ["world.opt"])
-        jobs = kwargs.get("jobs", os.cpu_count() or 1)
-        if not isinstance(configure_args, list):
-            raise TypeError("OCaml runtime configure_args must be a list")
-        if not isinstance(make_targets, list) or len(make_targets) == 0:
-            raise TypeError("OCaml runtime make_targets must be a non-empty list")
-        jobs = int(jobs)
+        jobs = int(kwargs.get("jobs", os.cpu_count() or 1))
 
         if executable:
-            return Path(str(executable)).absolute()
+            return Path(str(executable)).absolute(), None, None, None
 
         if not version and not commit:
             raise KeyError(
@@ -264,7 +262,7 @@ class OCaml(Runtime):
 
         if built_executable.exists():
             logging.info("Using cached OCaml runtime at %s", built_executable)
-            return built_executable
+            return built_executable, None, None, None
 
         toolchain_dir.mkdir(parents=True, exist_ok=True)
         if not source_dir.exists():
@@ -275,6 +273,23 @@ class OCaml(Runtime):
         checkout_ref = str(commit) if commit else str(version)
         OCaml._run_checked(["git", "checkout", checkout_ref], cwd=source_dir)
         OCaml._run_checked(["git", "submodule", "update", "--init", "--recursive"], cwd=source_dir)
+
+        return built_executable, source_dir, install_dir, jobs
+
+    @staticmethod
+    def _resolve_or_build_executable(kwargs: Dict[str, Any]) -> Path:
+        built_executable, source_dir, install_dir, jobs = OCaml._clone_and_checkout(kwargs)
+        if source_dir is None:
+            # Already cached or using a pre-built executable.
+            return built_executable
+
+        configure_args = kwargs.get("configure_args", [])
+        make_targets = kwargs.get("make_targets", ["world.opt"])
+        if not isinstance(configure_args, list):
+            raise TypeError("OCaml runtime configure_args must be a list")
+        if not isinstance(make_targets, list) or len(make_targets) == 0:
+            raise TypeError("OCaml runtime make_targets must be a non-empty list")
+
         OCaml._run_checked(["./configure", "--prefix={}".format(install_dir)] + configure_args, cwd=source_dir)
         OCaml._run_checked(["make", "-j", str(jobs)] + make_targets, cwd=source_dir)
         OCaml._run_checked(["make", "install"], cwd=source_dir)
@@ -340,3 +355,86 @@ class OCaml(Runtime):
                 )
             )
         return int(m.group(1))
+
+
+@register(Runtime)
+class OxCaml(OCaml):
+    """OxCaml (Jane Street's OCaml fork) runtime.
+
+    Uses the OxCaml build system: autoconf + ./configure --enable-runtime5 +
+    make install (Dune-based, no separate world.opt step).
+
+    Automatically builds a stock OCaml bootstrap compiler (default 5.4.0)
+    because OxCaml's configure requires OCaml 5.4.x on PATH.
+
+    Config fields are the same as OCaml (repo, commit/version, executable,
+    cache_dir, jobs) plus:
+      - configure_args: extra args appended after --prefix and --enable-runtime5
+      - bootstrap_version: stock OCaml version for bootstrapping (default "5.4.0")
+    """
+
+    DEFAULT_REPO = "https://github.com/oxcaml/oxcaml.git"
+    DEFAULT_BOOTSTRAP_VERSION = "5.4.0"
+
+    @staticmethod
+    def _ensure_bootstrap_compiler(kwargs: Dict[str, Any]) -> Path:
+        """Build or locate a stock OCaml compiler for bootstrapping OxCaml.
+
+        OxCaml's configure requires OCaml 5.4.x on PATH. Returns the bin/
+        directory of the bootstrap compiler.
+        """
+        bootstrap_version = kwargs.get("bootstrap_version", OxCaml.DEFAULT_BOOTSTRAP_VERSION)
+        bootstrap_kwargs = {
+            "version": bootstrap_version,
+            "cache_dir": kwargs.get("cache_dir",
+                Path(tempfile.gettempdir()) / "running-ng-ocaml-toolchains"),
+            "jobs": kwargs.get("jobs", os.cpu_count() or 1),
+        }
+        logging.info("Ensuring bootstrap compiler OCaml %s for OxCaml build", bootstrap_version)
+        bootstrap_exe = OCaml._resolve_or_build_executable(bootstrap_kwargs)
+        return bootstrap_exe.parent
+
+    @staticmethod
+    def _resolve_or_build_executable(kwargs: Dict[str, Any]) -> Path:
+        # Default repo to OxCaml if not specified.
+        if "repo" not in kwargs:
+            kwargs = dict(kwargs, repo=OxCaml.DEFAULT_REPO)
+
+        built_executable, source_dir, install_dir, jobs = OCaml._clone_and_checkout(kwargs)
+        if source_dir is None:
+            return built_executable
+
+        configure_args = kwargs.get("configure_args", [])
+        if not isinstance(configure_args, list):
+            raise TypeError("OxCaml runtime configure_args must be a list")
+
+        # Ensure a suitable bootstrap compiler (OCaml 5.4.x) is on PATH.
+        bootstrap_bin = OxCaml._ensure_bootstrap_compiler(kwargs)
+        build_env = dict(os.environ)
+        build_env["PATH"] = "{}:{}".format(bootstrap_bin, build_env.get("PATH", ""))
+        logging.info("OxCaml bootstrap compiler: %s", bootstrap_bin)
+
+        # OxCaml needs autoconf to generate ./configure from configure.ac.
+        OCaml._run_checked(["autoconf"], cwd=source_dir, env=build_env)
+        OCaml._run_checked(
+            ["./configure", "--prefix={}".format(install_dir), "--enable-runtime5"] + configure_args,
+            cwd=source_dir, env=build_env
+        )
+        # OxCaml's `make install` builds the compiler + stdlib and installs.
+        OCaml._run_checked(["make", "-j", str(jobs), "install"], cwd=source_dir, env=build_env)
+
+        if not built_executable.exists():
+            raise RuntimeError(
+                "OxCaml build finished but executable not found at {}".format(built_executable)
+            )
+        return built_executable
+
+    def __init__(self, **kwargs):
+        # Route through OxCaml's build logic, not OCaml's.
+        Runtime.__init__(self, **kwargs)
+        self.executable = OxCaml._resolve_or_build_executable(kwargs)
+        self.version: Optional[str] = kwargs.get("version")
+        self.commit: Optional[str] = kwargs.get("commit", kwargs.get("hash"))
+        if not self.executable.exists():
+            logging.warning("OxCaml executable {} doesn't exist".format(self.executable))
+        self.executable = self.executable.absolute()
