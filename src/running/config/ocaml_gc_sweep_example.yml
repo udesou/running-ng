@@ -27,13 +27,14 @@ runtimes:
   ocaml-release:
     type: OCaml
     commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
-
   # --- OxCaml (Jane Street fork with Domain.Safe, prefetch intrinsics, etc.) ---
-  # Uncomment and set the commit/version for your OxCaml build:
-  # oxcaml:
-  #   type: OCaml
-  #   repo: "https://github.com/ocaml-flambda/flambda-backend.git"
-  #   commit: "<oxcaml-commit-hash>"
+  # type: OxCaml handles the different build system automatically (autoconf,
+  # --enable-runtime5, Dune-based make install) and builds a stock OCaml 5.4.0
+  # bootstrap compiler if needed.  Default repo is oxcaml/oxcaml.
+  oxcaml-release:
+    type: OxCaml
+    commit: "068b25529286862035eaf827230f7ffa86659c49"
+    configure_args: ["--enable-poll-insertion", "--enable-multidomain"]
 
   # --- pre-built executable ---
   # ocaml-local:
@@ -347,10 +348,10 @@ suites:
         args: "-ndomains 4 ${RUNNING_BENCH_DIR}/multicore/graph500par/edges.data"
 
   # ---------------------------------------------------------------------------
-  # OxCaml-only benchmarks (require the Jane Street OxCaml compiler fork)
-  # WARNING: These benchmarks use OxCaml-specific APIs (Domain.Safe, prefetch
-  # intrinsics, etc.) and will fail to compile with stock OCaml.  Use an
-  # `oxcaml` runtime (see runtimes section above).
+  # OxCaml-only benchmarks (require a `type: OxCaml` runtime)
+  # These benchmarks use OxCaml-specific APIs (Domain.Safe, prefetch
+  # intrinsics, etc.).  The framework will refuse to build them if the
+  # runtime is not `type: OxCaml` (see runtimes section above).
   # ---------------------------------------------------------------------------
   oxcaml-prefetch:
     type: OCamlOxcamlBenchmarkSuite
@@ -397,9 +398,27 @@ modifiers:
     val: "task-clock,cycles,cache-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses"
 
   # --- GC run parameters (set via OCAMLRUNPARAM) ---
+  #
+  # gc_verbose: Print GC statistics at program exit.
+  #
+  # IMPORTANT: OxCaml reshuffled the GC verbosity flags relative to stock OCaml.
+  # The CAML_GC_MSG_STATS bit that prints minor/major collection counts, heap
+  # size, etc. at exit is:
+  #   - Stock OCaml (4.x / 5.x):  v=0x400   (bit 10)
+  #   - OxCaml:                    v=0x1000  (bit 12)
+  #
+  # OxCaml added new categories (DOMAIN=0x40, STW=0x80, MINOR_HEAP=0x100,
+  # MAJOR_HEAP=0x200, STACKS=0x800) which pushed STATS from 0x400 to 0x1000.
+  # Using the wrong value silently prints nothing (stock) or address-space
+  # reservation messages (OxCaml) instead of GC stats.
+  #
+  # Pick the modifier matching your runtime:
   gc_verbose:
     type: OCamlRunParam
     val: "v=0x400"
+  gc_verbose_oxcaml:
+    type: OCamlRunParam
+    val: "v=0x1000"
   s:
     type: OCamlRunParam
     val: "s={0}"
@@ -409,13 +428,28 @@ modifiers:
   a:
     type: OCamlRunParam
     val: "a={0}"
+  # Runtime events ring buffer size (log2 words per domain).
+  # Default is 16 (64K words).  Increase to reduce "Lost N events" from olly
+  # when running GC-heavy multicore benchmarks.
+  # NOTE: total events file size = max_domains * 2^e * 8 bytes.
+  # With default max_domains=128, e=21 gives a 2GB file which will fail
+  # ftruncate.  Pair with max_domains (d=) to keep it reasonable.
+  re:
+    type: OCamlRunParam
+    val: "e={0}"
+  # Max domains (OCAMLRUNPARAM d=).  Default is 128, but setting it to
+  # the actual number of domains used (main + spawned) reduces the runtime
+  # events file size proportionally.
+  md:
+    type: OCamlRunParam
+    val: "d={0}"
 
 # =============================================================================
 # Benchmarks — which programs to actually run
 # =============================================================================
 # Uncomment / comment suites and individual programs as needed.  The default
-# below enables all stock-OCaml benchmarks.  OxCaml-only and with_packages
-# suites are commented out since they require extra setup.
+# below enables all stock-OCaml benchmarks.  OxCaml-only
+# are commented out since they require extra setup.
 
 benchmarks:
   sandmark-sequential:
@@ -441,24 +475,24 @@ benchmarks:
   sandmark-with-deps:
     - graph500seq
 
-  # Packages are auto-installed by each build script; just uncomment to enable.
-  # sandmark-with-packages:
-  #   - binarytrees5
-  #   - fasta3
-  #   - fasta6
-  #   - mandelbrot6
-  #   - nbody
-  #   - pidigits5
-  #   - spectralnorm2
-  #   - zarith_fact
-  #   - zarith_fib
-  #   - zarith_pi
-  #   - zarith_tak
-  #   - chameneos_redux_lwt
-  #   - thread_ring_lwt_mvar
-  #   - thread_ring_lwt_stream
-  #   - test_decompress
-  #   - ydump
+  Packages are auto-installed by each build script; just uncomment to enable.
+  sandmark-with-packages:
+    - binarytrees5
+    - fasta3
+    - fasta6
+    - mandelbrot6
+    - nbody
+    - pidigits5
+    - spectralnorm2
+    - zarith_fact
+    - zarith_fib
+    - zarith_pi
+    - zarith_tak
+    - chameneos_redux_lwt
+    - thread_ring_lwt_mvar
+    - thread_ring_lwt_stream
+    - test_decompress
+    - ydump
 
   multicore-effects:
     - algorithmic_differentiation
@@ -513,7 +547,7 @@ benchmarks:
   graph500par:
     - kernel1_run_multicore
 
-  # OxCaml-only — requires an `oxcaml` runtime; will fail with stock OCaml.
+  # OxCaml-only — requires a `type: OxCaml` runtime; will error otherwise.
   # oxcaml-prefetch:
   #   - oxcaml_prefetch
 
@@ -526,41 +560,8 @@ benchmarks:
 
 configs:
   - "ocaml-release|time_stats|perf_grp1|gc_verbose"
+  # - "oxcaml-release|time_stats|perf_grp1|gc_verbose_oxcaml|re-23|md-9"
 
 config_sweep:
   s: [32768, 65536, 131072, 262144, 524288, 1048576, 2097152]
   o: [40, 60, 80, 100, 120, 150, 200]
-
-# =============================================================================
-# Notes from previous sweep runs
-# =============================================================================
-# Observed from gc-sweep-logs/obelisk-2026-02-24-Tue-230709 (single run per point):
-# 1) Increasing o reduces GC frequency and runtime, but raises peak memory.
-#    - At s=262144: o=10 -> 80
-#      minor_collections: 107 -> 91 (-15%)
-#      major_collections: 47 -> 16 (-66%)
-#      elapsed: 33.11s -> 19.58s (-41%)
-#      top_heap_words: 14.08M -> 16.05M (+14%)
-#      maxresident: 118640k -> 133992k (+13%)
-# 2) Increasing s also reduces GC frequency, mostly minor collections.
-#    - At o=80: s=262144 -> 524288
-#      minor_collections: 91 -> 52 (-43%)
-#      major_collections: 16 -> 14 (-12.5%)
-#      elapsed: 19.58s -> 18.98s (-3%)
-#      maxresident: 133992k -> 138864k (+3.6%)
-# 3) At higher s, pushing o further (80 -> 120) gives small extra GC/runtime wins,
-#    but a large memory increase:
-#      major_collections: 14 -> 12, elapsed: 18.98s -> 17.31s,
-#      maxresident: 138864k -> 164804k.
-# 4) promoted_words and promotion_rate stay close across runs (~0.926-0.934),
-#    suggesting the survival profile of this workload is mostly unchanged.
-# 5) compactions stayed 0 and forced_major_collections stayed 1 in all runs.
-#
-# Data collection:
-#   CSV summary has been generated at:
-#   gc-sweep-logs/obelisk-2026-02-24-Tue-230709/gc_summary.csv
-#   (fields include s,o,minor/major collections, promoted_words, top_heap_words,
-#   maxresident_kb, elapsed_s, etc.)
-#
-# Plotting:
-#   python3 scripts/plot_gc_sweep.py gc-sweep-logs/obelisk-2026-02-24-Tue-230709

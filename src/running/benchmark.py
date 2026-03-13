@@ -174,6 +174,18 @@ class Benchmark(object):
             logging.warning("No runtime events file found in %s; olly will not attach", tmpdir)
             olly_p = None
         else:
+            # If the actual OCaml PID differs from bench.pid (e.g. /usr/bin/time
+            # forked a child), re-attach perf to the real benchmark PID so that
+            # hardware counters track the OCaml process, not the idle wrapper.
+            if ocaml_pid != pid:
+                logging.info("OCaml PID %d differs from wrapper PID %d; re-attaching perf", ocaml_pid, pid)
+                perf_p.kill()
+                perf_p.wait()
+                perf_cmd_new = ["perf", "stat", "--inherit", "-p", str(ocaml_pid), "-o", perf_output]
+                if modifier.perf_events:
+                    perf_cmd_new.extend(["-e", ",".join(modifier.perf_events)])
+                perf_p = subprocess.Popen(perf_cmd_new, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
             olly_p = subprocess.Popen(
                 ["olly", "gc-stats", "--attach", "{}:{}".format(tmpdir, ocaml_pid)],
                 stdout=subprocess.PIPE,

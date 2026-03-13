@@ -376,6 +376,50 @@ class OxCaml(OCaml):
     DEFAULT_REPO = "https://github.com/oxcaml/oxcaml.git"
     DEFAULT_BOOTSTRAP_VERSION = "5.4.0"
 
+    OPAM_SWITCH_NAME = "running-ng-oxcaml-build"
+
+    _opam_bin: Optional[str] = None
+
+    @staticmethod
+    def _find_opam() -> str:
+        """Find the opam binary compatible with the current ~/.opam directory.
+
+        On some systems an older opam (e.g. 2.1) shadows a newer one on PATH.
+        We prefer the newest available opam to avoid "Refusing write access"
+        errors when ~/.opam was initialised by a newer version.
+        """
+        if OxCaml._opam_bin is not None:
+            return OxCaml._opam_bin
+
+        import shutil
+        candidates = []
+        seen: set = set()
+        search = list(os.environ.get("PATH", "").split(os.pathsep))
+        for extra in ["/usr/local/bin", "/usr/bin", "/bin"]:
+            if extra not in search:
+                search.append(extra)
+        for d in search:
+            p = os.path.join(d, "opam")
+            rp = os.path.realpath(p)
+            if rp in seen or not os.path.isfile(p) or not os.access(p, os.X_OK):
+                continue
+            seen.add(rp)
+            try:
+                ver = subprocess.run(
+                    [p, "--version"], capture_output=True, text=True
+                ).stdout.strip()
+                candidates.append((p, ver))
+            except Exception:
+                continue
+        if not candidates:
+            OxCaml._opam_bin = shutil.which("opam") or "opam"
+            return OxCaml._opam_bin
+        # Sort by version descending and pick the newest.
+        candidates.sort(key=lambda pv: [int(x) for x in pv[1].split(".")], reverse=True)
+        OxCaml._opam_bin = candidates[0][0]
+        logging.info("Using opam: %s (version %s)", OxCaml._opam_bin, candidates[0][1])
+        return OxCaml._opam_bin
+
     @staticmethod
     def _ensure_bootstrap_compiler(kwargs: Dict[str, Any]) -> Path:
         """Build or locate a stock OCaml compiler for bootstrapping OxCaml.
@@ -395,6 +439,113 @@ class OxCaml(OCaml):
         return bootstrap_exe.parent
 
     @staticmethod
+    def _ensure_opam_switch(bootstrap_bin: Path) -> Dict[str, str]:
+        """Create (or reuse) a dedicated opam switch for OxCaml builds.
+
+        Uses the bootstrap OCaml compiler so that build tool versions are
+        isolated from the user's active switch.  Returns an environ dict
+        that activates the switch.
+        """
+        opam = OxCaml._find_opam()
+        switch = OxCaml.OPAM_SWITCH_NAME
+        bootstrap_path_env = "{}:{}".format(bootstrap_bin, os.environ.get("PATH", ""))
+
+        # Check whether the switch already exists.
+        result = subprocess.run(
+            [opam, "switch", "list", "--short"],
+            capture_output=True, text=True,
+        )
+        existing_switches = result.stdout.split()
+
+        if switch not in existing_switches:
+            logging.info("Creating dedicated opam switch '%s' for OxCaml builds", switch)
+            OCaml._run_checked([
+                opam, "switch", "create", switch,
+                "--packages=ocaml-system",
+                "--no-install",
+                "--yes",
+            ], env=dict(os.environ, PATH=bootstrap_path_env))
+        else:
+            logging.info("Reusing existing opam switch '%s'", switch)
+
+        # Obtain the switch environment.
+        # opam env outputs lines like: KEY='VALUE'; export KEY;
+        result = subprocess.run(
+            [opam, "env", "--switch={}".format(switch), "--set-switch"],
+            capture_output=True, text=True, check=True,
+        )
+        env = dict(os.environ)
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if "=" not in line or "export" not in line:
+                continue
+            part = line.split(";")[0]  # KEY='VALUE'
+            key, _, value = part.partition("=")
+            env[key.strip()] = value.strip().strip("'\"")
+
+        # Ensure bootstrap compiler is first on PATH so opam uses it.
+        env["PATH"] = "{}:{}".format(bootstrap_bin, env.get("PATH", ""))
+
+        return env
+
+    @staticmethod
+    def _install_opam_deps(source_dir: Path, env: Dict[str, str]):
+        """Install OxCaml build deps from the repo's opam file into the switch.
+
+        Reads the oxcaml-dev.opam file to find pinned dependency versions
+        (e.g. menhir {= "20231231"}) and installs them at the exact required
+        version.  Also ensures dune is installed.
+        """
+        opam = OxCaml._find_opam()
+        switch = OxCaml.OPAM_SWITCH_NAME
+        opam_file = source_dir / "oxcaml-dev.opam"
+        deps_to_install: List[str] = []
+
+        if opam_file.exists():
+            content = opam_file.read_text()
+            # Match lines like: "menhir" {= "20231231"}
+            for m in re.finditer(r'"(\w[\w-]*?)"\s*\{=\s*"([^"]+)"\}', content):
+                pkg, ver = m.group(1), m.group(2)
+                deps_to_install.append("{}.{}".format(pkg, ver))
+                logging.info("OxCaml opam file requires %s = %s", pkg, ver)
+
+        # Always ensure dune is present.
+        if not any(d.startswith("dune.") or d == "dune" for d in deps_to_install):
+            deps_to_install.append("dune")
+
+        for dep in deps_to_install:
+            # dep is either "pkg.ver" or "pkg"
+            pkg_name = dep.split(".")[0]
+            check = subprocess.run(
+                [opam, "list", "--installed", "--short", pkg_name,
+                 "--switch={}".format(switch)],
+                capture_output=True, text=True,
+            )
+            installed = check.stdout.strip().split()
+            if pkg_name in installed:
+                # Check if the installed version matches.
+                if "." in dep:
+                    ver_check = subprocess.run(
+                        [opam, "list", "--installed", dep.split(".")[0],
+                         "--switch={}".format(switch), "--columns=version", "--short"],
+                        capture_output=True, text=True,
+                    )
+                    installed_ver = ver_check.stdout.strip()
+                    required_ver = dep.split(".", 1)[1]
+                    if installed_ver == required_ver:
+                        logging.info("%s already installed at correct version %s", pkg_name, installed_ver)
+                        continue
+                    logging.info("Reinstalling %s: have %s, need %s", pkg_name, installed_ver, required_ver)
+                else:
+                    logging.info("%s already installed", pkg_name)
+                    continue
+
+            logging.info("Installing %s in opam switch '%s'", dep, switch)
+            OCaml._run_checked([
+                opam, "install", dep, "--switch={}".format(switch), "--yes",
+            ], env=env)
+
+    @staticmethod
     def _resolve_or_build_executable(kwargs: Dict[str, Any]) -> Path:
         # Default repo to OxCaml if not specified.
         if "repo" not in kwargs:
@@ -408,10 +559,12 @@ class OxCaml(OCaml):
         if not isinstance(configure_args, list):
             raise TypeError("OxCaml runtime configure_args must be a list")
 
-        # Ensure a suitable bootstrap compiler (OCaml 5.4.x) is on PATH.
+        # Ensure a suitable bootstrap compiler (OCaml 5.4.x) is on PATH and
+        # build inside a dedicated opam switch so that menhir/dune versions
+        # are compatible with OxCaml (not leaked from the user's switch).
         bootstrap_bin = OxCaml._ensure_bootstrap_compiler(kwargs)
-        build_env = dict(os.environ)
-        build_env["PATH"] = "{}:{}".format(bootstrap_bin, build_env.get("PATH", ""))
+        build_env = OxCaml._ensure_opam_switch(bootstrap_bin)
+        OxCaml._install_opam_deps(source_dir, build_env)
         logging.info("OxCaml bootstrap compiler: %s", bootstrap_bin)
 
         # OxCaml needs autoconf to generate ./configure from configure.ac.
