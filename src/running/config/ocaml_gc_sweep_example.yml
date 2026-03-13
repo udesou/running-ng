@@ -475,7 +475,7 @@ benchmarks:
   sandmark-with-deps:
     - graph500seq
 
-  Packages are auto-installed by each build script; just uncomment to enable.
+  # Packages are auto-installed by each build script
   sandmark-with-packages:
     - binarytrees5
     - fasta3
