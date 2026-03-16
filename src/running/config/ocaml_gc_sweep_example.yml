@@ -5,6 +5,12 @@ minheap_multiplier: 1.0
 heap_range: 6
 spread_factor: 1
 
+# plugins:
+#   zulip:
+#     type: Zulip
+#     request:
+#       type: private
+#       to: [361443]
 
 # =============================================================================
 # Runtimes
@@ -488,11 +494,12 @@ benchmarks:
     - zarith_fib
     - zarith_pi
     - zarith_tak
-    - chameneos_redux_lwt
-    - thread_ring_lwt_mvar
-    - thread_ring_lwt_stream
+    # --- OxCaml-incompatible (commented out) ---
+    # chameneos_redux_lwt     — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
+    # thread_ring_lwt_mvar    — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
+    # thread_ring_lwt_stream  — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
     - test_decompress
-    - ydump
+    # ydump                   — yojson: OxCaml locality type error (write_intlit Buffer.t @ local)
 
   multicore-effects:
     - algorithmic_differentiation
@@ -513,7 +520,7 @@ benchmarks:
     - test_spsc_queue_pingpong_parallel
 
   multicore-numerical:
-    - mandelbrot6_multicore
+    # mandelbrot6_multicore  — OxCaml type error: output_bytes `bytes @ local` vs Array.iter
     - nbody_multicore
     - floyd_warshall_multicore
     - game_of_life_multicore
@@ -548,8 +555,8 @@ benchmarks:
     - kernel1_run_multicore
 
   # OxCaml-only — requires a `type: OxCaml` runtime; will error otherwise.
-  # oxcaml-prefetch:
-  #   - oxcaml_prefetch
+  oxcaml-prefetch:
+    - oxcaml_prefetch
 
 # =============================================================================
 # Configs & Sweep
@@ -559,9 +566,9 @@ benchmarks:
 # NOT already present in the base config.
 
 configs:
-  - "ocaml-release|time_stats|perf_grp1|gc_verbose"
+  - "oxcaml-release|time_stats|perf_grp1|gc_verbose_oxcaml|re-23|md-9"
   # - "oxcaml-release|time_stats|perf_grp1|gc_verbose_oxcaml|re-23|md-9"
 
 config_sweep:
-  s: [32768, 65536, 131072, 262144, 524288, 1048576, 2097152]
-  o: [40, 60, 80, 100, 120, 150, 200]
+  s: [32768] #, 65536, 131072, 262144, 524288, 1048576, 2097152]
+  o: [40] #, 60, 80, 100, 120, 150, 200]

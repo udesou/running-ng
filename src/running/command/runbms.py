@@ -335,18 +335,26 @@ def run_one_benchmark(
             log_filename = get_filename(bm, hfac, size, c)
             logging.debug("Running with log filename {}".format(log_filename))
             runtime, _ = parse_config_str(configuration, c)
-            if is_dry_run():
-                output, exit_status = run_benchmark_with_config(
-                    c, bm, runbms_dir, size, None
-                )
-                assert exit_status is SubprocessrExit.Dryrun
-            else:
-                fd: BinaryIO
-                with (log_dir / log_filename).open("ab") as fd:
+            try:
+                if is_dry_run():
                     output, exit_status = run_benchmark_with_config(
-                        c, bm, runbms_dir, size, fd
+                        c, bm, runbms_dir, size, None
                     )
-                ever_ran[j] = True
+                    assert exit_status is SubprocessrExit.Dryrun
+                else:
+                    fd: BinaryIO
+                    with (log_dir / log_filename).open("ab") as fd:
+                        output, exit_status = run_benchmark_with_config(
+                            c, bm, runbms_dir, size, fd
+                        )
+                    ever_ran[j] = True
+            except Exception as e:
+                logging.warning(
+                    "Benchmark %s config %s failed: %s — skipping.",
+                    bm_name, c, e,
+                )
+                print("X", end="", flush=True)
+                continue
             if runtime.is_oom(output):
                 oomed_count[c] += 1
             if exit_status is SubprocessrExit.Timeout:
@@ -505,6 +513,7 @@ def run(args):
         for c in configs:
             runtime_by_config[c], _ = parse_config_str(configuration, c)
         prepared: Set[Tuple[str, str, str]] = set()
+        build_failed: Set[Tuple[str, str, str]] = set()
         for suite_name, bms in benchmarks.items():
             _ = suites[suite_name]
             for bm in bms:
@@ -513,8 +522,22 @@ def run(args):
                     key = (suite_name, bm.name, runtime.name)
                     if key in prepared:
                         continue
-                    bm.prepare(runtime)
+                    try:
+                        bm.prepare(runtime)
+                    except Exception as e:
+                        logging.warning(
+                            "Build failed for %s/%s with runtime %s: %s — skipping.",
+                            suite_name, bm.name, runtime.name, e,
+                        )
+                        build_failed.add(key)
+                        continue
                     prepared.add(key)
+
+        if build_failed:
+            print("\n--- Build failures ({}) ---".format(len(build_failed)))
+            for suite_name, bm_name, rt_name in sorted(build_failed):
+                print("  SKIP {}/{} [{}]".format(suite_name, bm_name, rt_name))
+            print("---\nContinuing with remaining benchmarks.\n")
 
         def run_hfacs(hfacs):
             logging.info("hfacs: {}".format(
