@@ -453,9 +453,10 @@ modifiers:
 # =============================================================================
 # Benchmarks — which programs to actually run
 # =============================================================================
-# Uncomment / comment suites and individual programs as needed.  The default
-# below enables all stock-OCaml benchmarks.  OxCaml-only
-# are commented out since they require extra setup.
+# 72 active benchmarks, compatible with both oxcaml-release and ocaml-release.
+# 5 benchmarks are commented out due to OxCaml locality type errors in
+# upstream packages (lwt, yojson) or benchmark source (mandelbrot6_multicore);
+# these build fine with stock OCaml — see OXCAML_INCOMPATIBILITIES.md.
 
 benchmarks:
   sandmark-sequential:
@@ -494,11 +495,11 @@ benchmarks:
     - zarith_fib
     - zarith_pi
     - zarith_tak
-    # --- OxCaml-incompatible (commented out) ---
+    - test_decompress
+    # --- OxCaml-incompatible (build OK with stock OCaml) ---
     # chameneos_redux_lwt     — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
     # thread_ring_lwt_mvar    — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
     # thread_ring_lwt_stream  — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
-    - test_decompress
     # ydump                   — yojson: OxCaml locality type error (write_intlit Buffer.t @ local)
 
   multicore-effects:
@@ -520,6 +521,7 @@ benchmarks:
     - test_spsc_queue_pingpong_parallel
 
   multicore-numerical:
+    # --- OxCaml-incompatible (builds OK with stock OCaml) ---
     # mandelbrot6_multicore  — OxCaml type error: output_bytes `bytes @ local` vs Array.iter
     - nbody_multicore
     - floyd_warshall_multicore
@@ -567,7 +569,7 @@ benchmarks:
 
 configs:
   - "oxcaml-release|time_stats|perf_grp1|gc_verbose_oxcaml|re-23|md-9"
-  # - "oxcaml-release|time_stats|perf_grp1|gc_verbose_oxcaml|re-23|md-9"
+  - "ocaml-release|time_stats|perf_grp1|gc_verbose|re-23|md-9"
 
 config_sweep:
   s: [32768] #, 65536, 131072, 262144, 524288, 1048576, 2097152]
