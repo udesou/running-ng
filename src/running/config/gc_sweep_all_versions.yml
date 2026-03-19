@@ -562,6 +562,16 @@ suites:
       test_sched:
         path: "${RUNNING_BENCH_DIR}/with_packages/test_sched"
         args: "2 1000"
+      owl_gc:
+        path: "${RUNNING_BENCH_DIR}/with_packages/owl"
+        args: ""
+      contrast:
+        path: "${RUNNING_BENCH_DIR}/with_packages/sauvola"
+        args: "${RUNNING_BENCH_DIR}/with_packages/sauvola/example2_small.ppm /tmp/sauvola_out"
+      # OxCaml-incompatible (lwt.unix locality error)
+      test_lwt:
+        path: "${RUNNING_BENCH_DIR}/with_packages/valet"
+        args: "100"
 
   multicore-effects:
     type: OCamlMulticoreBenchmarkSuite
@@ -969,6 +979,9 @@ benchmarks:
     - thread_ring_lwt_stream
     - ydump
     - test_sched
+    - owl_gc
+    - contrast
+    - test_lwt
 
   multicore-effects:
     - algorithmic_differentiation
