@@ -118,9 +118,386 @@ suites:
       markbench:
         path: "${RUNNING_BENCH_DIR}/simple/markbench"
         args: ""
+      minilight:
+        path: "${RUNNING_BENCH_DIR}/simple/minilight"
+        args: "${RUNNING_BENCH_DIR}/simple/minilight/roomfront.ml.txt"
       sequence_cps:
         path: "${RUNNING_BENCH_DIR}/simple/sequence"
         args: "10000"
+      # --- simple/stdlib ---
+      array_bench_fold:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "array_bench.build.sh"
+        args: "array_fold 1000 100000"
+      array_bench_forall:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "array_bench.build.sh"
+        args: "array_forall 1000 100000"
+      array_bench_iter:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "array_bench.build.sh"
+        args: "array_iter 1000 100000"
+      bytes_bench_get:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_get 100000000"
+      bytes_bench_sub:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_sub 100000000"
+      bytes_bench_blit:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_blit 2500000"
+      bytes_bench_concat:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_concat 2000000"
+      bytes_bench_iter:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_iter 1000000"
+      bytes_bench_map:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_map 1000000"
+      bytes_bench_trim:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_trim 2500000"
+      bytes_bench_index:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_index 10000000"
+      bytes_bench_contains:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_contains 100000000"
+      bytes_bench_uppercase_ascii:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "bytes_bench.build.sh"
+        args: "bytes_uppercase_ascii 1000000"
+      string_bench_get:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_get 50000000"
+      string_bench_sub:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_sub 50000000"
+      string_bench_blit:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_blit 25000000"
+      string_bench_concat:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_concat 20000000"
+      string_bench_iter:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_iter 1000000"
+      string_bench_map:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_map 20000000"
+      string_bench_trim:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_trim 1000000"
+      string_bench_index:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_index 25000000"
+      string_bench_contains:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_contains 25000000"
+      string_bench_uppercase_ascii:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_uppercase_ascii 1000000"
+      string_bench_split_on_char:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_split_on_char 500000"
+      string_bench_compare:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_compare 10000"
+      string_bench_equal:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "string_bench.build.sh"
+        args: "string_equal 25000"
+      map_bench_iter:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "map_bench.build.sh"
+        args: "map_iter 10000"
+      map_bench_add:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "map_bench.build.sh"
+        args: "map_add 1000000"
+      map_bench_add_duplicate:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "map_bench.build.sh"
+        args: "map_add_duplicate 1000000"
+      map_bench_remove:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "map_bench.build.sh"
+        args: "map_remove 1000000"
+      map_bench_fold:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "map_bench.build.sh"
+        args: "map_fold 10000"
+      map_bench_for_all:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "map_bench.build.sh"
+        args: "map_for_all 10000"
+      map_bench_find:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "map_bench.build.sh"
+        args: "map_find 1000000"
+      map_bench_map:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "map_bench.build.sh"
+        args: "map_map 10000"
+      set_bench_fold:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "set_bench.build.sh"
+        args: "set_fold 1000000"
+      set_bench_mem:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "set_bench.build.sh"
+        args: "set_mem 50000000"
+      set_bench_add_rem:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "set_bench.build.sh"
+        args: "set_add_rem 20000000"
+      stack_bench_fold:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "stack_bench.build.sh"
+        args: "stack_fold 2500000"
+      stack_bench_push_pop:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "stack_bench.build.sh"
+        args: "stack_push_pop 100000000"
+      hashtbl_bench_int_replace1:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "int_replace1 10000"
+      hashtbl_bench_int_find1:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "int_find1 20000"
+      hashtbl_bench_int_replace2:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "int_replace2 100000"
+      hashtbl_bench_int_find2:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "int_find2 300000"
+      hashtbl_bench_caml_hash_int:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "caml_hash_int 200000"
+      hashtbl_bench_caml_hash_tuple:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "caml_hash_tuple 100000"
+      hashtbl_bench_iter:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "hashtbl_iter 200000"
+      hashtbl_bench_fold:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "hashtbl_fold 200000"
+      hashtbl_bench_add_resizing:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "hashtbl_add_resizing 4000000"
+      hashtbl_bench_add_sized:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "hashtbl_add_sized 6000000"
+      hashtbl_bench_add_duplicate:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "hashtbl_add_duplicate 2000000"
+      hashtbl_bench_remove:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "hashtbl_remove 4000000"
+      hashtbl_bench_find:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "hashtbl_find 6000000"
+      hashtbl_bench_filter_map:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "hashtbl_bench.build.sh"
+        args: "hashtbl_filter_map 100000"
+      pervasives_bench_compare_lists:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "pervasives_bench.build.sh"
+        args: "pervasives_compare_lists 100000000"
+      pervasives_bench_compare_ints:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "pervasives_bench.build.sh"
+        args: "pervasives_compare_ints 1000000000"
+      pervasives_bench_compare_floats:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "pervasives_bench.build.sh"
+        args: "pervasives_compare_floats 200000000"
+      pervasives_bench_compare_strings:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "pervasives_bench.build.sh"
+        args: "pervasives_compare_strings 20000000"
+      pervasives_bench_equal_lists:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "pervasives_bench.build.sh"
+        args: "pervasives_equal_lists 1000000000"
+      pervasives_bench_equal_ints:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "pervasives_bench.build.sh"
+        args: "pervasives_equal_ints 1000000000"
+      pervasives_bench_equal_floats:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "pervasives_bench.build.sh"
+        args: "pervasives_equal_floats 1000000000"
+      pervasives_bench_equal_strings:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "pervasives_bench.build.sh"
+        args: "pervasives_equal_strings 20000000"
+      str_bench_regexp:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "str_bench.build.sh"
+        args: "str_regexp 1000000"
+      str_bench_string_match:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "str_bench.build.sh"
+        args: "str_string_match 50000000"
+      str_bench_search_forward:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "str_bench.build.sh"
+        args: "str_search_forward 5000000"
+      str_bench_string_partial_match:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "str_bench.build.sh"
+        args: "str_string_partial_match 25000000"
+      str_bench_global_replace:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "str_bench.build.sh"
+        args: "str_global_replace 1000000"
+      str_bench_split:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "str_bench.build.sh"
+        args: "str_split 2000000"
+      big_array_bench_int_rev:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "big_array_bench.build.sh"
+        args: "big_array_int_rev 1024 50000"
+      big_array_bench_int32_rev:
+        path: "${RUNNING_BENCH_DIR}/simple/stdlib"
+        build_script: "big_array_bench.build.sh"
+        args: "big_array_int32_rev 1024 50000"
+      # --- simple/simple-tests ---
+      alloc:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        args: "200_000"
+      lists_int_small:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "lists.build.sh"
+        args: "int 1"
+      lists_int_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "lists.build.sh"
+        args: "int 100000"
+      lists_float_small:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "lists.build.sh"
+        args: "float 1"
+      lists_float_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "lists.build.sh"
+        args: "float 100000"
+      lists_string_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "lists.build.sh"
+        args: "string 100000"
+      lists_int_array_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "lists.build.sh"
+        args: "int-array 100000"
+      stress_small:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "stress.build.sh"
+        args: "10000 10"
+      stress_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "stress.build.sh"
+        args: "100000 100"
+      lazylist_small:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "lazylist.build.sh"
+        args: "100000 100"
+      lazylist_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "lazylist.build.sh"
+        args: "10000 1000"
+      lazy_primes:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        args: "10000"
+      morestacks:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        args: "1_000"
+      stacks_ints_small:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "stacks.build.sh"
+        args: "100000 ints-small"
+      stacks_ints_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "stacks.build.sh"
+        args: "20000 ints-large"
+      stacks_floats_small:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "stacks.build.sh"
+        args: "100000 floats-small"
+      stacks_floats_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "stacks.build.sh"
+        args: "20000 floats-large"
+      finalise_10:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "finalise.build.sh"
+        args: "10"
+      finalise_50:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "finalise.build.sh"
+        args: "50"
+      finalise_100:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "finalise.build.sh"
+        args: "100"
+      weakretain_25_small:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "weakretain.build.sh"
+        args: "25 1000"
+      weakretain_25_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "weakretain.build.sh"
+        args: "25 10000000"
+      weakretain_75_small:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "weakretain.build.sh"
+        args: "75 1000"
+      weakretain_75_large:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        build_script: "weakretain.build.sh"
+        args: "75 10000000"
+      weak_htbl:
+        path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
+        args: "1000"
 
   # ---------------------------------------------------------------------------
   # with_deps/ — benchmarks needing dune multi-library builds or generated data
@@ -132,6 +509,20 @@ suites:
       graph500seq:
         path: "${RUNNING_BENCH_DIR}/with_deps/graph500seq"
         args: "${RUNNING_BENCH_DIR}/with_deps/graph500seq/edges.data"
+      # --- benchmarksgame (fasta-generated input data; no external packages) ---
+      # build.deps.sh generates input25000000.txt and input5000000.txt via fasta3 on first build.
+      knucleotide:
+        path: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame"
+        args: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame/input25000000.txt"
+      knucleotide3:
+        path: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame"
+        args: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame/input25000000.txt"
+      revcomp2:
+        path: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame"
+        args: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame/input25000000.txt"
+      regexredux2:
+        path: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame"
+        args: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame/input5000000.txt"
 
   # ---------------------------------------------------------------------------
   # with_packages/ — benchmarks needing external opam packages
@@ -194,6 +585,9 @@ suites:
       ydump:
         path: "${RUNNING_BENCH_DIR}/with_packages/yojson"
         args: "-c ${RUNNING_BENCH_DIR}/with_packages/yojson/sample.json"
+      test_sched:
+        path: "${RUNNING_BENCH_DIR}/with_packages/test_sched"
+        args: "2 1000"
 
   # ---------------------------------------------------------------------------
   # multicore/ — OCaml 5+ benchmarks (effects, domains, domainslib)
@@ -223,6 +617,18 @@ suites:
       rec_seq_ack:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
         args: ""
+      effect_throughput_val:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: "1_000_000"
+      effect_throughput_perform:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: "1_000_000"
+      effect_throughput_perform_drop:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: "1_000_000"
+      eratosthenes:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: "1000"
 
   multicore-structures:
     type: OCamlMulticoreBenchmarkSuite
@@ -353,12 +759,43 @@ suites:
         path: "${RUNNING_BENCH_DIR}/multicore/graph500par"
         args: "-ndomains 4 ${RUNNING_BENCH_DIR}/multicore/graph500par/edges.data"
 
+  mpl:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 300
+    programs:
+      primes:
+        path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
+        args: "-N 100000000 -procs 4"
+      msort_ints:
+        path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
+        args: "-N 10000000 -procs 4"
+      msort_strings:
+        path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
+        args: "-f ${RUNNING_BENCH_DIR}/with_deps/mpl/inputs/words64.txt -procs 4"
+      tokens:
+        path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
+        args: "-f ${RUNNING_BENCH_DIR}/with_deps/mpl/inputs/words.txt --no-output -procs 4"
+      raytracer:
+        path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
+        args: "-n 2000 -procs 4"
+
   # ---------------------------------------------------------------------------
   # OxCaml-only benchmarks (require a `type: OxCaml` runtime)
   # These benchmarks use OxCaml-specific APIs (Domain.Safe, prefetch
   # intrinsics, etc.).  The framework will refuse to build them if the
   # runtime is not `type: OxCaml` (see runtimes section above).
   # ---------------------------------------------------------------------------
+  multicore-simple-tests:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 120
+    programs:
+      alloc_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/alloc_multicore"
+        args: "2 200_000"
+      pingpong_multicore:
+        path: "${RUNNING_BENCH_DIR}/multicore/pingpong_multicore"
+        args: "3 1 1000000"
+
   oxcaml-prefetch:
     type: OCamlOxcamlBenchmarkSuite
     timeout: 30
@@ -453,16 +890,15 @@ modifiers:
 # =============================================================================
 # Benchmarks — which programs to actually run
 # =============================================================================
-# 72 active benchmarks, compatible with both oxcaml-release and ocaml-release.
-# 5 benchmarks are commented out due to OxCaml locality type errors in
+# Active benchmarks: compatible with both oxcaml-release and ocaml-release.
+# Some benchmarks are commented out due to OxCaml locality type errors in
 # upstream packages (lwt, yojson) or benchmark source (mandelbrot6_multicore);
-# these build fine with stock OCaml — see OXCAML_INCOMPATIBILITIES.md.
+# these build fine with stock OCaml — see BENCHMARK_INCOMPATIBILITIES.md.
 
 benchmarks:
   sandmark-sequential:
     - almabench
     - bdd
-    - binarytrees
     - hamming
     - soli
     - kb
@@ -477,10 +913,111 @@ benchmarks:
     - levinson_durbin
     - naive_multilayer
     - markbench
+    - minilight
     - sequence_cps
+    # simple/stdlib
+    - array_bench_fold
+    - array_bench_forall
+    - array_bench_iter
+    - bytes_bench_get
+    - bytes_bench_sub
+    - bytes_bench_blit
+    - bytes_bench_concat
+    - bytes_bench_iter
+    - bytes_bench_map
+    - bytes_bench_trim
+    - bytes_bench_index
+    - bytes_bench_contains
+    - bytes_bench_uppercase_ascii
+    - string_bench_get
+    - string_bench_sub
+    - string_bench_blit
+    - string_bench_concat
+    - string_bench_iter
+    - string_bench_map
+    - string_bench_trim
+    - string_bench_index
+    - string_bench_contains
+    - string_bench_uppercase_ascii
+    - string_bench_split_on_char
+    - string_bench_compare
+    - string_bench_equal
+    - map_bench_iter
+    - map_bench_add
+    - map_bench_add_duplicate
+    - map_bench_remove
+    - map_bench_fold
+    - map_bench_for_all
+    - map_bench_find
+    - map_bench_map
+    - set_bench_fold
+    - set_bench_mem
+    - set_bench_add_rem
+    - stack_bench_fold
+    - stack_bench_push_pop
+    - hashtbl_bench_int_replace1
+    - hashtbl_bench_int_find1
+    - hashtbl_bench_int_replace2
+    - hashtbl_bench_int_find2
+    - hashtbl_bench_caml_hash_int
+    - hashtbl_bench_caml_hash_tuple
+    - hashtbl_bench_iter
+    - hashtbl_bench_fold
+    - hashtbl_bench_add_resizing
+    - hashtbl_bench_add_sized
+    - hashtbl_bench_add_duplicate
+    - hashtbl_bench_remove
+    - hashtbl_bench_find
+    - hashtbl_bench_filter_map
+    - pervasives_bench_compare_lists
+    - pervasives_bench_compare_ints
+    - pervasives_bench_compare_floats
+    - pervasives_bench_compare_strings
+    - pervasives_bench_equal_lists
+    - pervasives_bench_equal_ints
+    - pervasives_bench_equal_floats
+    - pervasives_bench_equal_strings
+    - str_bench_regexp
+    - str_bench_string_match
+    - str_bench_search_forward
+    - str_bench_string_partial_match
+    - str_bench_global_replace
+    - str_bench_split
+    - big_array_bench_int_rev
+    - big_array_bench_int32_rev
+    # simple/simple-tests
+    - alloc
+    - lists_int_small
+    - lists_int_large
+    - lists_float_small
+    - lists_float_large
+    - lists_string_large
+    - lists_int_array_large
+    - stress_small
+    - stress_large
+    - lazylist_small
+    - lazylist_large
+    - lazy_primes
+    - morestacks
+    - stacks_ints_small
+    - stacks_ints_large
+    - stacks_floats_small
+    - stacks_floats_large
+    - finalise_10
+    - finalise_50
+    - finalise_100
+    - weakretain_25_small
+    - weakretain_25_large
+    - weakretain_75_small
+    - weakretain_75_large
+    - weak_htbl
 
   sandmark-with-deps:
     - graph500seq
+    - knucleotide
+    - knucleotide3
+    - revcomp2
+    - regexredux2
 
   # Packages are auto-installed by each build script
   sandmark-with-packages:
@@ -496,6 +1033,7 @@ benchmarks:
     - zarith_pi
     - zarith_tak
     - test_decompress
+    - test_sched
     # --- OxCaml-incompatible (build OK with stock OCaml) ---
     # chameneos_redux_lwt     — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
     # thread_ring_lwt_mvar    — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
@@ -510,6 +1048,10 @@ benchmarks:
     - rec_seq_tak
     - rec_eff_ack
     - rec_seq_ack
+    - effect_throughput_val
+    - effect_throughput_perform
+    - effect_throughput_perform_drop
+    - eratosthenes
 
   multicore-structures:
     - test_queue_sequential
@@ -555,6 +1097,17 @@ benchmarks:
 
   graph500par:
     - kernel1_run_multicore
+
+  mpl:
+    - primes
+    - msort_ints
+    - msort_strings
+    - tokens
+    - raytracer
+
+  multicore-simple-tests:
+    - alloc_multicore
+    - pingpong_multicore
 
   # OxCaml-only — requires a `type: OxCaml` runtime; will error otherwise.
   oxcaml-prefetch:
