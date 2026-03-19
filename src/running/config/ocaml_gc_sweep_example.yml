@@ -498,6 +498,31 @@ suites:
       weak_htbl:
         path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
         args: "1000"
+      # --- simple/capi (OCaml→C FFI call overhead) ---
+      capi_no_args_alloc:
+        path: "${RUNNING_BENCH_DIR}/simple/capi"
+        build_script: "capi.build.sh"
+        args: "test_no_args_alloc 10000000"
+      capi_no_args_noalloc:
+        path: "${RUNNING_BENCH_DIR}/simple/capi"
+        build_script: "capi.build.sh"
+        args: "test_no_args_noalloc 10000000"
+      capi_few_args_alloc:
+        path: "${RUNNING_BENCH_DIR}/simple/capi"
+        build_script: "capi.build.sh"
+        args: "test_few_args_alloc 10000000"
+      capi_few_args_noalloc:
+        path: "${RUNNING_BENCH_DIR}/simple/capi"
+        build_script: "capi.build.sh"
+        args: "test_few_args_noalloc 10000000"
+      capi_many_args_alloc:
+        path: "${RUNNING_BENCH_DIR}/simple/capi"
+        build_script: "capi.build.sh"
+        args: "test_many_args_alloc 10000000"
+      capi_many_args_noalloc:
+        path: "${RUNNING_BENCH_DIR}/simple/capi"
+        build_script: "capi.build.sh"
+        args: "test_many_args_noalloc 10000000"
 
   # ---------------------------------------------------------------------------
   # with_deps/ — benchmarks needing dune multi-library builds or generated data
@@ -639,6 +664,24 @@ suites:
       eratosthenes:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
         args: "1000"
+      rec_eff_evenodd:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_seq_evenodd:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_eff_motzkin:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_seq_motzkin:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_eff_sudan:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
+      rec_seq_sudan:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
+        args: ""
 
   multicore-structures:
     type: OCamlMulticoreBenchmarkSuite
@@ -805,6 +848,20 @@ suites:
       pingpong_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/pingpong_multicore"
         args: "3 1 1000000"
+
+  multicore-gcroots:
+    type: OCamlMulticoreBenchmarkSuite
+    timeout: 120
+    programs:
+      globroots_seq:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-gcroots"
+        args: ""
+      globroots_mp:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-gcroots"
+        args: "4 10000"
+      globroots_sp:
+        path: "${RUNNING_BENCH_DIR}/multicore/multicore-gcroots"
+        args: "4 10000"
 
   oxcaml-prefetch:
     type: OCamlOxcamlBenchmarkSuite
@@ -1021,6 +1078,13 @@ benchmarks:
     - weakretain_75_small
     - weakretain_75_large
     - weak_htbl
+    # simple/capi
+    - capi_no_args_alloc
+    - capi_no_args_noalloc
+    - capi_few_args_alloc
+    - capi_few_args_noalloc
+    - capi_many_args_alloc
+    - capi_many_args_noalloc
 
   sandmark-with-deps:
     - graph500seq
@@ -1065,6 +1129,12 @@ benchmarks:
     - effect_throughput_perform
     - effect_throughput_perform_drop
     - eratosthenes
+    - rec_eff_evenodd
+    - rec_seq_evenodd
+    - rec_eff_motzkin
+    - rec_seq_motzkin
+    - rec_eff_sudan
+    - rec_seq_sudan
 
   multicore-structures:
     - test_queue_sequential
@@ -1121,6 +1191,11 @@ benchmarks:
   multicore-simple-tests:
     - alloc_multicore
     - pingpong_multicore
+
+  multicore-gcroots:
+    - globroots_seq
+    - globroots_mp
+    - globroots_sp
 
   # OxCaml-only — requires a `type: OxCaml` runtime; will error otherwise.
   oxcaml-prefetch:

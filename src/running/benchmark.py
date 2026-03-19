@@ -138,8 +138,8 @@ class Benchmark(object):
         bench = subprocess.Popen(
             ["python3", "-c", wrapper] + [str(c) for c in cmd],
             env=sync_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             pass_fds=(sync_r,),
             cwd=cwd,
         )
@@ -193,11 +193,11 @@ class Benchmark(object):
             )
 
         try:
-            bench_stdout, _ = bench.communicate(timeout=self.timeout)
+            _, bench_stderr = bench.communicate(timeout=self.timeout)
             subprocess_exit = SubprocessrExit.Normal
         except subprocess.TimeoutExpired:
             bench.kill()
-            bench_stdout, _ = bench.communicate()
+            _, bench_stderr = bench.communicate()
             subprocess_exit = SubprocessrExit.Timeout
 
         # perf stat exits automatically when its target exits
@@ -224,7 +224,7 @@ class Benchmark(object):
         except FileNotFoundError:
             logging.warning("perf output file %s not found", perf_output)
 
-        return bench_stdout if bench_stdout else b"", companion_out, subprocess_exit
+        return bench_stderr if bench_stderr else b"", companion_out, subprocess_exit
 
     def run(self, runtime: Runtime, cwd: Optional[Path] = None) -> Tuple[bytes, bytes, SubprocessrExit]:
         if suite.is_dry_run():
@@ -253,19 +253,19 @@ class Benchmark(object):
                 p = subprocess.run(
                     cmd,
                     env=env_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
                     timeout=self.timeout,
                     cwd=effective_cwd,
                 )
                 subprocess_exit = SubprocessrExit.Normal
-                stdout = p.stdout
+                stdout = p.stderr
             except subprocess.CalledProcessError as e:
                 subprocess_exit = SubprocessrExit.Error
-                stdout = e.stdout
+                stdout = e.stderr
             except subprocess.TimeoutExpired as e:
                 subprocess_exit = SubprocessrExit.Timeout
-                stdout = e.stdout
+                stdout = e.stderr
             finally:
                 if self.companion:
                     try:
