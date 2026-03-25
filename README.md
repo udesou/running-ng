@@ -17,6 +17,18 @@ RUNNING_BENCH_DIR=/path/to/benches ./run_ocaml_bench_gc_sweep.sh
 
 The script expects a sibling `benches/` directory by default. Override with `RUNNING_BENCH_DIR`. Logs go to `gc-sweep-logs/` (override with `LOG_DIR`). The config file defaults to `src/running/config/ocaml_gc_sweep_example.yml` (override with `CONFIG_FILE`).
 
+### Macrobenchmarks
+
+A separate config (`macrobenchmarks.yml`) runs real-world OCaml applications (alt-ergo, coq, cpdf, cubicle, frama-c, menhir) at default GC settings across compiler versions — no GC sweep, just baseline comparison:
+
+```bash
+CONFIG_FILE=src/running/config/macrobenchmarks.yml ./run_ocaml_bench_gc_sweep.sh
+# Or build-only:
+CONFIG_FILE=src/running/config/macrobenchmarks.yml ./build_ocaml_binaries_gc_sweep.sh
+```
+
+These benchmarks install tools via opam into isolated switches. First run is slow (opam installs); subsequent runs reuse cached switches. Benchmark sources and inputs live in `benches/macrobenchmarks/`.
+
 ## Prerequisites
 
 Run `install_deps.sh` to install everything automatically, or set up manually:
@@ -212,6 +224,11 @@ Two patterns in `benches/`:
 - Include `_opam_auto_install()` which automatically detects whether the compiler lives in an opam switch or was built from source, and installs required packages accordingly
 - No manual package installation needed
 
+**Macrobenchmarks** (e.g. `benches/macrobenchmarks/menhir/`):
+- Install real-world tools (alt-ergo, coq, cpdf, etc.) via `_opam_auto_install()` into isolated opam switches
+- Copy the installed binary as the benchmark executable
+- Each tool gets its own switch suffix to avoid dependency conflicts
+
 ### Purpose of the GC Sweep
 
 The goal is to measure how OCaml GC tuning parameters affect performance:
@@ -280,7 +297,7 @@ The section before `*****` is the benchmark's direct output. The section after i
 |---|---|---|
 | `RUNNING_BENCH_DIR` | `../benches` (relative to script) | Root of the benchmark sources |
 | `LOG_DIR` | `gc-sweep-logs/` | Where log files are written |
-| `CONFIG_FILE` | `src/running/config/ocaml_gc_sweep_example.yml` | YAML config |
+| `CONFIG_FILE` | `src/running/config/ocaml_gc_sweep_example.yml` | YAML config (also: `macrobenchmarks.yml`, `gc_sweep_all_versions.yml`) |
 | `OLLY_BIN` | `~/runtime_events_tools/_build/install/default/bin` | Directory containing `olly` binary |
 
 ## Development Setup
