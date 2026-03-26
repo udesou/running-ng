@@ -162,7 +162,7 @@ Each `s-32768` expands the modifier template `s={0}` to `s=32768`, which becomes
 
 1. **Parse config** — resolve runtimes, suites, modifiers
 2. **Expand configs** via `config_sweep` cross-product
-3. **Pre-build phase** — for each unique (benchmark, runtime) pair, run `benchmark.prepare(runtime)` which calls the benchmark's `.build.sh` script once. The build script receives env vars `OCAML_EXECUTABLE`, `OCAML_HOME`, `RUNNING_OCAML_OUTPUT`, etc., and compiles the benchmark to a named binary like `binarytrees-ocaml-release`.
+3. **Pre-build phase** — for each unique (benchmark, runtime) pair, `running-ng` activates the runtime's opam switch (created via `opam-compiler`) and runs the benchmark's `.build.sh` script. The build script receives env vars `RUNNING_OCAML_OUTPUT`, `RUNNING_OCAML_BENCH_DIR`, `RUNNING_OCAML_RUNTIME_NAME`, and `RUNNING_OCAML_SWITCH`; the compiler, dune, and installed packages are on `PATH` via the switch. Produces a named binary like `binarytrees-ocaml-release`.
 4. **Run loop** — for each benchmark x invocation x config combination:
    - Parse config string to get runtime + modifiers
    - `benchmark.attach_modifiers(mods)` sets `OCAMLRUNPARAM` and wraps with `/usr/bin/time`
@@ -208,26 +208,26 @@ configs:
 
 ### Benchmark Build Scripts
 
-Two patterns in `benches/`:
+All build scripts assume the runtime's opam switch is activated (compiler +
+dune on `PATH`). `running-ng` handles switch creation via `opam-compiler` and
+environment activation automatically. Three patterns in `benches/`:
 
-**Simple benchmarks** (e.g. `benches/simple/binarytrees/binarytrees.build.sh`):
+**Simple / multicore benchmarks** (e.g. `benches/simple/almabench/`):
 ```bash
-"${OCAMLOPT}" -O3 -I +unix unix.cmxa source.ml -o "${RUNNING_OCAML_OUTPUT}"
+dune build --root "${BENCH_DIR}" --profile release almabench.exe
+cp "${BENCH_DIR}/_build/default/almabench.exe" "${OUT}"
 ```
-
-**Multicore benchmarks** (e.g. `benches/multicore/multicore-numerical/`):
-- More complex — use `ocamlfind` with `-package domainslib`
-- Auto-create opam switches for custom compilers
-- Require OCaml 5+
+All benchmarks use dune. Multicore benchmarks auto-install `domainslib` into
+the active switch.
 
 **With-packages benchmarks** (e.g. `benches/with_packages/benchmarksgame/`):
-- Include `_opam_auto_install()` which automatically detects whether the compiler lives in an opam switch or was built from source, and installs required packages accordingly
+- Run `opam install <pkg> -y` to install dependencies into the active switch
+- Then build with dune
 - No manual package installation needed
 
 **Macrobenchmarks** (e.g. `benches/macrobenchmarks/menhir/`):
-- Install real-world tools (alt-ergo, coq, cpdf, etc.) via `_opam_auto_install()` into isolated opam switches
+- Install real-world tools (alt-ergo, coq, cpdf, etc.) via `opam install`
 - Copy the installed binary as the benchmark executable
-- Each tool gets its own switch suffix to avoid dependency conflicts
 
 ### Purpose of the GC Sweep
 

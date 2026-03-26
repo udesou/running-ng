@@ -213,6 +213,9 @@ class JavaScriptCore(JavaScriptRuntime):
 
 @register(Runtime)
 class OCaml(Runtime):
+    SWITCH_PREFIX = "running-ng"
+    _opam_bin: Optional[str] = None
+
     @staticmethod
     def _safe_key(raw: str) -> str:
         sanitized = re.sub(r"[^a-zA-Z0-9._-]+", "_", raw).strip("._-")
@@ -223,94 +226,177 @@ class OCaml(Runtime):
 
     @staticmethod
     def _run_checked(cmd: List[str], cwd: Optional[Path] = None, env: Optional[Dict[str, str]] = None):
-        logging.info("Running command: %s", " ".join(cmd))
+        logging.info("Running command: %s", " ".join(str(c) for c in cmd))
         subprocess.run(cmd, check=True, cwd=str(cwd) if cwd else None, env=env)
 
     @staticmethod
-    def _clone_and_checkout(kwargs: Dict[str, Any]):
-        """Clone/fetch the repo and check out the right ref.
+    def _find_opam() -> str:
+        """Find the best available opam binary.
 
-        Returns (source_dir, install_dir, built_executable, jobs) or
-        raises if the executable is already cached (via the returned Path).
+        Prefers the newest version to avoid compatibility issues when
+        ~/.opam was initialised by a newer opam.
         """
-        executable = kwargs.get("executable")
+        if OCaml._opam_bin is not None:
+            return OCaml._opam_bin
+        import shutil
+        candidates = []
+        seen: set = set()
+        search = list(os.environ.get("PATH", "").split(os.pathsep))
+        for extra in ["/usr/local/bin", "/usr/bin", "/bin"]:
+            if extra not in search:
+                search.append(extra)
+        for d in search:
+            p = os.path.join(d, "opam")
+            rp = os.path.realpath(p)
+            if rp in seen or not os.path.isfile(p) or not os.access(p, os.X_OK):
+                continue
+            seen.add(rp)
+            try:
+                ver = subprocess.run(
+                    [p, "--version"], capture_output=True, text=True
+                ).stdout.strip()
+                candidates.append((p, ver))
+            except Exception:
+                continue
+        if not candidates:
+            OCaml._opam_bin = shutil.which("opam") or "opam"
+            return OCaml._opam_bin
+        candidates.sort(key=lambda pv: [int(x) for x in pv[1].split(".")], reverse=True)
+        OCaml._opam_bin = candidates[0][0]
+        logging.info("Using opam: %s (version %s)", OCaml._opam_bin, candidates[0][1])
+        return OCaml._opam_bin
+
+    @staticmethod
+    def _switch_exists(switch_name: str) -> bool:
+        opam = OCaml._find_opam()
+        result = subprocess.run(
+            [opam, "switch", "list", "--short"],
+            capture_output=True, text=True,
+        )
+        return switch_name in result.stdout.split()
+
+    @staticmethod
+    def _parse_opam_env(switch: str) -> Dict[str, str]:
+        """Parse ``opam env`` output for *switch* into an environment dict."""
+        opam = OCaml._find_opam()
+        result = subprocess.run(
+            [opam, "env", "--switch={}".format(switch), "--set-switch"],
+            capture_output=True, text=True, check=True,
+        )
+        env = dict(os.environ)
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if "=" not in line or "export" not in line:
+                continue
+            part = line.split(";")[0]  # KEY='VALUE'
+            key, _, value = part.partition("=")
+            env[key.strip()] = value.strip().strip("'\"")
+        return env
+
+    @staticmethod
+    def _opam_compiler_source(kwargs: Dict[str, Any]) -> str:
+        """Build the ``opam compiler create`` source spec from config kwargs.
+
+        Maps config fields to the ``user/repo:ref`` format:
+          version: "5.4.0"  ->  "ocaml/ocaml:5.4.0"
+          commit: "abc123"  ->  "ocaml/ocaml:abc123"
+          repo: "https://github.com/user/repo.git"  ->  "user/repo:ref"
+        """
         version = kwargs.get("version")
         commit = kwargs.get("commit", kwargs.get("hash"))
         repo = kwargs.get("repo", "https://github.com/ocaml/ocaml.git")
-        jobs = int(kwargs.get("jobs", os.cpu_count() or 1))
 
-        if executable:
-            return Path(str(executable)).absolute(), None, None, None
-
-        if not version and not commit:
-            raise KeyError(
-                "OCaml runtime requires either `executable` or one of `version`/`commit`/`hash`."
+        m = re.match(r"https?://github\.com/([^/]+)/([^/.]+)", repo)
+        if not m:
+            raise ValueError(
+                "Cannot parse GitHub user/repo from repo URL: {}. "
+                "opam-compiler requires a GitHub repository.".format(repo)
             )
-        if version and commit:
-            raise ValueError("Use either `version` or `commit`/`hash`, not both.")
-
-        ref = str(commit) if commit else str(version)
-        key = "commit-{}".format(ref) if commit else "version-{}".format(ref)
-        root = Path(kwargs.get(
-            "cache_dir",
-            Path(tempfile.gettempdir()) / "running-ng-ocaml-toolchains"
-        )).expanduser().absolute()
-        toolchain_dir = root / OCaml._safe_key(key)
-        source_dir = toolchain_dir / "src"
-        install_dir = toolchain_dir / "install"
-        built_executable = install_dir / "bin" / "ocaml"
-
-        if built_executable.exists():
-            logging.info("Using cached OCaml runtime at %s", built_executable)
-            return built_executable, None, None, None
-
-        toolchain_dir.mkdir(parents=True, exist_ok=True)
-        if not source_dir.exists():
-            OCaml._run_checked(["git", "clone", "--recursive", repo, str(source_dir)])
-        else:
-            OCaml._run_checked(["git", "fetch", "--all", "--tags"], cwd=source_dir)
-
-        checkout_ref = str(commit) if commit else str(version)
-        OCaml._run_checked(["git", "checkout", checkout_ref], cwd=source_dir)
-        OCaml._run_checked(["git", "submodule", "update", "--init", "--recursive"], cwd=source_dir)
-
-        return built_executable, source_dir, install_dir, jobs
+        user, repo_name = m.group(1), m.group(2)
+        ref = str(version) if version else str(commit)
+        return "{}/{}:{}".format(user, repo_name, ref)
 
     @staticmethod
-    def _resolve_or_build_executable(kwargs: Dict[str, Any]) -> Path:
-        built_executable, source_dir, install_dir, jobs = OCaml._clone_and_checkout(kwargs)
-        if source_dir is None:
-            # Already cached or using a pre-built executable.
-            return built_executable
+    def _ensure_switch(kwargs: Dict[str, Any], switch_name: str):
+        """Create an opam switch via ``opam compiler create`` if needed."""
+        if OCaml._switch_exists(switch_name):
+            logging.info("Reusing existing opam switch '%s'", switch_name)
+            return
 
+        source = OCaml._opam_compiler_source(kwargs)
         configure_args = kwargs.get("configure_args", [])
-        make_targets = kwargs.get("make_targets", ["world.opt"])
-        if not isinstance(configure_args, list):
-            raise TypeError("OCaml runtime configure_args must be a list")
-        if not isinstance(make_targets, list) or len(make_targets) == 0:
-            raise TypeError("OCaml runtime make_targets must be a non-empty list")
 
-        OCaml._run_checked(["./configure", "--prefix={}".format(install_dir)] + configure_args, cwd=source_dir)
-        OCaml._run_checked(["make", "-j", str(jobs)] + make_targets, cwd=source_dir)
-        OCaml._run_checked(["make", "install"], cwd=source_dir)
+        cmd: List[str] = [
+            OCaml._find_opam(), "compiler", "create", source,
+            "--switch", switch_name,
+        ]
+        if configure_args:
+            configure_cmd = "./configure " + " ".join(configure_args)
+            cmd.extend(["--configure-command", configure_cmd])
 
-        if not built_executable.exists():
-            raise RuntimeError(
-                "OCaml build finished but executable not found at {}".format(built_executable)
-            )
-        return built_executable
+        logging.info("Creating opam switch '%s' from source '%s'", switch_name, source)
+        OCaml._run_checked(cmd)
+
+        # Ensure dune is available in the new switch.
+        OCaml._run_checked([
+            OCaml._find_opam(), "install", "dune",
+            "--switch={}".format(switch_name), "--yes",
+        ])
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.executable = OCaml._resolve_or_build_executable(kwargs)
         self.version: Optional[str] = kwargs.get("version")
         self.commit: Optional[str] = kwargs.get("commit", kwargs.get("hash"))
-        if not self.executable.exists():
-            logging.warning("OCaml executable {} doesn't exist".format(self.executable))
-        self.executable = self.executable.absolute()
+
+        executable = kwargs.get("executable")
+        if executable:
+            # Legacy mode: pre-built executable, no switch management.
+            self.executable = Path(str(executable)).absolute()
+            self._switch_name: Optional[str] = None
+            if not self.executable.exists():
+                logging.warning("OCaml executable {} doesn't exist".format(self.executable))
+        else:
+            if not self.version and not self.commit:
+                raise KeyError(
+                    "OCaml runtime requires either `executable` or one of "
+                    "`version`/`commit`/`hash`."
+                )
+            if self.version and self.commit:
+                raise ValueError("Use either `version` or `commit`/`hash`, not both.")
+
+            self._switch_name = "{}-{}".format(self.SWITCH_PREFIX, self.name)
+            OCaml._ensure_switch(kwargs, self._switch_name)
+
+            # Resolve the executable from the switch's bin directory.
+            opam = OCaml._find_opam()
+            result = subprocess.run(
+                [opam, "var", "bin", "--switch={}".format(self._switch_name)],
+                capture_output=True, text=True, check=True,
+            )
+            bin_dir = Path(result.stdout.strip())
+            self.executable = (bin_dir / "ocaml").absolute()
+            if not self.executable.exists():
+                raise RuntimeError(
+                    "Switch '{}' created but ocaml binary not found at {}".format(
+                        self._switch_name, self.executable
+                    )
+                )
 
     def get_executable(self) -> Path:
         return self.executable
+
+    def get_switch_name(self) -> Optional[str]:
+        """Return the opam switch name, or None for legacy executable mode."""
+        return self._switch_name
+
+    def get_switch_env(self) -> Dict[str, str]:
+        """Return an environment dict with the runtime's opam switch activated."""
+        if self._switch_name is None:
+            env = os.environ.copy()
+            exe_dir = str(self.executable.parent)
+            env["PATH"] = "{}:{}".format(exe_dir, env.get("PATH", ""))
+            return env
+        return OCaml._parse_opam_env(self._switch_name)
 
     def get_cache_key(self) -> str:
         if self.commit:
@@ -342,7 +428,6 @@ class OCaml(Runtime):
                 raise ValueError(
                     "Cannot parse major version from OCaml version string: {!r}".format(self.version)
                 )
-        # Fall back to querying the executable
         result = subprocess.run(
             [str(self.executable), "--version"],
             capture_output=True, text=True, check=True
@@ -378,48 +463,6 @@ class OxCaml(OCaml):
 
     OPAM_SWITCH_NAME = "running-ng-oxcaml-build"
 
-    _opam_bin: Optional[str] = None
-
-    @staticmethod
-    def _find_opam() -> str:
-        """Find the opam binary compatible with the current ~/.opam directory.
-
-        On some systems an older opam (e.g. 2.1) shadows a newer one on PATH.
-        We prefer the newest available opam to avoid "Refusing write access"
-        errors when ~/.opam was initialised by a newer version.
-        """
-        if OxCaml._opam_bin is not None:
-            return OxCaml._opam_bin
-
-        import shutil
-        candidates = []
-        seen: set = set()
-        search = list(os.environ.get("PATH", "").split(os.pathsep))
-        for extra in ["/usr/local/bin", "/usr/bin", "/bin"]:
-            if extra not in search:
-                search.append(extra)
-        for d in search:
-            p = os.path.join(d, "opam")
-            rp = os.path.realpath(p)
-            if rp in seen or not os.path.isfile(p) or not os.access(p, os.X_OK):
-                continue
-            seen.add(rp)
-            try:
-                ver = subprocess.run(
-                    [p, "--version"], capture_output=True, text=True
-                ).stdout.strip()
-                candidates.append((p, ver))
-            except Exception:
-                continue
-        if not candidates:
-            OxCaml._opam_bin = shutil.which("opam") or "opam"
-            return OxCaml._opam_bin
-        # Sort by version descending and pick the newest.
-        candidates.sort(key=lambda pv: [int(x) for x in pv[1].split(".")], reverse=True)
-        OxCaml._opam_bin = candidates[0][0]
-        logging.info("Using opam: %s (version %s)", OxCaml._opam_bin, candidates[0][1])
-        return OxCaml._opam_bin
-
     @staticmethod
     def _ensure_bootstrap_compiler(kwargs: Dict[str, Any]) -> Path:
         """Build or locate a stock OCaml compiler for bootstrapping OxCaml.
@@ -446,7 +489,7 @@ class OxCaml(OCaml):
         isolated from the user's active switch.  Returns an environ dict
         that activates the switch.
         """
-        opam = OxCaml._find_opam()
+        opam = OCaml._find_opam()
         switch = OxCaml.OPAM_SWITCH_NAME
         bootstrap_path_env = "{}:{}".format(bootstrap_bin, os.environ.get("PATH", ""))
 
@@ -496,7 +539,7 @@ class OxCaml(OCaml):
         (e.g. menhir {= "20231231"}) and installs them at the exact required
         version.  Also ensures dune is installed.
         """
-        opam = OxCaml._find_opam()
+        opam = OCaml._find_opam()
         switch = OxCaml.OPAM_SWITCH_NAME
         opam_file = source_dir / "oxcaml-dev.opam"
         deps_to_install: List[str] = []

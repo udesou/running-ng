@@ -529,13 +529,17 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
             )
             return
         out_binary.parent.mkdir(parents=True, exist_ok=True)
-        env = os.environ.copy()
+
+        # Activate the runtime's opam switch so that the compiler, dune,
+        # and any installed packages are on PATH for the build script.
+        env = runtime.get_switch_env()
         env.update(self.build_env)
-        env["OCAML_EXECUTABLE"] = str(runtime.get_executable())
-        env["OCAML_HOME"] = str(runtime.get_executable().resolve().parent.parent)
         env["RUNNING_OCAML_OUTPUT"] = str(out_binary)
         env["RUNNING_OCAML_BENCH_DIR"] = str(self.benchmark_dir)
         env["RUNNING_OCAML_RUNTIME_NAME"] = runtime.name
+        switch_name = runtime.get_switch_name()
+        if switch_name:
+            env["RUNNING_OCAML_SWITCH"] = switch_name
 
         build_script = self._resolve_build_script()
         if not build_script.exists():
