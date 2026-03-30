@@ -501,6 +501,24 @@ class OCamlOxcamlBenchmarkSuite(OCamlMulticoreBenchmarkSuite):
 
 
 @register(BenchmarkSuite)
+class OCamlMacroBenchmarkSuite(OCamlBenchmarkSuite):
+    """OCaml macrobenchmark suite with per-benchmark opam switch isolation.
+
+    Each benchmark gets its own satellite opam switch (cloned from the
+    runtime's base switch) so that ``opam install`` in one benchmark's
+    build script cannot conflict with another's.  The runtime handles
+    the cloning strategy: relocatable compiler cloning for released
+    versions, ocaml-system fallback for commits and OxCaml.
+    """
+
+    def get_benchmark(self, bm_spec: Union[str, Dict[str, Any]]) -> 'OCamlBenchmark':
+        bm = super().get_benchmark(bm_spec)
+        if isinstance(bm, OCamlBuiltBinaryBenchmark):
+            bm.isolated_switch = True
+        return bm
+
+
+@register(BenchmarkSuite)
 class SPECjvm98(JavaBenchmarkSuite):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

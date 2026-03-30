@@ -214,6 +214,7 @@ class JavaScriptCore(JavaScriptRuntime):
 @register(Runtime)
 class OCaml(Runtime):
     SWITCH_PREFIX = "running-ng"
+    RELOCATABLE_REPO = "git+https://github.com/dra27/opam-repository.git#relocatable"
     _opam_bin: Optional[str] = None
 
     @staticmethod
@@ -318,16 +319,24 @@ class OCaml(Runtime):
 
     @staticmethod
     def _ensure_switch(kwargs: Dict[str, Any], switch_name: str):
-        """Create an opam switch via ``opam compiler create`` if needed."""
+        """Create an opam switch via ``opam compiler create`` if needed.
+
+        After building the compiler from source, the dra27 relocatable
+        overlay repo is added to the switch so that ``dune`` and
+        ``ocamlfind`` are installed as relocatable binaries.  This allows
+        the switch to be copied for satellite switches without hardcoded
+        paths breaking.
+        """
         if OCaml._switch_exists(switch_name):
             logging.info("Reusing existing opam switch '%s'", switch_name)
             return
 
+        opam = OCaml._find_opam()
         source = OCaml._opam_compiler_source(kwargs)
         configure_args = kwargs.get("configure_args", [])
 
         cmd: List[str] = [
-            OCaml._find_opam(), "compiler", "create", source,
+            opam, "compiler", "create", source,
             "--switch", switch_name,
         ]
         if configure_args:
@@ -337,16 +346,89 @@ class OCaml(Runtime):
         logging.info("Creating opam switch '%s' from source '%s'", switch_name, source)
         OCaml._run_checked(cmd)
 
-        # Ensure dune is available in the new switch.
+        # Add the relocatable overlay repo so dune/ocamlfind are installed
+        # as relocatable binaries (no hardcoded paths in the binaries).
+        logging.info("Adding relocatable overlay repo to switch '%s'", switch_name)
         OCaml._run_checked([
-            OCaml._find_opam(), "install", "dune",
+            opam, "repo", "add", "relocatable", OCaml.RELOCATABLE_REPO,
+            "--switch={}".format(switch_name), "--set-default",
+        ])
+
+        # Install relocatable dune and ocamlfind.
+        OCaml._run_checked([
+            opam, "install", "dune", "ocamlfind",
             "--switch={}".format(switch_name), "--yes",
         ])
+
+    @staticmethod
+    def _get_opam_root() -> Path:
+        """Return the opam root directory (typically ~/.opam)."""
+        opam = OCaml._find_opam()
+        result = subprocess.run(
+            [opam, "var", "root"],
+            capture_output=True, text=True, check=True,
+        )
+        return Path(result.stdout.strip())
+
+    @staticmethod
+    def _ensure_satellite_switch(base_switch: str, satellite_name: str):
+        """Create a per-benchmark satellite switch by copying the base switch.
+
+        1. Creates an empty opam switch (so opam registers it properly).
+        2. Replaces its contents with a copy of the base switch's directory,
+           skipping heavyweight build artifacts (sources/, build/).
+
+        The base switch is set up with dra27's relocatable overlay, so the
+        compiler tools (dune, ocamlfind) have no hardcoded paths and work
+        correctly after being copied to a new location.
+        ``opam env --switch=<satellite>`` regenerates the correct PATH.
+        """
+        if OCaml._switch_exists(satellite_name):
+            logging.info("Reusing existing satellite switch '%s'", satellite_name)
+            return
+
+        import shutil
+
+        opam = OCaml._find_opam()
+        opam_root = OCaml._get_opam_root()
+        base_dir = opam_root / base_switch
+        satellite_dir = opam_root / satellite_name
+
+        if not base_dir.is_dir():
+            raise RuntimeError(
+                "Base switch directory not found at {}".format(base_dir)
+            )
+
+        # Step 1: Let opam create an empty, properly registered switch.
+        logging.info(
+            "Creating satellite switch '%s' (copying from '%s')",
+            satellite_name, base_switch,
+        )
+        OCaml._run_checked([
+            opam, "switch", "create", satellite_name,
+            "--empty", "--no-switch",
+        ])
+
+        # Step 2: Replace the empty switch contents with the base switch copy.
+        shutil.rmtree(str(satellite_dir))
+
+        def _ignore_heavy(directory: str, contents: List[str]) -> set:
+            """Skip sources/ and build/ inside .opam-switch to save ~300MB."""
+            if os.path.basename(directory) == ".opam-switch":
+                return {c for c in contents if c in ("sources", "build")}
+            return set()
+
+        shutil.copytree(
+            str(base_dir), str(satellite_dir),
+            ignore=_ignore_heavy, symlinks=True,
+        )
+        logging.info("Satellite switch '%s' ready", satellite_name)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.version: Optional[str] = kwargs.get("version")
         self.commit: Optional[str] = kwargs.get("commit", kwargs.get("hash"))
+        self._satellite_switches: Dict[str, str] = {}  # benchmark_name -> switch_name
 
         executable = kwargs.get("executable")
         if executable:
@@ -397,6 +479,35 @@ class OCaml(Runtime):
             env["PATH"] = "{}:{}".format(exe_dir, env.get("PATH", ""))
             return env
         return OCaml._parse_opam_env(self._switch_name)
+
+    def ensure_benchmark_switch(self, benchmark_name: str) -> str:
+        """Create (or reuse) a per-benchmark satellite switch.
+
+        Returns the satellite switch name.  The satellite is a copy of the
+        runtime's base switch (compiler binaries + stdlib + opam metadata)
+        with its own independent opam package root for isolated installs.
+        """
+        if self._switch_name is None:
+            raise RuntimeError(
+                "Cannot create satellite switches in legacy executable mode"
+            )
+        cached = self._satellite_switches.get(benchmark_name)
+        if cached and OCaml._switch_exists(cached):
+            return cached
+
+        satellite = "{}-{}".format(self._switch_name, self._safe_key(benchmark_name))
+        OCaml._ensure_satellite_switch(self._switch_name, satellite)
+        self._satellite_switches[benchmark_name] = satellite
+        return satellite
+
+    def get_benchmark_switch_env(self, benchmark_name: str) -> Dict[str, str]:
+        """Return an environment dict with a per-benchmark satellite switch activated."""
+        satellite = self.ensure_benchmark_switch(benchmark_name)
+        return OCaml._parse_opam_env(satellite)
+
+    def get_benchmark_switch_name(self, benchmark_name: str) -> Optional[str]:
+        """Return the satellite switch name for a benchmark, or None if not created."""
+        return self._satellite_switches.get(benchmark_name)
 
     def get_cache_key(self) -> str:
         if self.commit:

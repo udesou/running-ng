@@ -2,8 +2,13 @@
 # Macro-benchmarks — real-world OCaml applications
 # =============================================================================
 # These benchmarks install external tools (alt-ergo, coq, cpdf, etc.) via opam
-# and benchmark the installed binary.  Each tool gets its own isolated opam
-# switch per compiler version to avoid dependency conflicts.
+# and benchmark the installed binary.  Each tool gets its own isolated satellite
+# opam switch per compiler version to avoid dependency conflicts.
+#
+# Switch isolation: the base runtime switch (built once via `opam compiler
+# create`) is copied to per-benchmark satellite switches.  OCaml 5.6+
+# compilers are relocatable, so copied binaries work in the new location.
+# Each satellite has its own opam package root for independent installs.
 #
 # Intended for large baseline comparisons across compiler versions, NOT for
 # GC parameter sweeps or PR feedback loops.
@@ -39,20 +44,37 @@ spread_factor: 1
 runtimes:
   ocaml-4.14.3:
     type: OCaml
-    version: "4.14.3"
+    repo: "https://github.com/dra27/ocaml.git"
+    commit: "8b8971e46f5c09aedb5f8d43a6e2701fecc8f98d"
+    configure_args:
+      - "--with-relative-libdir=../lib/ocaml"
+      - "--enable-runtime-search=always"
+      - "--enable-runtime-search-target"
+      - "--with-stublibs=../stublibs"
   ocaml-5.4.1:
     type: OCaml
-    version: "5.4.1"
+    repo: "https://github.com/dra27/ocaml.git"
+    commit: "b74c645ef30c6060dcc293a73811a9ae9ceefd57"
+    configure_args:
+      - "--with-relative-libdir=../lib/ocaml"
+      - "--enable-runtime-search=always"
+      - "--enable-runtime-search-target"
+      - "--with-stublibs=../stublibs"
   ocaml-trunk:
     type: OCaml
     commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
+    configure_args:
+      - "--with-relative-libdir=../lib/ocaml"
+      - "--enable-runtime-search=always"
+      - "--enable-runtime-search-target"
+      - "--with-stublibs=../stublibs"
 
 # =============================================================================
 # Suites
 # =============================================================================
 suites:
   macro-alt-ergo:
-    type: OCamlBenchmarkSuite
+    type: OCamlMacroBenchmarkSuite
     timeout: 300
     programs:
       alt_ergo_fill:
@@ -65,7 +87,7 @@ suites:
         args: "${RUNNING_BENCH_DIR}/macrobenchmarks/alt-ergo/yyll.why"
 
   macro-cpdf:
-    type: OCamlBenchmarkSuite
+    type: OCamlMacroBenchmarkSuite
     timeout: 300
     programs:
       cpdf_merge:
@@ -86,7 +108,7 @@ suites:
         args: "-squeeze ${RUNNING_BENCH_DIR}/macrobenchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
 
   macro-cubicle:
-    type: OCamlBenchmarkSuite
+    type: OCamlMacroBenchmarkSuite
     timeout: 600
     programs:
       cubicle_german_pfs:
@@ -99,7 +121,7 @@ suites:
         args: "${RUNNING_BENCH_DIR}/macrobenchmarks/cubicle/szymanski_at.cub"
 
   macro-frama-c:
-    type: OCamlBenchmarkSuite
+    type: OCamlMacroBenchmarkSuite
     timeout: 600
     programs:
       frama_c_slevel:
@@ -108,7 +130,7 @@ suites:
         args: "-slevel 1000000000 -no-results -no-val-show-progress ${RUNNING_BENCH_DIR}/macrobenchmarks/frama-c/t.c -val"
 
   macro-menhir:
-    type: OCamlBenchmarkSuite
+    type: OCamlMacroBenchmarkSuite
     timeout: 600
     programs:
       menhir_ocamly:
@@ -125,7 +147,7 @@ suites:
         args: "-v --table ${RUNNING_BENCH_DIR}/macrobenchmarks/menhir/sysver.mly"
 
   macro-coq:
-    type: OCamlBenchmarkSuite
+    type: OCamlMacroBenchmarkSuite
     timeout: 600
     programs:
       coqc_basicsyntax:

@@ -465,6 +465,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         always_build: bool,
         min_ocaml_major: Optional[int] = None,
         required_runtime_hint: Optional[str] = None,
+        isolated_switch: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -478,6 +479,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         self.always_build = always_build
         self.min_ocaml_major = min_ocaml_major
         self.required_runtime_hint = required_runtime_hint
+        self.isolated_switch: bool = isolated_switch
         self._binary_cache: Dict[str, Path] = {}
 
     def __str__(self) -> str:
@@ -530,14 +532,20 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
             return
         out_binary.parent.mkdir(parents=True, exist_ok=True)
 
-        # Activate the runtime's opam switch so that the compiler, dune,
-        # and any installed packages are on PATH for the build script.
-        env = runtime.get_switch_env()
+        # When isolated_switch is set (macrobenchmarks), create a
+        # per-benchmark satellite switch so that opam installs don't
+        # pollute the shared runtime switch.
+        if self.isolated_switch:
+            env = runtime.get_benchmark_switch_env(self.benchmark_name)
+            switch_name = runtime.get_benchmark_switch_name(self.benchmark_name)
+        else:
+            env = runtime.get_switch_env()
+            switch_name = runtime.get_switch_name()
+
         env.update(self.build_env)
         env["RUNNING_OCAML_OUTPUT"] = str(out_binary)
         env["RUNNING_OCAML_BENCH_DIR"] = str(self.benchmark_dir)
         env["RUNNING_OCAML_RUNTIME_NAME"] = runtime.name
-        switch_name = runtime.get_switch_name()
         if switch_name:
             env["RUNNING_OCAML_SWITCH"] = switch_name
 
