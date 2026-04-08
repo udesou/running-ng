@@ -1,4 +1,5 @@
 from typing import Optional, TYPE_CHECKING
+import time
 import zulip
 from running.plugin.runbms import RunbmsPlugin
 from running.util import Moma, register, MomaReservationStatus, config_index_to_chr
@@ -36,7 +37,7 @@ class Zulip(RunbmsPlugin):
         self.last_message_content = None
         self.sent_reservation_message = False
 
-    def send_message(self, content):
+    def send_message(self, content, max_retries=5):
         message_data = copy.deepcopy(self.request)
         reservation_msg = ""
         if not self.sent_reservation_message:
@@ -47,30 +48,54 @@ class Zulip(RunbmsPlugin):
             reservation_msg,
             content
         )
-        try:
-            result = self.client.send_message(message_data=message_data)
-            if result["result"] != "success":
+        for attempt in range(max_retries):
+            try:
+                result = self.client.send_message(message_data=message_data)
+                if result["result"] == "success":
+                    self.last_message_id = result["id"]
+                    self.last_message_content = message_data["content"]
+                    return
+                if result.get("code") == "RATE_LIMIT_HIT":
+                    retry_after = result.get("retry-after", 1)
+                    logging.info(
+                        "Zulip rate limited, retrying after {:.1f}s (attempt {}/{})".format(
+                            retry_after, attempt + 1, max_retries))
+                    time.sleep(retry_after)
+                    continue
                 logging.warning("Zulip send_message failed\n{}".format(result))
-            else:
-                self.last_message_id = result["id"]
-                self.last_message_content = message_data["content"]
-        except:
-            logging.exception("Unhandled Zulip send_message exception")
+                return
+            except:
+                logging.exception("Unhandled Zulip send_message exception")
+                return
+        logging.warning("Zulip send_message failed after {} retries".format(max_retries))
 
-    def modify_message(self, content):
+    def modify_message(self, content, max_retries=5):
+        # Update optimistically so subsequent calls build on this content
+        # even if the Zulip API call ultimately fails
+        self.last_message_content = content
         request = {
             "message_id": self.last_message_id,
             "content": content,
         }
-        try:
-            result = self.client.update_message(request)
-            if result["result"] != "success":
+        for attempt in range(max_retries):
+            try:
+                result = self.client.update_message(request)
+                if result["result"] == "success":
+                    return
+                if result.get("code") == "RATE_LIMIT_HIT":
+                    retry_after = result.get("retry-after", 1)
+                    logging.info(
+                        "Zulip rate limited, retrying after {:.1f}s (attempt {}/{})".format(
+                            retry_after, attempt + 1, max_retries))
+                    time.sleep(retry_after)
+                    continue
                 logging.warning(
                     "Zulip update_message failed\n{}".format(result))
-            else:
-                self.last_message_content = content
-        except:
-            logging.exception("Unhandled Zulip update_message exception")
+                return
+            except:
+                logging.exception("Unhandled Zulip update_message exception")
+                return
+        logging.warning("Zulip update_message failed after {} retries".format(max_retries))
 
     def __str__(self) -> str:
         return "Zulip {}".format(self.name)

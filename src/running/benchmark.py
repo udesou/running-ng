@@ -1,6 +1,7 @@
 import errno
 import glob
 import logging
+import signal
 import subprocess
 import sys
 import tempfile
@@ -197,7 +198,16 @@ class Benchmark(object):
             subprocess_exit = SubprocessrExit.Normal
         except subprocess.TimeoutExpired:
             bench.kill()
-            _, bench_stderr = bench.communicate()
+            # If the actual OCaml process is a forked child of the wrapper
+            # (e.g. /usr/bin/time), killing the wrapper leaves the child
+            # reparented to init, still holding the stderr pipe open.
+            # Kill it explicitly to avoid an infinite hang on communicate().
+            if ocaml_pid is not None and ocaml_pid != pid:
+                try:
+                    os.kill(ocaml_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            _, bench_stderr = bench.communicate(timeout=30)
             subprocess_exit = SubprocessrExit.Timeout
 
         # perf stat exits automatically when its target exits
@@ -591,10 +601,22 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         if cached and cached.exists() and not self.always_build:
             return cached
         out_binary = self._resolve_output_binary(runtime)
+        sentinel = Path(str(out_binary) + ".build-failed")
+        if sentinel.exists() and not self.always_build:
+            raise RuntimeError(
+                "Build previously failed for {} (sentinel: {}). "
+                "Delete the sentinel file to retry.".format(out_binary.name, sentinel)
+            )
         if suite.is_dry_run():
             self._binary_cache[runtime_key] = out_binary
             return out_binary
-        self._run_build(runtime, out_binary)
+        try:
+            self._run_build(runtime, out_binary)
+        except Exception:
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.touch()
+            raise
+        sentinel.unlink(missing_ok=True)
         if not out_binary.exists():
             raise RuntimeError("Output binary {} does not exist after build step".format(out_binary))
         self._binary_cache[runtime_key] = out_binary

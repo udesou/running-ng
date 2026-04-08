@@ -25,12 +25,10 @@ def register(parent_class):
 
 
 def config_index_to_chr(i: int) -> str:
-    if i < 0 or i >= 52:
+    _CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    if i < 0:
         raise ValueError("Cannot convert {} into a character".format(i))
-    elif i < 26:
-        return chr(ord('a')+i)
-    else:
-        return chr(ord('A')+i-26)
+    return _CHARS[i % len(_CHARS)]
 
 
 def parse_modifier_strs(configuration: 'Configuration', mod_strs: List[str]) -> List['Modifier']:

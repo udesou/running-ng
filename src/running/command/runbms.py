@@ -322,15 +322,21 @@ def run_one_benchmark(
                 p.start_config(hfac, size, bm, i, c, j)
             if skip_oom is not None and oomed_count[c] >= skip_oom:
                 print(".", end="", flush=True)
+                for p in plugins.values():
+                    p.end_config(hfac, size, bm, i, c, j, False)
                 continue
             if skip_timeout is not None and timeout_count[c] >= skip_timeout:
                 print(".", end="", flush=True)
+                for p in plugins.values():
+                    p.end_config(hfac, size, bm, i, c, j, False)
                 continue
             if resume:
                 log_filename_completed_candidates = get_filename_completed_candidates(
                     bm, hfac, size, c)
                 if any((log_dir / f).exists() for f in log_filename_completed_candidates):
                     print(config_index_to_chr(j), end="", flush=True)
+                    for p in plugins.values():
+                        p.end_config(hfac, size, bm, i, c, j, True)
                     continue
             log_filename = get_filename(bm, hfac, size, c)
             logging.debug("Running with log filename {}".format(log_filename))
@@ -354,6 +360,8 @@ def run_one_benchmark(
                     bm_name, c, e,
                 )
                 print("X", end="", flush=True)
+                for p in plugins.values():
+                    p.end_config(hfac, size, bm, i, c, j, False)
                 continue
             if runtime.is_oom(output):
                 oomed_count[c] += 1
@@ -520,7 +528,7 @@ def run(args):
                 for c in configs:
                     runtime = runtime_by_config[c]
                     key = (suite_name, bm.name, runtime.name)
-                    if key in prepared:
+                    if key in prepared or key in build_failed:
                         continue
                     try:
                         bm.prepare(runtime)
