@@ -136,6 +136,31 @@ suites:
         build_script: "coq.build.sh"
         args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/AbstractInterpretation.v"
 
+  # ahrefs-devkit: builds as a standalone dune project (not in the monorepo
+  # workspace) because devkit has C-binding deps (libevent, ocurl, pcre) that
+  # must be installed in the runtime switch via opam.
+  # Prerequisite: opam install devkit --switch=<runtime-switch> --assume-depexts
+  macro-devkit:
+    type: OCamlBenchmarkSuite
+    timeout: 600
+    programs:
+      devkit_htmlstream:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: ""
+      devkit_stre:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: ""
+      devkit_network:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: ""
+      devkit_gzip:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: ""
+
 # =============================================================================
 # Modifiers
 # =============================================================================
@@ -172,6 +197,12 @@ benchmarks:
   macro-coq-monorepo:
     - coqc_basicsyntax
     - coqc_abstractinterpretation
+
+  macro-devkit:
+    - devkit_htmlstream
+    - devkit_stre
+    - devkit_network
+    - devkit_gzip
 
 # =============================================================================
 # Configs — no sweep, baseline comparison at default GC settings
