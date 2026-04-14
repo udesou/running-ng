@@ -198,6 +198,15 @@ suites:
         build_script: "eio.build.sh"
         args: ""
 
+  macro-sedlex:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      sedlex_tokenize:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
+        build_script: "sedlex.build.sh"
+        args: "200000"
+
 # =============================================================================
 # Modifiers
 # =============================================================================
@@ -252,6 +261,9 @@ benchmarks:
 
   macro-eio:
     - eio_fiber_stream
+
+  macro-sedlex:
+    - sedlex_tokenize
 
 # =============================================================================
 # Configs — no sweep, baseline comparison at default GC settings
