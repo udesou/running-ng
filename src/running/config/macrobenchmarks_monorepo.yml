@@ -179,6 +179,15 @@ suites:
         build_script: "ocamlformat.build.sh"
         args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/workload.ml -o /dev/null"
 
+  macro-decompress:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      test_decompress:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
+        build_script: "decompress.build.sh"
+        args: "64 524288"
+
 # =============================================================================
 # Modifiers
 # =============================================================================
@@ -227,6 +236,9 @@ benchmarks:
 
   macro-ocamlformat:
     - ocamlformat_rocq
+
+  macro-decompress:
+    - test_decompress
 
 # =============================================================================
 # Configs — no sweep, baseline comparison at default GC settings
