@@ -207,6 +207,33 @@ suites:
         build_script: "sedlex.build.sh"
         args: "200000"
 
+  macro-yojson:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      ydump:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
+        build_script: "yojson.build.sh"
+        args: "-c ${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson/sample.json"
+
+  macro-zarith:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      zarith_pi:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
+        build_script: "zarith.build.sh"
+        args: "10000"
+
+  macro-owl:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      owl_gc:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
+        build_script: "owl.build.sh"
+        args: ""
+
 # =============================================================================
 # Modifiers
 # =============================================================================
@@ -264,6 +291,15 @@ benchmarks:
 
   macro-sedlex:
     - sedlex_tokenize
+
+  macro-yojson:
+    - ydump
+
+  macro-zarith:
+    - zarith_pi
+
+  macro-owl:
+    - owl_gc
 
 # =============================================================================
 # Configs — no sweep, baseline comparison at default GC settings
