@@ -161,6 +161,24 @@ suites:
         build_script: "ahrefs-devkit.build.sh"
         args: ""
 
+  macro-irmin:
+    type: OCamlBenchmarkSuite
+    timeout: 300
+    programs:
+      irmin_mem_rw:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
+        build_script: "irmin.build.sh"
+        args: "10000 50000 80 100000"
+
+  macro-ocamlformat:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      ocamlformat_rocq:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
+        build_script: "ocamlformat.build.sh"
+        args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/workload.ml -o /dev/null"
+
 # =============================================================================
 # Modifiers
 # =============================================================================
@@ -203,6 +221,12 @@ benchmarks:
     - devkit_stre
     - devkit_network
     - devkit_gzip
+
+  macro-irmin:
+    - irmin_mem_rw
+
+  macro-ocamlformat:
+    - ocamlformat_rocq
 
 # =============================================================================
 # Configs — no sweep, baseline comparison at default GC settings
