@@ -46,19 +46,19 @@ spread_factor: 1
 # The compiler is the ONLY thing that changes between runtimes.
 # The benchmark source code (in ~/macro-benches) is identical for all.
 #
-# ocaml-5.4.1 uses opam switch (auto-created if not present).
-# trunk and OxCaml use pre-built executables from the toolchain cache
-# (built by the gc_sweep config).  To rebuild them, use gc_sweep_all_versions.yml.
+# Compilers are built from source via `opam compiler create` on first run
+# and cached in opam switches for subsequent runs.
 runtimes:
   ocaml-5.4.1:
     type: OCaml
     version: "5.4.1"
   ocaml-trunk:
     type: OCaml
-    executable: "/tmp/running-ng-ocaml-toolchains/commit-02ee646ee1f40eb19f4942f50a4a607b52b3ab39/install/bin/ocaml"
+    commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
   oxcaml-trunk:
-    type: OCaml
-    executable: "/tmp/running-ng-ocaml-toolchains/commit-068b25529286862035eaf827230f7ffa86659c49/install/bin/ocaml"
+    type: OxCaml
+    commit: "068b25529286862035eaf827230f7ffa86659c49"
+    configure_args: ["--enable-poll-insertion", "--enable-multidomain"]
 
 # =============================================================================
 # Suites — monorepo builds (OCamlBenchmarkSuite, not MacroBenchmarkSuite)

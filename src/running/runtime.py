@@ -355,10 +355,21 @@ class OCaml(Runtime):
         ])
 
         # Install relocatable dune and ocamlfind.
-        OCaml._run_checked([
-            opam, "install", "dune", "ocamlfind",
-            "--switch={}".format(switch_name), "--yes",
-        ])
+        # This may fail on bleeding-edge trunk if dune is incompatible with
+        # the compiler version.  In that case, the tools switch provides dune
+        # via PATH (set up by run_ocaml_bench_gc_sweep.sh).
+        try:
+            OCaml._run_checked([
+                opam, "install", "dune", "ocamlfind",
+                "--switch={}".format(switch_name), "--yes",
+            ])
+        except subprocess.CalledProcessError:
+            logging.warning(
+                "Failed to install dune/ocamlfind in switch '%s'. "
+                "Benchmark build scripts will use dune from the tools switch "
+                "(ensure it is on PATH).",
+                switch_name,
+            )
 
     @staticmethod
     def _get_opam_root() -> Path:
