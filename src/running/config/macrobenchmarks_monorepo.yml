@@ -188,6 +188,16 @@ suites:
         build_script: "decompress.build.sh"
         args: "64 524288"
 
+  # Eio: OCaml 5 effect-based concurrency (requires OCaml >= 5.2)
+  macro-eio:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      eio_fiber_stream:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
+        build_script: "eio.build.sh"
+        args: ""
+
 # =============================================================================
 # Modifiers
 # =============================================================================
@@ -239,6 +249,9 @@ benchmarks:
 
   macro-decompress:
     - test_decompress
+
+  macro-eio:
+    - eio_fiber_stream
 
 # =============================================================================
 # Configs — no sweep, baseline comparison at default GC settings
