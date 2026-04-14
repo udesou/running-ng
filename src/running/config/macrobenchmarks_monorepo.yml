@@ -122,6 +122,10 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
         args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/yyll.why"
+      alt_ergo_unsat_smt2:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
+        build_script: "alt-ergo.build.sh"
+        args: "--timelimit 15 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/unsat.smt2"
 
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
@@ -266,6 +270,7 @@ benchmarks:
   macro-alt-ergo-monorepo:
     - alt_ergo_fill
     - alt_ergo_yyll
+    - alt_ergo_unsat_smt2
 
   macro-coq-monorepo:
     - coqc_basicsyntax
