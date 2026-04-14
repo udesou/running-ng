@@ -168,7 +168,7 @@ suites:
       irmin_mem_rw:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
         build_script: "irmin.build.sh"
-        args: "10000 50000 80 100000"
+        args: "3000 10000 80 20000"
 
   macro-ocamlformat:
     type: OCamlBenchmarkSuite
@@ -177,7 +177,7 @@ suites:
       ocamlformat_rocq:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
         build_script: "ocamlformat.build.sh"
-        args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/workload.ml -o /dev/null"
+        args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/workload_5x.ml -o /dev/null"
 
   macro-decompress:
     type: OCamlBenchmarkSuite
@@ -205,16 +205,16 @@ suites:
       sedlex_tokenize:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
         build_script: "sedlex.build.sh"
-        args: "200000"
+        args: "700000"
 
   macro-yojson:
     type: OCamlBenchmarkSuite
     timeout: 120
     programs:
-      ydump:
+      ydump_repeat:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
         build_script: "yojson.build.sh"
-        args: "-c ${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson/sample.json"
+        args: "1000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson/sample.json"
 
   macro-zarith:
     type: OCamlBenchmarkSuite
@@ -223,7 +223,7 @@ suites:
       zarith_pi:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
         build_script: "zarith.build.sh"
-        args: "10000"
+        args: "15000"
 
   macro-owl:
     type: OCamlBenchmarkSuite
@@ -293,7 +293,7 @@ benchmarks:
     - sedlex_tokenize
 
   macro-yojson:
-    - ydump
+    - ydump_repeat
 
   macro-zarith:
     - zarith_pi
