@@ -129,16 +129,12 @@ suites:
 
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
-    timeout: 600
+    timeout: 120
     programs:
-      coqc_basicsyntax:
+      coqc_corelib_stress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
         build_script: "coq.build.sh"
-        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/BasicSyntax.v"
-      coqc_abstractinterpretation:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
-        build_script: "coq.build.sh"
-        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/AbstractInterpretation.v"
+        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_corelib_stress.v"
 
   # ahrefs-devkit: builds as a standalone dune project (not in the monorepo
   # workspace) because devkit has C-binding deps (libevent, ocurl, pcre) that
@@ -273,8 +269,7 @@ benchmarks:
     - alt_ergo_unsat_smt2
 
   macro-coq-monorepo:
-    - coqc_basicsyntax
-    - coqc_abstractinterpretation
+    - coqc_corelib_stress
 
   macro-devkit:
     - devkit_htmlstream
