@@ -748,11 +748,8 @@ class OxCaml(OCaml):
         return built_executable
 
     def __init__(self, **kwargs):
-        # Route through OxCaml's build logic, not OCaml's.
-        Runtime.__init__(self, **kwargs)
-        self.executable = OxCaml._resolve_or_build_executable(kwargs)
-        self.version: Optional[str] = kwargs.get("version")
-        self.commit: Optional[str] = kwargs.get("commit", kwargs.get("hash"))
-        if not self.executable.exists():
-            logging.warning("OxCaml executable {} doesn't exist".format(self.executable))
-        self.executable = self.executable.absolute()
+        # Default to OxCaml repo if not specified, then delegate to OCaml's
+        # switch-based build via opam compiler create.
+        if "repo" not in kwargs:
+            kwargs["repo"] = OxCaml.DEFAULT_REPO
+        super().__init__(**kwargs)
