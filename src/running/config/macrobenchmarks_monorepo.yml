@@ -234,6 +234,40 @@ suites:
         build_script: "owl.build.sh"
         args: ""
 
+  # dune-bootstrap: build dune from source (~100K LOC OCaml).
+  # Exercises the OCaml compiler on a large real-world codebase.
+  macro-dune-bootstrap:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      dune_bootstrap:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/dune-bootstrap"
+        build_script: "dune-bootstrap.build.sh"
+        args: ""
+
+  # liquidsoap-lang: parse + typecheck liquidsoap scripts (DSL compiler).
+  macro-liquidsoap-lang:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      liq_parse_typecheck:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
+        build_script: "liquidsoap-lang.build.sh"
+        args: "50000"
+
+  # pplacer: phylogenetic placement (bioinformatics).
+  # Runs the pplacer test suite (224 tests) which exercises likelihood
+  # calculations, tree operations, and placement algorithms.
+  # NOTE: batteries doesn't support OCaml trunk (5.6) — 5.4.1 only.
+  macro-pplacer:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      pplacer_testsuite:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
+        build_script: "pplacer.build.sh"
+        args: "8"
+
 # =============================================================================
 # Modifiers
 # =============================================================================
@@ -300,6 +334,15 @@ benchmarks:
 
   macro-owl:
     - owl_gc
+
+  macro-dune-bootstrap:
+    - dune_bootstrap
+
+  macro-liquidsoap-lang:
+    - liq_parse_typecheck
+
+  macro-pplacer:
+    - pplacer_testsuite
 
 # =============================================================================
 # Configs — no sweep, baseline comparison at default GC settings
