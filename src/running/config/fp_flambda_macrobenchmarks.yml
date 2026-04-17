@@ -254,6 +254,17 @@ modifiers:
   perf_grp1:
     type: PerfAndOllyAttach
     val: "task-clock,page-faults,cycles,instructions"
+  # Runtime events ring buffer size (log2 words per domain).
+  # Default 16 (64K words) overflows on GC-heavy benchmarks (owl, zarith,
+  # eio, coq), causing millions of lost events.  Use 23 (8M words).
+  re:
+    type: OCamlRunParam
+    val: "e={0}"
+  # Max domains — total events file size = d * 2^e * 8 bytes.
+  # Our macrobenchmarks are single-domain; d=2 gives a 128MB file.
+  md:
+    type: OCamlRunParam
+    val: "d={0}"
 
 # =============================================================================
 # Benchmarks — all programs enabled
@@ -321,7 +332,7 @@ benchmarks:
 # Configs — 4 runtimes × default GC params (no sweep)
 # =============================================================================
 configs:
-  - "ocaml-5.4.1|perf_grp1"
-  - "ocaml-5.4.1-fp|perf_grp1"
-  - "ocaml-5.4.1-flambda|perf_grp1"
-  - "ocaml-5.4.1-fp-flambda|perf_grp1"
+  - "ocaml-5.4.1|perf_grp1|re-23|md-2"
+  - "ocaml-5.4.1-fp|perf_grp1|re-23|md-2"
+  - "ocaml-5.4.1-flambda|perf_grp1|re-23|md-2"
+  - "ocaml-5.4.1-fp-flambda|perf_grp1|re-23|md-2"
