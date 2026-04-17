@@ -19,15 +19,48 @@ The script expects a sibling `benches/` directory by default. Override with `RUN
 
 ### Macrobenchmarks
 
-A separate config (`macrobenchmarks.yml`) runs real-world OCaml applications (alt-ergo, coq, cpdf, cubicle, frama-c, menhir) at default GC settings across compiler versions — no GC sweep, just baseline comparison:
+Real-world OCaml applications (17 tools, 29 benchmark programs across 14
+categories) built from a single dune monorepo ([macro-benches](https://github.com/udesou/macro-benches))
+that vendors all dependencies via opam-monorepo.  Current benchmarks:
+
+- **Text processing:** menhir (3 grammars), sedlex
+- **Text/media:** cpdf (4 PDF operations)
+- **SMT / Proof:** alt-ergo (3), coq/rocq (corelib_stress)
+- **GC stress:** ahrefs-devkit (4)
+- **Databases/Compilers:** irmin, ocamlformat, dune-bootstrap, liquidsoap-lang
+- **Compression/Concurrency:** decompress, eio
+- **Data formats:** yojson
+- **Numerics:** zarith, owl
+- **Bioinformatics:** pplacer
+
+Three macrobenchmark configs are shipped:
+
+| Config | Purpose | Runtimes | Invocations |
+|---|---|---|---|
+| `macrobenchmarks_monorepo.yml` | Cross-runtime comparison at default GC | 5.4.1, trunk, OxCaml | 1 |
+| `fp_flambda_macrobenchmarks.yml` | FP × flambda 2×2 sweep | 4 variants of 5.4.1 | 3 |
+| `macrobenchmarks.yml` | Legacy (opam-install per switch) | configurable | 1 |
+
+To run the monorepo-based configs:
 
 ```bash
-CONFIG_FILE=src/running/config/macrobenchmarks.yml ./run_ocaml_bench_gc_sweep.sh
-# Or build-only:
-CONFIG_FILE=src/running/config/macrobenchmarks.yml ./build_ocaml_binaries_gc_sweep.sh
+# Clone and set up the macro-benches monorepo (one-time; ~10 min):
+git clone https://github.com/udesou/macro-benches.git ~/macro-benches
+cd ~/macro-benches && make setup
+
+# Then run from running-ng:
+cd ~/running-ng
+RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+CONFIG_FILE=src/running/config/macrobenchmarks_monorepo.yml \
+  bash run_ocaml_bench_gc_sweep.sh
 ```
 
-These benchmarks install tools via opam into isolated switches. First run is slow (opam installs); subsequent runs reuse cached switches. Benchmark sources and inputs live in `benches/macrobenchmarks/`.
+The monorepo approach vendors all OCaml dependencies into a single
+dune workspace, ensuring identical source code across all runtimes —
+the only variable is the compiler.  See
+[macro-benches/README.md](https://github.com/udesou/macro-benches#readme)
+for setup details, patches applied to vendored sources, and a list
+of system dependencies.
 
 ## Prerequisites
 
@@ -284,7 +317,8 @@ The `.json` sidecar is the preferred input for analysis scripts. Old `.log` file
 |---|---|---|
 | `RUNNING_BENCH_DIR` | `../benches` (relative to script) | Root of the benchmark sources |
 | `LOG_DIR` | `gc-sweep-logs/` | Where log files are written |
-| `CONFIG_FILE` | `src/running/config/ocaml_gc_sweep_example.yml` | YAML config (also: `macrobenchmarks.yml`, `gc_sweep_all_versions.yml`) |
+| `CONFIG_FILE` | `src/running/config/ocaml_gc_sweep_example.yml` | YAML config (also: `macrobenchmarks_monorepo.yml`, `fp_flambda_macrobenchmarks.yml`, `gc_sweep_all_versions.yml`) |
+| `RUNNING_MACRO_BENCH_DIR` | n/a | Root of the `macro-benches` monorepo (required for `macrobenchmarks_monorepo.yml` and `fp_flambda_macrobenchmarks.yml`) |
 | `OLLY_BIN` | `~/runtime_events_tools/_build/install/default/bin` | Directory containing `olly` binary |
 
 ## Development Setup
