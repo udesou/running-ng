@@ -96,11 +96,11 @@ suites:
       cpdf_merge:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
         build_script: "cpdf.build.sh"
-        args: "-merge ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/metro_geo.pdf -o /dev/null"
+        args: "-merge ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
       cpdf_blacktext:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
         build_script: "cpdf.build.sh"
-        args: "-blacktext ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/metro_geo.pdf -o /dev/null"
+        args: "-blacktext ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
       cpdf_scale:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
         build_script: "cpdf.build.sh"
@@ -117,11 +117,11 @@ suites:
       alt_ergo_fill:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
-        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/fill.why"
+        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/fill.why"
       alt_ergo_yyll:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
-        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/yyll.why"
+        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/yyll.why"
       alt_ergo_unsat_smt2:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
@@ -129,7 +129,7 @@ suites:
 
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 300
     programs:
       coqc_corelib_stress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
@@ -151,15 +151,15 @@ suites:
       devkit_stre:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
-        args: ""
+        args: "80"
       devkit_network:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
-        args: ""
+        args: "10"
       devkit_gzip:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
-        args: ""
+        args: "15"
 
   macro-irmin:
     type: OCamlBenchmarkSuite
@@ -232,7 +232,7 @@ suites:
       owl_gc:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
-        args: ""
+        args: "7"
 
   # dune-bootstrap: build dune from source (~100K LOC OCaml).
   # Exercises the OCaml compiler on a large real-world codebase.
