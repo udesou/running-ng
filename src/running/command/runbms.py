@@ -176,7 +176,7 @@ def get_hfacs(heap_range: int, spread_factor: int, N: int, ns: List[int]) -> Lis
     return [spread(spread_factor, N, n)/divisor + start for n in ns]
 
 
-def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Optional[int], fd: Optional[BinaryIO]) -> Tuple[bytes, SubprocessrExit]:
+def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Optional[int], fd: Optional[BinaryIO], json_path: Optional[Path] = None) -> Tuple[bytes, SubprocessrExit]:
     runtime, mods = parse_config_str(configuration, c)
     mod_b = b.attach_modifiers(mods)
     if size is not None:
@@ -193,6 +193,16 @@ def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Opti
     if fd:
         epilogue = get_log_epilogue(runtime, mod_b)
         fd.write(epilogue.encode("ascii"))
+    # Write structured JSON sidecar (NDJSON: one compact JSON object per line)
+    if json_path is not None and companion_out:
+        try:
+            import json
+            data = json.loads(companion_out)
+            with json_path.open("ab") as jf:
+                jf.write(json.dumps(data, separators=(",", ":")).encode("utf-8"))
+                jf.write(b"\n")
+        except (json.JSONDecodeError, ValueError):
+            pass
     return output, exit_status
 
 
@@ -210,6 +220,10 @@ def get_filename_no_ext(bm: Benchmark, hfac: Optional[float], size: Optional[int
 
 def get_filename(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> str:
     return get_filename_no_ext(bm, hfac, size, config) + ".log"
+
+
+def get_json_filename(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> str:
+    return get_filename_no_ext(bm, hfac, size, config) + ".json"
 
 
 def get_filename_completed(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> str:
@@ -339,6 +353,7 @@ def run_one_benchmark(
                         p.end_config(hfac, size, bm, i, c, j, True)
                     continue
             log_filename = get_filename(bm, hfac, size, c)
+            json_filename = get_json_filename(bm, hfac, size, c)
             logging.debug("Running with log filename {}".format(log_filename))
             runtime, _ = parse_config_str(configuration, c)
             try:
@@ -351,7 +366,8 @@ def run_one_benchmark(
                     fd: BinaryIO
                     with (log_dir / log_filename).open("ab") as fd:
                         output, exit_status = run_benchmark_with_config(
-                            c, bm, runbms_dir, size, fd
+                            c, bm, runbms_dir, size, fd,
+                            json_path=log_dir / json_filename,
                         )
                     ever_ran[j] = True
             except Exception as e:
@@ -389,8 +405,11 @@ def run_one_benchmark(
         p.end_benchmark(hfac, size, bm)
     for j, c in enumerate(configs):
         log_filename = get_filename(bm, hfac, size, c)
+        json_file = log_dir / get_json_filename(bm, hfac, size, c)
         if not is_dry_run() and compress_logs and ever_ran[j]:
             compress_log_file(log_dir / log_filename)
+            if json_file.exists():
+                compress_log_file(json_file)
     print()
 
 

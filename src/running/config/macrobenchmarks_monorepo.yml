@@ -348,6 +348,6 @@ benchmarks:
 # Configs — no sweep, baseline comparison at default GC settings
 # =============================================================================
 configs:
-  - "ocaml-5.4.1|perf_grp1|time_stats|gc_verbose"
-  - "ocaml-trunk|perf_grp1|time_stats|gc_verbose"
-  - "oxcaml-trunk|perf_grp1|time_stats|gc_verbose"
+  - "ocaml-5.4.1|perf_grp1"
+  - "ocaml-trunk|perf_grp1"
+  - "oxcaml-trunk|perf_grp1"

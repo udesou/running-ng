@@ -16,6 +16,29 @@ PYTHONPATH="$ROOT_DIR/src"
 OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"
 OLLY_BIN="${OLLY_BIN:-$OLLY_DIR/_build/install/default/bin}"
 
+# --- Verify runtime_events_tools is recent enough --------------------------
+# The benchmark pipeline relies on `olly gc-stats --json` emitting `max_rss_kb`
+# (tarides/runtime_events_tools#85).  If the local checkout predates that
+# change, the .json sidecar will silently lack RSS data — so fail loudly at
+# setup time rather than halfway through a long sweep.  We check the feature
+# commit (not the merge commit) so the check works from any branch based on
+# or after it.
+REQUIRED_OLLY_COMMIT="977e33b6dea5e3bbcf13557a31513b11dfbfc4d5"
+if [[ -d "$OLLY_DIR/.git" ]]; then
+  if ! git -C "$OLLY_DIR" cat-file -e "$REQUIRED_OLLY_COMMIT" 2>/dev/null; then
+    echo "Fetching latest refs in $OLLY_DIR ..."
+    git -C "$OLLY_DIR" fetch --quiet || true
+  fi
+  if ! git -C "$OLLY_DIR" merge-base --is-ancestor "$REQUIRED_OLLY_COMMIT" HEAD 2>/dev/null; then
+    echo "ERROR: runtime_events_tools at $OLLY_DIR is out of date." >&2
+    echo "  HEAD does not contain $REQUIRED_OLLY_COMMIT" >&2
+    echo "  (tarides/runtime_events_tools#85, required for max_rss_kb in --json output)." >&2
+    echo "  Update: cd '$OLLY_DIR' && git checkout main && git pull" >&2
+    echo "  Then delete the stale binary: rm -rf '$OLLY_DIR/_build'" >&2
+    exit 1
+  fi
+fi
+
 # --- Ensure a tools switch with dune/ocamlfind exists ----------------------
 # Benchmark build scripts and olly need dune + ocamlfind.  The user's active
 # opam switch may be the OxCaml bootstrap switch which lacks these tools.

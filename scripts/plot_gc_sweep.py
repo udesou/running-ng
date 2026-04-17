@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import csv
+import gzip
+import json
 import re
 from pathlib import Path
+
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -62,12 +66,119 @@ def _read_olly_time_s(text: str, label: str) -> float:
     return float(m.group(1))
 
 
+def _find_json_sidecar(log_path: Path) -> Optional[Path]:
+    """Find the .json sidecar for a .log file (plain or gzipped)."""
+    stem = log_path.name
+    # Strip .log or .log.gz suffix to get the base name
+    if stem.endswith(".log.gz"):
+        base = stem[: -len(".log.gz")]
+    elif stem.endswith(".log"):
+        base = stem[: -len(".log")]
+    else:
+        return None
+    for candidate in [
+        log_path.parent / f"{base}.json",
+        log_path.parent / f"{base}.json.gz",
+    ]:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _read_json_sidecar(path: Path) -> Optional[dict]:
+    """Read and parse a JSON sidecar file (NDJSON, plain or gzipped).
+
+    A sidecar contains one compact JSON object per line (one per invocation).
+    We return the last one — matching the .log convention of appending.
+    """
+    try:
+        if path.name.endswith(".gz"):
+            raw = gzip.open(path, "rb").read()
+        else:
+            raw = path.read_bytes()
+        text = raw.decode("utf-8", errors="replace").strip()
+        if not text:
+            return None
+        # NDJSON: take the last non-empty line
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if line:
+                return json.loads(line)
+        return None
+    except Exception:
+        return None
+
+
+def _parse_from_json(data: dict, log_name: str, s: int, o: int) -> dict:
+    """Build a row dict from structured JSON sidecar data."""
+    row: dict = {
+        "log_file": log_name,
+        "s": s,
+        "o": o,
+    }
+
+    # olly gc-stats --json metrics (flat top-level fields)
+    olly = data.get("olly", {})
+    row["olly_wall_time_s"] = olly.get("wall_time", np.nan)
+    row["olly_cpu_time_s"] = olly.get("cpu_time", np.nan)
+    row["olly_gc_time_s"] = olly.get("gc_time", np.nan)
+    row["olly_gc_overhead_pct"] = olly.get("gc_overhead", np.nan)
+    row["max_rss_kb"] = olly.get("max_rss_kb", np.nan)
+    row["max_rss_mb"] = row["max_rss_kb"] / 1024.0 if row["max_rss_kb"] and not (isinstance(row["max_rss_kb"], float) and np.isnan(row["max_rss_kb"])) else np.nan
+
+    # Allocation stats from olly (replaces OCAMLRUNPARAM gc_verbose)
+    alloc = olly.get("allocations", {})
+    row["minor_words"] = alloc.get("minor_heap", np.nan)
+    row["promoted_words"] = alloc.get("promoted_words", np.nan)
+    row["major_words"] = alloc.get("major_heap", np.nan)
+
+    # Collection counts from olly
+    collections = olly.get("collections", {})
+    row["minor_collections"] = collections.get("minor", np.nan)
+    row["major_collections"] = collections.get("major", np.nan)
+    row["forced_major_collections"] = collections.get("forced_major", np.nan)
+    row["compactions"] = collections.get("compactions", np.nan)
+
+    row["promotion_rate"] = row["promoted_words"] / row["minor_words"] if row["minor_words"] else np.nan
+    row["major_per_minor"] = row["major_collections"] / row["minor_collections"] if row["minor_collections"] else np.nan
+
+    # perf stat --json output: array of {"event": "cycles", "counter-value": "123", ...}
+    perf_list = data.get("perf", [])
+    for entry in perf_list:
+        event = entry.get("event")
+        if not event:
+            continue
+        try:
+            row[f"perf_{event}"] = float(entry["counter-value"])
+        except (KeyError, ValueError, TypeError):
+            row[f"perf_{event}"] = np.nan
+        # Also store the derived metric if present (e.g. "insn per cycle", "GHz")
+        metric_val = entry.get("metric-value")
+        metric_unit = entry.get("metric-unit")
+        if metric_val is not None and metric_unit:
+            safe_unit = re.sub(r"[^a-zA-Z0-9_]+", "_", metric_unit).strip("_").lower()
+            try:
+                row[f"perf_{event}_{safe_unit}"] = float(metric_val)
+            except (ValueError, TypeError):
+                pass
+
+    return row
+
+
 def parse_log(path: Path) -> dict:
     m = re.search(r"\.s-(\d+)\.o-(\d+)\.", path.name)
     if not m:
         raise ValueError(f"Cannot parse s/o from filename: {path.name}")
     s, o = map(int, m.groups())
 
+    # Try structured JSON sidecar first
+    json_path = _find_json_sidecar(path)
+    if json_path is not None:
+        data = _read_json_sidecar(json_path)
+        if data is not None:
+            return _parse_from_json(data, path.name, s, o)
+
+    # Fallback: regex-parse the text log (backward compat for old runs)
     text = path.read_text()
 
     row = {
@@ -237,24 +348,19 @@ def main() -> None:
     df = parse_logs(logs_dir, args.pattern)
     write_csv(df, out_csv)
 
-    has_olly = (
-        "olly_wall_time_s" in df.columns
-        and "olly_gc_time_s" in df.columns
-        and not df["olly_wall_time_s"].isna().all()
-        and not df["olly_gc_time_s"].isna().all()
-    )
+    metric_specs = [
+        ("olly_wall_time_s", "Wall time (s) over (s,o)", False),
+        ("olly_gc_time_s", "GC time (s) over (s,o)", False),
+    ]
 
-    if has_olly:
-        metric_specs = [
-            ("olly_wall_time_s", "Olly wall time (s) over (s,o)", False),
-            ("olly_gc_time_s", "Olly GC time (s) over (s,o)", False),
-            ("maxresident_mb", "Max RSS (MB) over (s,o)", False),
-        ]
-    else:
-        metric_specs = [
-            ("elapsed_s", "Elapsed time (s) over (s,o)", False),
-            ("maxresident_mb", "Max RSS (MB) over (s,o)", False),
-        ]
+    if "max_rss_mb" in df.columns and not df["max_rss_mb"].isna().all():
+        metric_specs.append(("max_rss_mb", "Max RSS (MB) over (s,o)", False))
+
+    # Legacy /usr/bin/time metrics (old logs without JSON sidecar)
+    if "elapsed_s" in df.columns and not df["elapsed_s"].isna().all():
+        metric_specs.append(("elapsed_s", "Elapsed time (s) over (s,o)", False))
+    if "maxresident_mb" in df.columns and not df["maxresident_mb"].isna().all():
+        metric_specs.append(("maxresident_mb", "Max RSS (MB) over (s,o)", False))
 
     for metric, title, logz in metric_specs:
         if metric not in df.columns or df[metric].isna().all():

@@ -1,5 +1,6 @@
 import errno
 import glob
+import json
 import logging
 import signal
 import subprocess
@@ -148,8 +149,8 @@ class Benchmark(object):
         os.close(sync_r)
 
         # Attach perf to the PID while the wrapper is blocked — perf follows exec()
-        perf_output = os.path.join(tmpdir, "perf.out")
-        perf_cmd = ["perf", "stat", "--inherit", "-p", str(pid), "-o", perf_output]
+        perf_output = os.path.join(tmpdir, "perf.json")
+        perf_cmd = ["perf", "stat", "--json", "--inherit", "-p", str(pid), "-o", perf_output]
         if modifier.perf_events:
             perf_cmd.extend(["-e", ",".join(modifier.perf_events)])
         perf_p = subprocess.Popen(perf_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -182,13 +183,13 @@ class Benchmark(object):
                 logging.info("OCaml PID %d differs from wrapper PID %d; re-attaching perf", ocaml_pid, pid)
                 perf_p.kill()
                 perf_p.wait()
-                perf_cmd_new = ["perf", "stat", "--inherit", "-p", str(ocaml_pid), "-o", perf_output]
+                perf_cmd_new = ["perf", "stat", "--json", "--inherit", "-p", str(ocaml_pid), "-o", perf_output]
                 if modifier.perf_events:
                     perf_cmd_new.extend(["-e", ",".join(modifier.perf_events)])
                 perf_p = subprocess.Popen(perf_cmd_new, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
             olly_p = subprocess.Popen(
-                ["olly", "gc-stats", "--attach", "{}:{}".format(tmpdir, ocaml_pid)],
+                ["olly", "gc-stats", "--json", "--attach", "{}:{}".format(tmpdir, ocaml_pid)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -217,23 +218,39 @@ class Benchmark(object):
             perf_p.kill()
             perf_p.wait()
 
-        companion_out = b""
+        # --- Build structured JSON result ---
+        structured: Dict[str, Any] = {}
+
+        # olly gc-stats --json output
         if olly_p is not None:
             try:
                 olly_stdout, _ = olly_p.communicate(timeout=30)
-                companion_out += olly_stdout
             except subprocess.TimeoutExpired:
                 logging.warning("olly gc-stats did not exit after 30 seconds. Killing.")
                 olly_p.kill()
                 olly_stdout, _ = olly_p.communicate()
-                companion_out += olly_stdout
+            try:
+                structured["olly"] = json.loads(olly_stdout)
+            except (json.JSONDecodeError, ValueError) as e:
+                logging.warning("Failed to parse olly JSON output: %s", e)
+                structured["olly_raw"] = olly_stdout.decode("utf-8", errors="replace")
 
+        # perf stat --json output (NDJSON: one JSON object per counter)
         try:
-            with open(perf_output, "rb") as f:
-                companion_out += b"\n--- perf stat ---\n" + f.read()
+            with open(perf_output, "r") as f:
+                perf_lines = []
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            perf_lines.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+                structured["perf"] = perf_lines
         except FileNotFoundError:
             logging.warning("perf output file %s not found", perf_output)
 
+        companion_out = json.dumps(structured, indent=2).encode("utf-8")
         return bench_stderr if bench_stderr else b"", companion_out, subprocess_exit
 
     def run(self, runtime: Runtime, cwd: Optional[Path] = None) -> Tuple[bytes, bytes, SubprocessrExit]:

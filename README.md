@@ -40,6 +40,7 @@ Run `install_deps.sh` to install everything automatically, or set up manually:
   git clone https://github.com/tarides/runtime_events_tools.git ~/runtime_events_tools
   cd ~/runtime_events_tools && dune build -p runtime_events_tools @install
   ```
+  **Minimum version:** must include [PR #85](https://github.com/tarides/runtime_events_tools/pull/85) (commit `977e33b`) so `olly gc-stats --json` emits `max_rss_kb`. The launch script checks this and fails with a clear message if the local checkout is too old — run `git pull` inside `~/runtime_events_tools` and delete `_build/` to rebuild.
 - **perf** (Linux only) — for hardware performance counters. `PerfAndOllyAttach` modifiers require `perf stat`. Check access with `perf stat ls`; you may need `sudo sysctl kernel.perf_event_paranoid=1`.
 - **benches/** — the benchmark sources repository (cloned by `install_deps.sh`)
 
@@ -106,20 +107,9 @@ All paths in the config use `${RUNNING_BENCH_DIR}` which is expanded at runtime 
 
 #### `modifiers` — How to tweak runs
 
-- **`Wrapper`** (`time_stats`, `olly_gc`) — prepends commands like `/usr/bin/time` or `olly gc-stats` to the benchmark execution
-- **`OCamlRunParam`** (`s`, `o`, `a`, `gc_verbose`, `re`, `md`) — templated values like `s={0}` that get expanded with sweep values and concatenated into the `OCAMLRUNPARAM` env var (e.g. `OCAMLRUNPARAM="s=32768,o=40"`)
-- **`PerfAndOllyAttach`** (`perf_grp1`, `perf_grp2`, `perf_grp3`) — attaches both `perf stat` and `olly gc-stats` to the benchmark process simultaneously (see below)
-
-##### `gc_verbose` — OxCaml vs stock OCaml
-
-OxCaml reshuffled the GC verbosity flags. The bit that prints GC statistics at exit (`CAML_GC_MSG_STATS` — minor/major collections, heap size, promoted words, etc.) is at different positions:
-
-| Runtime | Modifier | OCAMLRUNPARAM | Hex value |
-|---|---|---|---|
-| Stock OCaml (4.x / 5.x) | `gc_verbose` | `v=0x400` | bit 10 |
-| OxCaml | `gc_verbose_oxcaml` | `v=0x1000` | bit 12 |
-
-OxCaml added new GC message categories (`DOMAIN`, `STW`, `MINOR_HEAP`, `MAJOR_HEAP`, `STACKS`) which shifted `STATS` from `0x400` to `0x1000`. Using the wrong value silently prints nothing useful. **Use `gc_verbose` for stock OCaml runtimes and `gc_verbose_oxcaml` for OxCaml runtimes.**
+- **`Wrapper`** (`time_stats`, `olly_gc`) — prepends commands like `/usr/bin/time` or `olly gc-stats` to the benchmark execution (legacy; `PerfAndOllyAttach` is preferred)
+- **`OCamlRunParam`** (`s`, `o`, `a`, `re`, `md`) — templated values like `s={0}` that get expanded with sweep values and concatenated into the `OCAMLRUNPARAM` env var (e.g. `OCAMLRUNPARAM="s=32768,o=40"`)
+- **`PerfAndOllyAttach`** (`perf_grp1`, `perf_grp2`, `perf_grp3`) — attaches both `perf stat --json` and `olly gc-stats --json` to the benchmark process simultaneously, producing structured JSON output with no custom parsing needed (see below)
 
 ##### Runtime events tuning (`re`, `md`)
 
@@ -137,7 +127,7 @@ Example: for a benchmark spawning 8 worker domains (9 total), use `re-23|md-9`.
 Each config string is `runtime | modifier1 | modifier2 | ...`. Example:
 ```yaml
 configs:
-  - "oxcaml-release|time_stats|perf_grp1|gc_verbose_oxcaml|re-23|md-9"
+  - "oxcaml-release|perf_grp1|re-23|md-9"
 ```
 
 #### `config_sweep` — The GC parameter sweep
@@ -148,12 +138,12 @@ config_sweep:
   o: [40, 60, 80, 100, 120, 150, 200]
 ```
 
-The framework takes the **cross-product** of sweep values for any modifiers **not already present** in the base config. So a base config `"ocaml-release|time_stats"` with the above sweep generates 7x7 = 49 configs like:
+The framework takes the **cross-product** of sweep values for any modifiers **not already present** in the base config. So a base config `"ocaml-release|perf_grp1"` with the above sweep generates 7x7 = 49 configs like:
 ```
-ocaml-release|time_stats|s-32768|o-40
-ocaml-release|time_stats|s-32768|o-60
+ocaml-release|perf_grp1|s-32768|o-40
+ocaml-release|perf_grp1|s-32768|o-60
 ...
-ocaml-release|time_stats|s-2097152|o-200
+ocaml-release|perf_grp1|s-2097152|o-200
 ```
 
 Each `s-32768` expands the modifier template `s={0}` to `s=32768`, which becomes part of `OCAMLRUNPARAM`.
@@ -165,25 +155,23 @@ Each `s-32768` expands the modifier template `s={0}` to `s=32768`, which becomes
 3. **Pre-build phase** — for each unique (benchmark, runtime) pair, `running-ng` activates the runtime's opam switch (created via `opam-compiler`) and runs the benchmark's `.build.sh` script. The build script receives env vars `RUNNING_OCAML_OUTPUT`, `RUNNING_OCAML_BENCH_DIR`, `RUNNING_OCAML_RUNTIME_NAME`, and `RUNNING_OCAML_SWITCH`; the compiler, dune, and installed packages are on `PATH` via the switch. Produces a named binary like `binarytrees-ocaml-release`.
 4. **Run loop** — for each benchmark x invocation x config combination:
    - Parse config string to get runtime + modifiers
-   - `benchmark.attach_modifiers(mods)` sets `OCAMLRUNPARAM` and wraps with `/usr/bin/time`
-   - Execute: `[/usr/bin/time ...] ./binarytrees-ocaml-release 21` with `OCAMLRUNPARAM="s=32768,o=40"`
-   - Capture stdout+stderr into a log file
-5. **Log files** are named like: `binarytrees.1000.0.ocaml-release.time_stats.s-32768.o-40.multicore-effects.log`
-   - Prologue includes system info (vmstat, cpuinfo, env vars)
-   - Body is the benchmark's raw output + `/usr/bin/time` stats
-   - `*****` separator, followed by companion output (olly gc-stats + perf stat)
+   - `benchmark.attach_modifiers(mods)` sets `OCAMLRUNPARAM` and attaches perf + olly
+   - Execute: `./binarytrees-ocaml-release 21` with `OCAMLRUNPARAM="s=32768,o=40"`, perf and olly attached
+   - Capture stderr into a log file, structured JSON into a sidecar
+5. **Log files** (`.log`) — metadata: prologue (system info), benchmark stderr; the JSON companion after `*****`
+6. **JSON sidecar files** (`.json`) — the primary output: NDJSON (one compact JSON object per invocation) combining `olly gc-stats --json` and `perf stat --json` output directly
 
 ### Hardware Performance Counters (`PerfAndOllyAttach`)
 
-The `PerfAndOllyAttach` modifier collects both `perf stat` hardware counters and `olly gc-stats` GC telemetry in a single benchmark run. It works by:
+The `PerfAndOllyAttach` modifier collects both `perf stat --json` hardware counters and `olly gc-stats --json` GC telemetry in a single benchmark run, producing structured JSON with zero custom parsing. It works by:
 
 1. Spawning the benchmark via a thin Python wrapper that blocks on a sync pipe
-2. Attaching `perf stat -p <pid>` to the blocked process
+2. Attaching `perf stat --json -p <pid>` to the blocked process
 3. Closing the pipe write end to release the child, which `execvp`s into the benchmark command
-4. Scanning for the OCaml runtime events `.events` file to discover the actual benchmark PID (which may differ from the wrapper PID if `/usr/bin/time` forks a child)
-5. If the OCaml PID differs, re-attaching perf to the real benchmark PID
-6. Attaching `olly gc-stats --attach` to the runtime events ring buffer
-7. Collecting both outputs when the benchmark exits
+4. Scanning for the OCaml runtime events `.events` file to discover the actual benchmark PID
+5. If the OCaml PID differs from the wrapper, re-attaching perf to the real benchmark PID
+6. Attaching `olly gc-stats --json --attach` to the runtime events ring buffer
+7. Collecting both JSON outputs and combining into `{"olly": {...}, "perf": [...]}`
 
 Three pre-defined counter groups avoid PMU multiplexing (each fits in ~4 programmable + 3 fixed counters):
 
@@ -196,7 +184,7 @@ Three pre-defined counter groups avoid PMU multiplexing (each fits in ~4 program
 Run one group at a time. Example config:
 ```yaml
 configs:
-  - "ocaml-release|time_stats|perf_grp1|gc_verbose"
+  - "ocaml-release|perf_grp1"
 ```
 
 **Requirements:**
@@ -259,21 +247,16 @@ python3 scripts/plot_gc_sweep.py gc-sweep-logs/<run-directory>
 The example config (`ocaml_gc_sweep_example.yml`) ships with this default:
 ```yaml
 configs:
-  - "oxcaml-release|time_stats|perf_grp1|gc_verbose_oxcaml|re-23|md-9"
+  - "oxcaml-release|perf_grp1|re-23|md-9"
 ```
 
-This collects `/usr/bin/time` resource stats, baseline IPC perf counters, olly GC stats (via `PerfAndOllyAttach`), and OxCaml verbose GC output (`OCAMLRUNPARAM=v=0x1000`) for every benchmark. The `config_sweep` then varies `s` (minor heap size) and `o` (space overhead) across the parameter grid.
-
-For stock OCaml runtimes, use `gc_verbose` instead of `gc_verbose_oxcaml`:
-```yaml
-configs:
-  - "ocaml-release|time_stats|perf_grp1|gc_verbose"
-```
+This collects baseline IPC perf counters (`perf stat --json`) and structured GC stats (`olly gc-stats --json` — allocations, collections, latencies, execution times) for every benchmark. No `/usr/bin/time` or `OCAMLRUNPARAM=v=...` needed — olly provides all timing and GC allocation data directly. The `config_sweep` then varies `s` (minor heap size) and `o` (space overhead) across the parameter grid.
 
 ### Log File Structure
 
-Each log file contains:
+Each benchmark run produces two files:
 
+**`.log` file** — metadata + benchmark stderr:
 ```
 -----
 <command line with OCAMLRUNPARAM and full invocation>
@@ -281,15 +264,19 @@ running-ng v0.3.8
 <timestamp>
 
 <system info: uptime, vmstat, top, env vars, OS, CPU>
-<benchmark stdout + stderr (including /usr/bin/time stats)>
+<benchmark stderr>
 *****
-<olly gc-stats output (lost events warnings, execution times, per-domain stats, GC latency profile)>
-
---- perf stat ---
-<perf stat hardware counter output>
+<structured JSON (pretty-printed, for human inspection)>
 ```
 
-The section before `*****` is the benchmark's direct output. The section after is companion tool output (olly + perf).
+**`.json` sidecar file** — the primary structured output (NDJSON, one compact object per invocation):
+```json
+{"olly":{"execution_times":{...},"allocations":{...},"collections":{...},"gc_latencies":{...}},"perf":[{"event":"cycles","counter-value":"123",...},{"event":"instructions","counter-value":"456",...}]}
+```
+
+The `olly` section is the direct output of `olly gc-stats --json`. The `perf` section is the direct output of `perf stat --json` (an array of counter objects). No custom parsers involved — both tools produce their native JSON.
+
+The `.json` sidecar is the preferred input for analysis scripts. Old `.log` files without a sidecar are still supported via regex fallback in `plot_gc_sweep.py`.
 
 ## Environment Variables
 

@@ -1,16 +1,16 @@
-invocations: 1
+invocations: 5
 remote_host: null
 compress_logs: false
 minheap_multiplier: 1.0
 heap_range: 6
 spread_factor: 1
 
-# plugins:
-#   zulip:
-#     type: Zulip
-#     request:
-#       type: private
-#       to: [361443]
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
 
 # =============================================================================
 # Runtimes
@@ -1209,8 +1209,8 @@ benchmarks:
 # NOT already present in the base config.
 
 configs:
-  - "oxcaml-release|time_stats|perf_grp1|gc_verbose_oxcaml|re-23|md-9"
-  - "ocaml-release|time_stats|perf_grp1|gc_verbose|re-23|md-9"
+  - "oxcaml-release|perf_grp1|re-23|md-9"
+  - "ocaml-release|perf_grp1|re-23|md-9"
 
 config_sweep:
   s: [32768] #, 65536, 131072, 262144, 524288, 1048576, 2097152]
