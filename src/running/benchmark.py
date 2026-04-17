@@ -2,6 +2,7 @@ import errno
 import glob
 import json
 import logging
+import re
 import signal
 import subprocess
 import sys
@@ -188,10 +189,17 @@ class Benchmark(object):
                     perf_cmd_new.extend(["-e", ",".join(modifier.perf_events)])
                 perf_p = subprocess.Popen(perf_cmd_new, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
+            # olly writes its JSON output to stderr by default.  That gets
+            # interleaved with ring-buffer warnings like "[ring_id=0] Lost N
+            # events" on GC-heavy workloads, corrupting the JSON.  Use
+            # --output to redirect JSON to a file and leave stderr for the
+            # warnings we want to discard.
+            olly_output = os.path.join(tmpdir, "olly.json")
             olly_p = subprocess.Popen(
-                ["olly", "gc-stats", "--json", "--attach", "{}:{}".format(tmpdir, ocaml_pid)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                ["olly", "gc-stats", "--json", "--output", olly_output,
+                 "--attach", "{}:{}".format(tmpdir, ocaml_pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
             )
 
         try:
@@ -221,19 +229,40 @@ class Benchmark(object):
         # --- Build structured JSON result ---
         structured: Dict[str, Any] = {}
 
-        # olly gc-stats --json output
+        # olly gc-stats --json output (written to olly_output via --output)
         if olly_p is not None:
             try:
-                olly_stdout, _ = olly_p.communicate(timeout=30)
+                _, olly_stderr = olly_p.communicate(timeout=30)
             except subprocess.TimeoutExpired:
                 logging.warning("olly gc-stats did not exit after 30 seconds. Killing.")
                 olly_p.kill()
-                olly_stdout, _ = olly_p.communicate()
+                _, olly_stderr = olly_p.communicate()
+            if olly_stderr:
+                # Lost-events warnings etc. — surface the first line, don't spam.
+                lines = olly_stderr.decode("utf-8", errors="replace").splitlines()
+                if lines:
+                    logging.info("olly stderr: %s (and %d more lines)", lines[0],
+                                 max(0, len(lines) - 1))
             try:
-                structured["olly"] = json.loads(olly_stdout)
+                with open(olly_output, "r") as f:
+                    olly_text = f.read()
+            except FileNotFoundError:
+                olly_text = ""
+                logging.warning("olly output file %s not found", olly_output)
+            # olly emits C-style `-nan` / `nan` / `-inf` / `inf` when a metric
+            # is computed from zero events (e.g. gc_overhead = 0/0).  These
+            # aren't valid JSON, so substitute `null` before parsing.
+            olly_text_clean = re.sub(
+                r"(?<![A-Za-z0-9_])-?(?:nan|inf(?:inity)?)\b",
+                "null",
+                olly_text,
+                flags=re.IGNORECASE,
+            )
+            try:
+                structured["olly"] = json.loads(olly_text_clean)
             except (json.JSONDecodeError, ValueError) as e:
                 logging.warning("Failed to parse olly JSON output: %s", e)
-                structured["olly_raw"] = olly_stdout.decode("utf-8", errors="replace")
+                structured["olly_raw"] = olly_text
 
         # perf stat --json output (NDJSON: one JSON object per counter)
         try:

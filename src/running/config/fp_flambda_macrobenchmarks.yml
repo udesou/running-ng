@@ -251,6 +251,18 @@ modifiers:
   gc_verbose:
     type: OCamlRunParam
     val: "v=0x400"
+  # Runtime events ring buffer size (log2 words per domain).  Bigger ring
+  # reduces "Lost N events" from olly on GC-heavy workloads.  e=23 → 8M
+  # words (64MB) per domain.
+  re:
+    type: OCamlRunParam
+    val: "e={0}"
+  # Max domains (OCAMLRUNPARAM d=).  All these macrobenchmarks are
+  # sequential (1 main domain), so d=2 minimises the events file size
+  # (md × 2^re × 8 bytes = 128MB for md=2, re=23).
+  md:
+    type: OCamlRunParam
+    val: "d={0}"
   perf_grp1:
     type: PerfAndOllyAttach
     val: "task-clock,page-faults,cycles,instructions"
