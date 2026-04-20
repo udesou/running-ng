@@ -174,10 +174,24 @@ class Benchmark(object):
         #      (ocamlfind, ocamlc, dune, ocamlopt ...).
         # Tool-filter runs off /proc/<pid>/exe on Linux; on other platforms
         # only the alive check applies.
+        # Wait for a usable *.events file in tmpdir.  Priority:
+        #
+        #   1. The wrapper PID's own events file.  Our Python wrapper
+        #      execvp's the benchmark script, and the script ultimately
+        #      exec's the real benchmark binary — so `/proc/<wrapper_pid>`
+        #      ends up as the benchmark itself with the same PID.  Any
+        #      other .events files in tmpdir come from short-lived OCaml
+        #      helpers that the wrapper script invoked in $(...)
+        #      subshells (e.g. coq's wrapper runs `ocamlfind printconf
+        #      stdlib` to set up OCAMLPATH).
+        #
+        #   2. Fall back to scanning for other alive, non-build-tool PIDs
+        #      — needed when a wrapper like /usr/bin/time forks a child
+        #      with a different PID than the one we launched.
         BUILD_TOOLS = {"ocamlfind", "ocamlc", "ocamlc.opt", "ocamlopt",
                        "ocamlopt.opt", "ocaml", "ocamldep", "ocamlmklib",
-                       "ocamllex", "ocamlyacc", "dune", "menhir"}
-        STABILITY_WINDOW = 0.1  # seconds the candidate must stay alive
+                       "ocamllex", "ocamlyacc", "dune", "menhir",
+                       "bash", "sh"}
 
         def pid_alive(p: int) -> bool:
             try:
@@ -204,26 +218,23 @@ class Benchmark(object):
 
         events_file = None
         ocaml_pid = None
+        wrapper_events = os.path.join(tmpdir, "{}.events".format(pid))
         deadline = time.time() + 10.0
         while time.time() < deadline:
+            # Prefer the wrapper's own events file whenever it exists and
+            # the PID has exec'd into the benchmark binary.
+            if os.path.exists(wrapper_events) and pid_is_benchmark(pid):
+                events_file = wrapper_events
+                ocaml_pid = pid
+                break
+            # Fallback: any other alive, non-build-tool PID.
             hits = sorted(glob.glob(os.path.join(tmpdir, "*.events")))
             candidates = [h for h in hits
                           if pid_is_benchmark(int(os.path.basename(h)[:-len(".events")]))]
             if candidates:
-                # If multiple match (rare), prefer the latest by mtime —
-                # the final exec'd process writes its ring last.
-                candidate = max(candidates, key=os.path.getmtime)
-                candidate_pid = int(os.path.basename(candidate)[:-len(".events")])
-                # Stability check: a real benchmark lives for seconds; a
-                # wrapper's $(...) subshell dies in milliseconds.  Wait a
-                # short window and confirm the PID is still the same
-                # (non-build-tool) process before committing.
-                time.sleep(STABILITY_WINDOW)
-                if pid_is_benchmark(candidate_pid):
-                    events_file = candidate
-                    ocaml_pid = candidate_pid
-                    break
-                # Otherwise: the candidate was transient; keep polling.
+                events_file = max(candidates, key=os.path.getmtime)
+                ocaml_pid = int(os.path.basename(events_file)[:-len(".events")])
+                break
             time.sleep(0.01)
 
         if events_file is None:
