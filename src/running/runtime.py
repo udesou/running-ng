@@ -521,12 +521,22 @@ class OCaml(Runtime):
         return self._satellite_switches.get(benchmark_name)
 
     def get_cache_key(self) -> str:
+        # The cache key must uniquely identify the compiler being used — two
+        # runtimes that build from the same version but with different
+        # configure_args (e.g. --enable-frame-pointers vs --enable-flambda)
+        # produce different binaries and must not share a binary cache entry.
+        # Use the runtime's config-file name which is always unique.
         if self.commit:
-            return "ocaml-commit-{}".format(self._safe_key(self.commit))
+            return "ocaml-commit-{}-{}".format(
+                self._safe_key(self.name), self._safe_key(self.commit)
+            )
         if self.version:
-            return "ocaml-version-{}".format(self._safe_key(self.version))
-        return "ocaml-exec-{}".format(
-            hashlib.sha256(str(self.executable).encode("utf-8")).hexdigest()[:12]
+            return "ocaml-version-{}-{}".format(
+                self._safe_key(self.name), self._safe_key(self.version)
+            )
+        return "ocaml-exec-{}-{}".format(
+            self._safe_key(self.name),
+            hashlib.sha256(str(self.executable).encode("utf-8")).hexdigest()[:12],
         )
 
     def get_heapsize_modifier(self, _size: int) -> Modifier:
