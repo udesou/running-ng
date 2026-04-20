@@ -159,16 +159,37 @@ class Benchmark(object):
         # Release: wrapper execs the benchmark, OCaml runtime starts, ring buffer is created
         os.close(sync_w)
 
-        # Wait for any *.events file in tmpdir — we scan rather than looking for a specific
-        # PID because wrappers like /usr/bin/time fork a new child for the actual benchmark,
-        # so the OCaml process PID differs from bench.pid.
+        # Wait for a *.events file in tmpdir whose PID is still alive.  We
+        # scan rather than looking for a specific PID because wrappers like
+        # /usr/bin/time fork a new child, so the OCaml process PID differs
+        # from bench.pid.
+        #
+        # Why we filter by "still alive": some benchmark wrapper scripts run
+        # short-lived OCaml programs (e.g. `ocamlfind printconf stdlib` in a
+        # `$(...)` subshell) *before* exec'ing the real benchmark.  With
+        # OCAML_RUNTIME_EVENTS_START=1 inherited from our env, each of those
+        # writes a .events file with its own short-lived PID, and without
+        # this check we'd latch onto that dead PID and miss the real
+        # benchmark entirely.
+        def pid_alive(p: int) -> bool:
+            try:
+                os.kill(p, 0)
+                return True
+            except OSError:
+                return False
+
         events_file = None
         ocaml_pid = None
         deadline = time.time() + 10.0
         while time.time() < deadline:
-            hits = glob.glob(os.path.join(tmpdir, "*.events"))
-            if hits:
-                events_file = hits[0]
+            hits = sorted(glob.glob(os.path.join(tmpdir, "*.events")))
+            # Prefer any file whose PID is still alive; ignore dead ones.
+            alive = [h for h in hits
+                     if pid_alive(int(os.path.basename(h)[:-len(".events")]))]
+            if alive:
+                # If multiple are alive (rare), prefer the latest by mtime —
+                # the final exec'd process usually writes last.
+                events_file = max(alive, key=os.path.getmtime)
                 ocaml_pid = int(os.path.basename(events_file)[:-len(".events")])
                 break
             time.sleep(0.01)
