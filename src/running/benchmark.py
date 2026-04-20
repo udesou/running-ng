@@ -159,18 +159,25 @@ class Benchmark(object):
         # Release: wrapper execs the benchmark, OCaml runtime starts, ring buffer is created
         os.close(sync_w)
 
-        # Wait for a *.events file in tmpdir whose PID is still alive.  We
-        # scan rather than looking for a specific PID because wrappers like
-        # /usr/bin/time fork a new child, so the OCaml process PID differs
-        # from bench.pid.
+        # Wait for a *.events file in tmpdir whose PID belongs to the real
+        # benchmark (not a short-lived helper).  Some benchmark wrapper
+        # scripts run OCaml programs in `$(...)` subshells before exec'ing
+        # the real benchmark — e.g. coq's wrapper runs `ocamlfind printconf
+        # stdlib` to set up OCAMLPATH.  With OCAML_RUNTIME_EVENTS_START=1
+        # inherited from our env, each of those writes a .events file with
+        # its own short-lived PID.  If we latch onto one of those we'll
+        # miss the real benchmark.
         #
-        # Why we filter by "still alive": some benchmark wrapper scripts run
-        # short-lived OCaml programs (e.g. `ocamlfind printconf stdlib` in a
-        # `$(...)` subshell) *before* exec'ing the real benchmark.  With
-        # OCAML_RUNTIME_EVENTS_START=1 inherited from our env, each of those
-        # writes a .events file with its own short-lived PID, and without
-        # this check we'd latch onto that dead PID and miss the real
-        # benchmark entirely.
+        # Filter strategy:
+        #   1. PID must still be alive (kill(pid, 0) succeeds), AND
+        #   2. The process exe path must not look like a build/setup tool
+        #      (ocamlfind, ocamlc, dune, ocamlopt ...).
+        # Tool-filter runs off /proc/<pid>/exe on Linux; on other platforms
+        # only the alive check applies.
+        BUILD_TOOLS = {"ocamlfind", "ocamlc", "ocamlc.opt", "ocamlopt",
+                       "ocamlopt.opt", "ocaml", "ocamldep", "ocamlmklib",
+                       "ocamllex", "ocamlyacc", "dune", "menhir"}
+
         def pid_alive(p: int) -> bool:
             try:
                 os.kill(p, 0)
@@ -178,18 +185,27 @@ class Benchmark(object):
             except OSError:
                 return False
 
+        def pid_is_benchmark(p: int) -> bool:
+            """Heuristic: PID is alive and not a known build/setup tool."""
+            if not pid_alive(p):
+                return False
+            try:
+                exe = os.path.basename(os.readlink("/proc/{}/exe".format(p)))
+            except OSError:
+                return True  # can't tell — assume ok
+            return exe not in BUILD_TOOLS
+
         events_file = None
         ocaml_pid = None
         deadline = time.time() + 10.0
         while time.time() < deadline:
             hits = sorted(glob.glob(os.path.join(tmpdir, "*.events")))
-            # Prefer any file whose PID is still alive; ignore dead ones.
-            alive = [h for h in hits
-                     if pid_alive(int(os.path.basename(h)[:-len(".events")]))]
-            if alive:
-                # If multiple are alive (rare), prefer the latest by mtime —
-                # the final exec'd process usually writes last.
-                events_file = max(alive, key=os.path.getmtime)
+            candidates = [h for h in hits
+                          if pid_is_benchmark(int(os.path.basename(h)[:-len(".events")]))]
+            if candidates:
+                # If multiple match (rare), prefer the latest by mtime —
+                # the final exec'd process writes its ring last.
+                events_file = max(candidates, key=os.path.getmtime)
                 ocaml_pid = int(os.path.basename(events_file)[:-len(".events")])
                 break
             time.sleep(0.01)
