@@ -66,31 +66,40 @@ def _read_olly_time_s(text: str, label: str) -> float:
     return float(m.group(1))
 
 
-def _find_json_sidecar(log_path: Path) -> Optional[Path]:
-    """Find the .json sidecar for a .log file (plain or gzipped)."""
+def _find_tool_sidecars(log_path: Path) -> dict:
+    """Return a dict mapping tool name to its NDJSON sidecar path.
+
+    Looks for new-format per-tool sidecars (``olly_<base>.json``,
+    ``perf_<base>.json``) and also the old combined-single-sidecar
+    format (``<base>.json``) for backward compat.
+    """
     stem = log_path.name
-    # Strip .log or .log.gz suffix to get the base name
     if stem.endswith(".log.gz"):
         base = stem[: -len(".log.gz")]
     elif stem.endswith(".log"):
         base = stem[: -len(".log")]
     else:
-        return None
-    for candidate in [
-        log_path.parent / f"{base}.json",
-        log_path.parent / f"{base}.json.gz",
-    ]:
-        if candidate.exists():
-            return candidate
-    return None
+        return {}
+
+    found = {}
+    for tool in ("olly", "perf"):
+        for cand in (log_path.parent / f"{tool}_{base}.json",
+                     log_path.parent / f"{tool}_{base}.json.gz"):
+            if cand.exists():
+                found[tool] = cand
+                break
+    # Legacy single-sidecar: {"olly": ..., "perf": ...}
+    if not found:
+        for cand in (log_path.parent / f"{base}.json",
+                     log_path.parent / f"{base}.json.gz"):
+            if cand.exists():
+                found["_combined"] = cand
+                break
+    return found
 
 
-def _read_json_sidecar(path: Path) -> Optional[dict]:
-    """Read and parse a JSON sidecar file (NDJSON, plain or gzipped).
-
-    A sidecar contains one compact JSON object per line (one per invocation).
-    We return the last one — matching the .log convention of appending.
-    """
+def _read_ndjson_last(path: Path) -> Optional[dict]:
+    """Read the last record from an NDJSON file (plain or gzipped)."""
     try:
         if path.name.endswith(".gz"):
             raw = gzip.open(path, "rb").read()
@@ -99,7 +108,6 @@ def _read_json_sidecar(path: Path) -> Optional[dict]:
         text = raw.decode("utf-8", errors="replace").strip()
         if not text:
             return None
-        # NDJSON: take the last non-empty line
         for line in reversed(text.splitlines()):
             line = line.strip()
             if line:
@@ -107,6 +115,26 @@ def _read_json_sidecar(path: Path) -> Optional[dict]:
         return None
     except Exception:
         return None
+
+
+def _read_json_sidecar(log_path: Path) -> Optional[dict]:
+    """Collect the latest invocation's data from per-tool sidecars.
+
+    Returns a dict shaped like the legacy combined sidecar — ``{"olly":
+    ..., "perf": ...}`` — so the rest of the pipeline is agnostic to the
+    file layout.
+    """
+    sidecars = _find_tool_sidecars(log_path)
+    if not sidecars:
+        return None
+    if "_combined" in sidecars:  # legacy single-file
+        return _read_ndjson_last(sidecars["_combined"])
+    merged: dict = {}
+    for tool, path in sidecars.items():
+        data = _read_ndjson_last(path)
+        if data is not None:
+            merged[tool] = data
+    return merged or None
 
 
 def _parse_from_json(data: dict, log_name: str, s: int, o: int) -> dict:
@@ -171,12 +199,10 @@ def parse_log(path: Path) -> dict:
         raise ValueError(f"Cannot parse s/o from filename: {path.name}")
     s, o = map(int, m.groups())
 
-    # Try structured JSON sidecar first
-    json_path = _find_json_sidecar(path)
-    if json_path is not None:
-        data = _read_json_sidecar(json_path)
-        if data is not None:
-            return _parse_from_json(data, path.name, s, o)
+    # Try structured JSON sidecar first (per-tool or legacy combined).
+    data = _read_json_sidecar(path)
+    if data is not None:
+        return _parse_from_json(data, path.name, s, o)
 
     # Fallback: regex-parse the text log (backward compat for old runs)
     text = path.read_text()
