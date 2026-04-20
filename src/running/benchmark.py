@@ -177,6 +177,7 @@ class Benchmark(object):
         BUILD_TOOLS = {"ocamlfind", "ocamlc", "ocamlc.opt", "ocamlopt",
                        "ocamlopt.opt", "ocaml", "ocamldep", "ocamlmklib",
                        "ocamllex", "ocamlyacc", "dune", "menhir"}
+        STABILITY_WINDOW = 0.1  # seconds the candidate must stay alive
 
         def pid_alive(p: int) -> bool:
             try:
@@ -186,13 +187,19 @@ class Benchmark(object):
                 return False
 
         def pid_is_benchmark(p: int) -> bool:
-            """Heuristic: PID is alive and not a known build/setup tool."""
+            """PID must be alive and its exe must not be a known setup tool.
+
+            If we can't read /proc/<pid>/exe (zombie, transient, permission
+            denied …) we reject rather than accept — defaulting to accept
+            lets dying subshells slip through when their readlink briefly
+            fails.
+            """
             if not pid_alive(p):
                 return False
             try:
                 exe = os.path.basename(os.readlink("/proc/{}/exe".format(p)))
             except OSError:
-                return True  # can't tell — assume ok
+                return False
             return exe not in BUILD_TOOLS
 
         events_file = None
@@ -205,9 +212,18 @@ class Benchmark(object):
             if candidates:
                 # If multiple match (rare), prefer the latest by mtime —
                 # the final exec'd process writes its ring last.
-                events_file = max(candidates, key=os.path.getmtime)
-                ocaml_pid = int(os.path.basename(events_file)[:-len(".events")])
-                break
+                candidate = max(candidates, key=os.path.getmtime)
+                candidate_pid = int(os.path.basename(candidate)[:-len(".events")])
+                # Stability check: a real benchmark lives for seconds; a
+                # wrapper's $(...) subshell dies in milliseconds.  Wait a
+                # short window and confirm the PID is still the same
+                # (non-build-tool) process before committing.
+                time.sleep(STABILITY_WINDOW)
+                if pid_is_benchmark(candidate_pid):
+                    events_file = candidate
+                    ocaml_pid = candidate_pid
+                    break
+                # Otherwise: the candidate was transient; keep polling.
             time.sleep(0.01)
 
         if events_file is None:
