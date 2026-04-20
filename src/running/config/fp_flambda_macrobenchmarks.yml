@@ -110,7 +110,7 @@ suites:
 
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
-    timeout: 300
+    timeout: 900
     programs:
       coqc_corelib_stress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
