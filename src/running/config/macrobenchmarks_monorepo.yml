@@ -1,9 +1,9 @@
 # =============================================================================
 # Macro-benchmarks — monorepo build (no opam at build time)
 # =============================================================================
-# Builds real-world OCaml tools (menhir, cpdf, alt-ergo, coq) from vendored
-# source in ~/macro-benches.  All dependencies are pre-locked and vendored
-# via opam-monorepo, ensuring identical source code across all runtimes.
+# Builds real-world OCaml tools (menhir, cpdf, alt-ergo, coq, ...) from vendored
+# source in ~/macro-benches.  All dependencies are pre-locked and vendored via
+# opam-monorepo, so identical source code is compiled by every runtime.
 #
 # How it works:
 #   1. running-ng builds the compiler (via opam compiler create)
@@ -11,43 +11,28 @@
 #      the runtime compiler on PATH
 #   3. Each runtime gets its own _build-<runtime> directory for isolation
 #
-# Prerequisites:
-#   - ~/macro-benches/duniverse/ populated:
-#       cd ~/macro-benches
-#       OPAMSWITCH=running-ng-tools opam monorepo pull --lockfile=macro-benches.opam.locked
-#   - ~/macro-benches/vendor/camlpdf and vendor/cpdf-source populated:
-#       bash ~/macro-benches/scripts/vendor-cpdf.sh
-#   - ~/macro-benches/vendor/zarith populated:
-#       bash ~/macro-benches/scripts/vendor-coq.sh  (only need zarith from this)
+# Prerequisites (see macrobenchmarks_base.yml for full setup notes):
+#   - ~/macro-benches/duniverse/ populated (opam monorepo pull)
+#   - ~/macro-benches/vendor/{camlpdf,cpdf-source,zarith} populated
 #   - Input files in ~/macro-benches/benchmarks/<tool>/
-#     (copied from ~/sandmark/benchmarks/<tool>/)
 #
 # Usage:
 #   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
 #   CONFIG_FILE=src/running/config/macrobenchmarks_monorepo.yml \
 #     bash run_ocaml_bench_gc_sweep.sh
-#
-# Or directly:
-#   RUNNING_BENCH_DIR=~/benches \
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-#   python3 -m running runbms <log_dir> macrobenchmarks_monorepo.yml
 # =============================================================================
 
-invocations: 1
-remote_host: null
-compress_logs: false
-minheap_multiplier: 1.0
-heap_range: 6
-spread_factor: 1
+includes:
+  - "./macrobenchmarks_base.yml"
+
+# Baseline-comparison run: 1 invocation, and coq's faster 300s timeout.
+overrides:
+  invocations: 1
+  suites.macro-coq-monorepo.timeout: 300
 
 # =============================================================================
 # Runtimes
 # =============================================================================
-# The compiler is the ONLY thing that changes between runtimes.
-# The benchmark source code (in ~/macro-benches) is identical for all.
-#
-# Compilers are built from source via `opam compiler create` on first run
-# and cached in opam switches for subsequent runs.
 runtimes:
   ocaml-5.4.1:
     type: OCaml
@@ -59,290 +44,6 @@ runtimes:
     type: OxCaml
     commit: "068b25529286862035eaf827230f7ffa86659c49"
     configure_args: ["--enable-poll-insertion", "--enable-multidomain"]
-
-# =============================================================================
-# Suites — monorepo builds (OCamlBenchmarkSuite, not MacroBenchmarkSuite)
-# =============================================================================
-# We use OCamlBenchmarkSuite (not OCamlMacroBenchmarkSuite) because the
-# monorepo build doesn't install into the opam switch — it just needs
-# the compiler on PATH to run `dune build`.
-#
-# RUNNING_MACRO_BENCH_DIR points to ~/macro-benches so the build scripts
-# can find the monorepo root.  Set it in your environment or it defaults
-# to ../../ relative to the build script (i.e. ~/macro-benches/benchmarks/<tool>/../..).
-
-suites:
-  macro-menhir-monorepo:
-    type: OCamlBenchmarkSuite
-    timeout: 600
-    programs:
-      menhir_ocamly:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
-        build_script: "menhir.build.sh"
-        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/ocaml.mly --list-errors -la 2 --no-stdlib --lalr"
-      menhir_sql_parser:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
-        build_script: "menhir.build.sh"
-        args: "-v -t ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/keywords.mly ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/sql-parser.mly --base sql-parser"
-      menhir_sysver:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
-        build_script: "menhir.build.sh"
-        args: "-v --table ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/sysver.mly"
-
-  macro-cpdf-monorepo:
-    type: OCamlBenchmarkSuite
-    timeout: 300
-    programs:
-      cpdf_merge:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
-        build_script: "cpdf.build.sh"
-        args: "-merge ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
-      cpdf_blacktext:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
-        build_script: "cpdf.build.sh"
-        args: "-blacktext ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
-      cpdf_scale:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
-        build_script: "cpdf.build.sh"
-        args: "scale-to-fit a4landscape -twoup ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
-      cpdf_squeeze:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
-        build_script: "cpdf.build.sh"
-        args: "-squeeze ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
-
-  macro-alt-ergo-monorepo:
-    type: OCamlBenchmarkSuite
-    timeout: 300
-    programs:
-      alt_ergo_fill:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
-        build_script: "alt-ergo.build.sh"
-        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/fill.why"
-      alt_ergo_yyll:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
-        build_script: "alt-ergo.build.sh"
-        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/yyll.why"
-      alt_ergo_unsat_smt2:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
-        build_script: "alt-ergo.build.sh"
-        args: "--timelimit 15 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/unsat.smt2"
-
-  macro-coq-monorepo:
-    type: OCamlBenchmarkSuite
-    timeout: 300
-    programs:
-      coqc_corelib_stress:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
-        build_script: "coq.build.sh"
-        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_corelib_stress.v"
-
-  # ahrefs-devkit: builds as a standalone dune project (not in the monorepo
-  # workspace) because devkit has C-binding deps (libevent, ocurl, pcre) that
-  # must be installed in the runtime switch via opam.
-  # Prerequisite: opam install devkit --switch=<runtime-switch> --assume-depexts
-  macro-devkit:
-    type: OCamlBenchmarkSuite
-    timeout: 600
-    programs:
-      devkit_htmlstream:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
-        build_script: "ahrefs-devkit.build.sh"
-        args: ""
-      devkit_stre:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
-        build_script: "ahrefs-devkit.build.sh"
-        args: "80"
-      devkit_network:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
-        build_script: "ahrefs-devkit.build.sh"
-        args: "10"
-      devkit_gzip:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
-        build_script: "ahrefs-devkit.build.sh"
-        args: "15"
-
-  macro-irmin:
-    type: OCamlBenchmarkSuite
-    timeout: 300
-    programs:
-      irmin_mem_rw:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
-        build_script: "irmin.build.sh"
-        args: "3000 10000 80 20000"
-
-  macro-ocamlformat:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      ocamlformat_rocq:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
-        build_script: "ocamlformat.build.sh"
-        args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/workload_5x.ml -o /dev/null"
-
-  macro-decompress:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      test_decompress:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
-        build_script: "decompress.build.sh"
-        args: "64 524288"
-
-  # Eio: OCaml 5 effect-based concurrency (requires OCaml >= 5.2)
-  macro-eio:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      eio_fiber_stream:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
-        build_script: "eio.build.sh"
-        args: ""
-
-  macro-sedlex:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      sedlex_tokenize:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
-        build_script: "sedlex.build.sh"
-        args: "700000"
-
-  macro-yojson:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      ydump_repeat:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
-        build_script: "yojson.build.sh"
-        args: "1000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson/sample.json"
-
-  macro-zarith:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      zarith_pi:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
-        build_script: "zarith.build.sh"
-        args: "15000"
-
-  macro-owl:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      owl_gc:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
-        build_script: "owl.build.sh"
-        args: "7"
-
-  # dune-bootstrap: build dune from source (~100K LOC OCaml).
-  # Exercises the OCaml compiler on a large real-world codebase.
-  macro-dune-bootstrap:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      dune_bootstrap:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/dune-bootstrap"
-        build_script: "dune-bootstrap.build.sh"
-        args: ""
-
-  # liquidsoap-lang: parse + typecheck liquidsoap scripts (DSL compiler).
-  macro-liquidsoap-lang:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      liq_parse_typecheck:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
-        build_script: "liquidsoap-lang.build.sh"
-        args: "50000"
-
-  # pplacer: phylogenetic placement (bioinformatics).
-  # Runs the pplacer test suite (224 tests) which exercises likelihood
-  # calculations, tree operations, and placement algorithms.
-  # NOTE: batteries doesn't support OCaml trunk (5.6) — 5.4.1 only.
-  macro-pplacer:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      pplacer_testsuite:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
-        build_script: "pplacer.build.sh"
-        args: "8"
-
-# =============================================================================
-# Modifiers
-# =============================================================================
-modifiers:
-  time_stats:
-    type: Wrapper
-    val: "/usr/bin/time -f \"%Uuser %Ssystem %eelapsed %PCPU (%Xavgtext+%Davgdata %Mmaxresident)k\""
-  gc_verbose:
-    type: OCamlRunParam
-    val: "v=0x400"
-  perf_grp1:
-    type: PerfAndOllyAttach
-    val: "task-clock,page-faults,cycles,instructions"
-
-# =============================================================================
-# Benchmarks — all programs enabled
-# =============================================================================
-benchmarks:
-  macro-menhir-monorepo:
-    - menhir_ocamly
-    - menhir_sql_parser
-    - menhir_sysver
-
-  macro-cpdf-monorepo:
-    - cpdf_merge
-    - cpdf_blacktext
-    - cpdf_scale
-    - cpdf_squeeze
-
-  macro-alt-ergo-monorepo:
-    - alt_ergo_fill
-    - alt_ergo_yyll
-    - alt_ergo_unsat_smt2
-
-  macro-coq-monorepo:
-    - coqc_corelib_stress
-
-  macro-devkit:
-    - devkit_htmlstream
-    - devkit_stre
-    - devkit_network
-    - devkit_gzip
-
-  macro-irmin:
-    - irmin_mem_rw
-
-  macro-ocamlformat:
-    - ocamlformat_rocq
-
-  macro-decompress:
-    - test_decompress
-
-  macro-eio:
-    - eio_fiber_stream
-
-  macro-sedlex:
-    - sedlex_tokenize
-
-  macro-yojson:
-    - ydump_repeat
-
-  macro-zarith:
-    - zarith_pi
-
-  macro-owl:
-    - owl_gc
-
-  macro-dune-bootstrap:
-    - dune_bootstrap
-
-  macro-liquidsoap-lang:
-    - liq_parse_typecheck
-
-  macro-pplacer:
-    - pplacer_testsuite
 
 # =============================================================================
 # Configs — no sweep, baseline comparison at default GC settings

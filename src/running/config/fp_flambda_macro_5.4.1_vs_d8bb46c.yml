@@ -1,0 +1,71 @@
+# =============================================================================
+# FP × Flambda × {OCaml 5.4.1, commit d8bb46c3} — macrobenchmarks
+# =============================================================================
+# 2 versions × 2 (frame-pointers on/off) × 2 (flambda on/off) = 8 variants.
+#
+# Versions:
+#   - 5.4.1                (release)
+#   - d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a  (ocaml/ocaml commit)
+#
+# Benchmarks, suites, modifiers, plugins, and run settings are inherited from
+# macrobenchmarks_base.yml.  Only runtimes and the configs matrix live here.
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/fp_flambda_macro_5.4.1_vs_d8bb46c.yml \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "./macrobenchmarks_base.yml"
+
+# =============================================================================
+# Runtimes — 8 variants
+# =============================================================================
+runtimes:
+  # --- OCaml 5.4.1 ---
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+  ocaml-5.4.1-fp:
+    type: OCaml
+    version: "5.4.1"
+    configure_args: ["--enable-frame-pointers"]
+  ocaml-5.4.1-flambda:
+    type: OCaml
+    version: "5.4.1"
+    configure_args: ["--enable-flambda"]
+  ocaml-5.4.1-fp-flambda:
+    type: OCaml
+    version: "5.4.1"
+    configure_args: ["--enable-frame-pointers", "--enable-flambda"]
+
+  # --- ocaml/ocaml commit d8bb46c3 ---
+  ocaml-d8bb46c:
+    type: OCaml
+    commit: "d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a"
+  ocaml-d8bb46c-fp:
+    type: OCaml
+    commit: "d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a"
+    configure_args: ["--enable-frame-pointers"]
+  ocaml-d8bb46c-flambda:
+    type: OCaml
+    commit: "d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a"
+    configure_args: ["--enable-flambda"]
+  ocaml-d8bb46c-fp-flambda:
+    type: OCaml
+    commit: "d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a"
+    configure_args: ["--enable-frame-pointers", "--enable-flambda"]
+
+# =============================================================================
+# Configs — 8 runtimes × default GC params (no sweep)
+# =============================================================================
+configs:
+  - "ocaml-5.4.1|perf_grp1|re-23|md-2"
+  - "ocaml-5.4.1-fp|perf_grp1|re-23|md-2"
+  - "ocaml-5.4.1-flambda|perf_grp1|re-23|md-2"
+  - "ocaml-5.4.1-fp-flambda|perf_grp1|re-23|md-2"
+  - "ocaml-d8bb46c|perf_grp1|re-23|md-2"
+  - "ocaml-d8bb46c-fp|perf_grp1|re-23|md-2"
+  - "ocaml-d8bb46c-flambda|perf_grp1|re-23|md-2"
+  - "ocaml-d8bb46c-fp-flambda|perf_grp1|re-23|md-2"
