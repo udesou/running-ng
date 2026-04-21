@@ -105,6 +105,16 @@ fi
 
 export PATH="$OLLY_BIN:$PATH"
 
+# Ensure the chosen opam binary is first on PATH.  opam plugins (notably
+# opam-compiler) shell out to `opam` by name, so if PATH resolves to an older
+# opam than `$_OPAM` the plugin refuses to write a newer root with:
+#   "Refusing write access to /home/$USER/.opam, which is more recent ..."
+_OPAM_DIR="$(dirname "$_OPAM")"
+case ":$PATH:" in
+  :"$_OPAM_DIR":*) ;;
+  *) export PATH="$_OPAM_DIR:$PATH" ;;
+esac
+
 mkdir -p "$LOG_DIR"
 
 echo "Running GC sweep with config: $CONFIG_FILE"
