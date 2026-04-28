@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import csv
-import gzip
-import json
 import re
 from pathlib import Path
 
@@ -10,6 +8,12 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+
+from running.analysis.json_sidecars import (
+    find_tool_sidecars as _find_tool_sidecars,
+    read_ndjson_last as _read_ndjson_last,
+    read_json_sidecar as _read_json_sidecar,
+)
 
 
 LOG_GLOB = "binarytrees*.log"
@@ -64,77 +68,6 @@ def _read_olly_time_s(text: str, label: str) -> float:
     if not m:
         raise ValueError(f"Missing olly metric: {label}")
     return float(m.group(1))
-
-
-def _find_tool_sidecars(log_path: Path) -> dict:
-    """Return a dict mapping tool name to its NDJSON sidecar path.
-
-    Looks for new-format per-tool sidecars (``olly_<base>.json``,
-    ``perf_<base>.json``) and also the old combined-single-sidecar
-    format (``<base>.json``) for backward compat.
-    """
-    stem = log_path.name
-    if stem.endswith(".log.gz"):
-        base = stem[: -len(".log.gz")]
-    elif stem.endswith(".log"):
-        base = stem[: -len(".log")]
-    else:
-        return {}
-
-    found = {}
-    for tool in ("olly", "perf"):
-        for cand in (log_path.parent / f"{tool}_{base}.json",
-                     log_path.parent / f"{tool}_{base}.json.gz"):
-            if cand.exists():
-                found[tool] = cand
-                break
-    # Legacy single-sidecar: {"olly": ..., "perf": ...}
-    if not found:
-        for cand in (log_path.parent / f"{base}.json",
-                     log_path.parent / f"{base}.json.gz"):
-            if cand.exists():
-                found["_combined"] = cand
-                break
-    return found
-
-
-def _read_ndjson_last(path: Path) -> Optional[dict]:
-    """Read the last record from an NDJSON file (plain or gzipped)."""
-    try:
-        if path.name.endswith(".gz"):
-            raw = gzip.open(path, "rb").read()
-        else:
-            raw = path.read_bytes()
-        text = raw.decode("utf-8", errors="replace").strip()
-        if not text:
-            return None
-        for line in reversed(text.splitlines()):
-            line = line.strip()
-            if line:
-                return json.loads(line)
-        return None
-    except Exception:
-        return None
-
-
-def _read_json_sidecar(log_path: Path) -> Optional[dict]:
-    """Collect the latest invocation's data from per-tool sidecars.
-
-    Returns a dict shaped like the legacy combined sidecar — ``{"olly":
-    ..., "perf": ...}`` — so the rest of the pipeline is agnostic to the
-    file layout.
-    """
-    sidecars = _find_tool_sidecars(log_path)
-    if not sidecars:
-        return None
-    if "_combined" in sidecars:  # legacy single-file
-        return _read_ndjson_last(sidecars["_combined"])
-    merged: dict = {}
-    for tool, path in sidecars.items():
-        data = _read_ndjson_last(path)
-        if data is not None:
-            merged[tool] = data
-    return merged or None
 
 
 def _parse_from_json(data: dict, log_name: str, s: int, o: int) -> dict:
