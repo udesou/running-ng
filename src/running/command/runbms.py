@@ -495,6 +495,10 @@ def run(args):
         global configuration
         configuration = Configuration.from_file(
             Path(os.getcwd()), args.get("CONFIG"))
+        # Cross-check runtimes / configs / comparisons before doing anything
+        # else. Errors here mean a typo or structurally-broken block; better
+        # to fail before benchmarks run.
+        configuration.validate()
         # Save metadata
         if not is_dry_run():
             with (log_dir / "runbms.yml").open("w") as fd:

@@ -73,6 +73,131 @@ class Configuration(object):
     def get(self, name: str) -> Any:
         return self.__items.get(name)
 
+    def validate(self) -> None:
+        """Cross-check ``runtimes:`` / ``configs:`` / ``comparisons:`` consistency.
+
+        Raises ``ValueError`` if any of the following conditions hold:
+
+        Structural problems in ``comparisons:``:
+          * Block missing ``a`` or ``b`` keys.
+          * Unknown ``mode`` (must be ``pairwise`` or ``cartesian``).
+          * Pairwise length mismatch where neither side is a scalar.
+          * Non-string entries in ``a`` / ``b`` lists.
+
+        Cross-block consistency:
+          * Runtime referenced by ``configs:`` but not declared in ``runtimes:``.
+          * Runtime referenced by ``comparisons:`` but not declared in ``runtimes:``.
+          * Runtime declared in ``runtimes:`` but not referenced by any
+            ``configs:`` entry (dead declaration).
+          * (When ``comparisons:`` is present) Runtime referenced by a
+            comparison but not in any ``configs:`` entry — would produce
+            no data.
+          * (When ``comparisons:`` is present) Runtime in ``configs:`` not
+            referenced by any comparison block — data would be collected
+            but never rendered.
+
+        Must be called *before* :meth:`resolve_class`, which filters
+        ``runtimes`` to only those referenced by ``configs`` — calling
+        after would mask the "declared but unused" check.
+        """
+        runtimes = self.__items.get("runtimes") or {}
+        configs = self.__items.get("configs") or []
+        comparisons = self.__items.get("comparisons") or []
+
+        declared_runtimes = set(runtimes.keys())
+
+        config_runtimes = set()
+        for c in configs:
+            if isinstance(c, str):
+                config_runtimes.add(c.split('|')[0].strip())
+
+        comparison_runtimes = set()
+        errors: list = []
+
+        for i, block in enumerate(comparisons):
+            if not isinstance(block, dict):
+                errors.append(
+                    f"comparisons[{i}] must be a mapping; got {type(block).__name__}: {block!r}"
+                )
+                continue
+            if "a" not in block or "b" not in block:
+                errors.append(f"comparisons[{i}] missing 'a' or 'b': {block!r}")
+                continue
+            mode = block.get("mode", "pairwise")
+            if mode not in ("pairwise", "cartesian"):
+                errors.append(
+                    f"comparisons[{i}] has unknown mode {mode!r}; "
+                    f"expected 'pairwise' or 'cartesian'"
+                )
+            a, b = block["a"], block["b"]
+            for side, v in (("a", a), ("b", b)):
+                if isinstance(v, str):
+                    comparison_runtimes.add(v)
+                elif isinstance(v, list):
+                    for x in v:
+                        if not isinstance(x, str):
+                            errors.append(
+                                f"comparisons[{i}].{side} contains a non-string entry: {x!r}"
+                            )
+                        else:
+                            comparison_runtimes.add(x)
+                else:
+                    errors.append(
+                        f"comparisons[{i}].{side} must be a string or a list of strings; "
+                        f"got {type(v).__name__}: {v!r}"
+                    )
+            if mode == "pairwise":
+                la = 1 if isinstance(a, str) else (len(a) if isinstance(a, list) else 0)
+                lb = 1 if isinstance(b, str) else (len(b) if isinstance(b, list) else 0)
+                if la > 1 and lb > 1 and la != lb:
+                    errors.append(
+                        f"comparisons[{i}] pairwise lengths don't match: "
+                        f"len(a)={la}, len(b)={lb}. Set `mode: cartesian` "
+                        f"if you wanted the cross product."
+                    )
+
+        config_undeclared = config_runtimes - declared_runtimes
+        comparison_undeclared = comparison_runtimes - declared_runtimes
+        declared_unused = declared_runtimes - config_runtimes
+
+        if config_undeclared:
+            errors.append(
+                f"Runtimes referenced in `configs:` but not declared in "
+                f"`runtimes:` (typo?): {sorted(config_undeclared)}"
+            )
+        if comparison_undeclared:
+            errors.append(
+                f"Runtimes referenced in `comparisons:` but not declared in "
+                f"`runtimes:` (typo?): {sorted(comparison_undeclared)}"
+            )
+        if declared_unused:
+            errors.append(
+                f"Runtimes declared in `runtimes:` but not referenced by any "
+                f"`configs:` entry (dead declarations): {sorted(declared_unused)}"
+            )
+
+        if comparisons:
+            comparison_no_data = comparison_runtimes - config_runtimes
+            if comparison_no_data:
+                errors.append(
+                    f"Runtimes in `comparisons:` but not in any `configs:` "
+                    f"entry — no data will be produced for these: "
+                    f"{sorted(comparison_no_data)}"
+                )
+
+            config_uncovered = config_runtimes - comparison_runtimes
+            if config_uncovered:
+                errors.append(
+                    f"Runtimes in `configs:` but never referenced by any "
+                    f"`comparisons:` block — data would be collected but not "
+                    f"rendered: {sorted(config_uncovered)}"
+                )
+
+        if errors:
+            raise ValueError(
+                "Configuration validation failed:\n  - " + "\n  - ".join(errors)
+            )
+
     def override(self, selector: str, new_value: Any):
         current: Any  # Union[Dict[str, Any], List[Any]]
         current = self.__items
