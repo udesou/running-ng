@@ -1,5 +1,7 @@
 /scratch
 gc-sweep-logs/
+.venv-notebooks/
+notebooks/cache/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
