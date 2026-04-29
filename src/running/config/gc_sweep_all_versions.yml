@@ -1141,7 +1141,7 @@ configs:
   - "ocaml-5.1.0|perf_grp1"
   - "ocaml-5.4.1|perf_grp1"
   - "ocaml-trunk|perf_grp1"
-  - "oxcaml-trunk|perf_grp1|re-23|md-9"
+  - "oxcaml-trunk|perf_grp1|re-25|md-9"
 
 config_sweep:
   s: [32768, 65536, 131072, 262144, 524288, 1048576, 2097152]

@@ -1209,8 +1209,8 @@ benchmarks:
 # NOT already present in the base config.
 
 configs:
-  - "oxcaml-release|perf_grp1|re-23|md-9"
-  - "ocaml-release|perf_grp1|re-23|md-9"
+  - "oxcaml-release|perf_grp1|re-25|md-9"
+  - "ocaml-release|perf_grp1|re-25|md-9"
 
 config_sweep:
   s: [32768] #, 65536, 131072, 262144, 524288, 1048576, 2097152]

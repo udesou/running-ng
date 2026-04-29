@@ -41,7 +41,14 @@ suites:
       menhir_ocamly:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
         build_script: "menhir.build.sh"
-        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/ocaml.mly --list-errors -la 2 --no-stdlib --lalr"
+        # `--canonical` builds the full canonical LR(1) automaton (vs the
+        # smaller LALR tables in `--lalr`). For the OCaml grammar this is
+        # ~80× more work — brings wall time from 0.4s to ~33s on this
+        # machine and uses ~2.7 GB RSS for the state table. The other two
+        # menhir benchmarks (sql_parser, sysver) use different algorithms
+        # already; switching ocamly to canonical gives the suite three
+        # distinct menhir workloads.
+        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/ocaml.mly --list-errors --no-stdlib --canonical"
       menhir_sql_parser:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
         build_script: "menhir.build.sh"
@@ -79,7 +86,12 @@ suites:
       alt_ergo_fill:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
-        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/fill.why"
+        # fill_x100.why is generated at build time by alt-ergo.build.sh —
+        # it replicates the original `fill_assert_39` goal 100 times so
+        # alt-ergo solves each independently. Scales work linearly: ~14s
+        # wall on this machine, vs 0.18s for the single-goal fill.why.
+        # See ~/macro-benches/README.md §"Iteration counts".
+        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/fill_x100.why"
       alt_ergo_yyll:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
@@ -109,15 +121,23 @@ suites:
       devkit_stre:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
-        args: "80"
+        # arg = in-process loop count, read by stre_bench.ml as Sys.argv.(1).
+        # Each iteration is ~0.47s on this machine (full 8 sub-benches),
+        # so arg=30 → ~14s wall.
+        # See ~/macro-benches/README.md §"Iteration counts".
+        args: "30"
       devkit_network:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
-        args: "10"
+        # arg = in-process loop count. Each iteration ~4.3s, so arg=4 → ~17s.
+        args: "4"
       devkit_gzip:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
-        args: "15"
+        # arg = in-process loop count. Each iteration ~2.7s, so arg=5 → ~14s.
+        # gc_overhead ≈ 1% — gzip is compute-bound, GC isn't the story here.
+        # Candidate for `tag: compute-bound` once tags are wired up.
+        args: "5"
 
   macro-irmin:
     type: OCamlBenchmarkSuite
@@ -190,7 +210,15 @@ suites:
       owl_gc:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
-        args: "7"
+        # arg = in-process loop count, read by owl_gc.ml as Sys.argv.(1).
+        # Each iteration is ~2.6s on this machine (full O(n²) GW pass),
+        # so arg=6 → ~16s wall.
+        # Requires runtime_events ring `re-25` (32 MB) or larger in the
+        # config string — `re-23` (8 MB default) overflows on 5+
+        # iterations and olly reports lost events plus a corrupted
+        # wall_time.
+        # See ~/macro-benches/README.md §"Iteration counts".
+        args: "6"
 
   # dune-bootstrap: build dune from source (~100K LOC OCaml).
   macro-dune-bootstrap:
@@ -220,7 +248,13 @@ suites:
       pplacer_testsuite:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
         build_script: "pplacer.build.sh"
-        args: "8"
+        # arg = in-process loop count, passed to tests.exe as
+        # PPLACER_TEST_LOOP. The whole suite runs in one OCaml process so
+        # olly observes everything. Each iteration is ~3.5s on this machine,
+        # so arg ≈ N × 3.5s wall. arg=5 → ~17s (well in envelope on slower
+        # hardware; comfortably above noise floor on faster CI machines).
+        # See ~/macro-benches/README.md §"Iteration counts" for the pattern.
+        args: "5"
 
 # =============================================================================
 # Modifiers

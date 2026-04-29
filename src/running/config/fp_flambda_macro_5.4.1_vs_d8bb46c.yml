@@ -68,14 +68,14 @@ runtimes:
 # Configs — 8 runtimes × default GC params (no sweep)
 # =============================================================================
 configs:
-  - "ocaml-5.4.1|perf_grp1|re-23|md-2"
-  - "ocaml-5.4.1-fp|perf_grp1|re-23|md-2"
-  - "ocaml-5.4.1-flambda|perf_grp1|re-23|md-2"
-  - "ocaml-5.4.1-fp-flambda|perf_grp1|re-23|md-2"
-  - "ocaml-d8bb46c|perf_grp1|re-23|md-2"
-  - "ocaml-d8bb46c-fp|perf_grp1|re-23|md-2"
-  - "ocaml-d8bb46c-flambda|perf_grp1|re-23|md-2"
-  - "ocaml-d8bb46c-fp-flambda|perf_grp1|re-23|md-2"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2"
+  - "ocaml-5.4.1-fp|perf_grp1|re-25|md-2"
+  - "ocaml-5.4.1-flambda|perf_grp1|re-25|md-2"
+  - "ocaml-5.4.1-fp-flambda|perf_grp1|re-25|md-2"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2"
+  - "ocaml-d8bb46c-fp|perf_grp1|re-25|md-2"
+  - "ocaml-d8bb46c-flambda|perf_grp1|re-25|md-2"
+  - "ocaml-d8bb46c-fp-flambda|perf_grp1|re-25|md-2"
 
 # =============================================================================
 # Comparisons — declared pairs the visualisation should render.

@@ -24,4 +24,4 @@ runtimes:
     commit: "d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a"
 
 configs:
-  - "ocaml-d8bb46c|perf_grp1|re-23|md-2"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2"
