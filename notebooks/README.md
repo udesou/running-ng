@@ -412,7 +412,16 @@ populates.
    - automated pathology hints (e.g., "median IPC < 0.5 for variant
      X — possible memory pathology");
    - all-variants wall-time violin (one panel per variant) for
-     spotting dramatic distribution shifts.
+     spotting dramatic distribution shifts;
+   - **per-benchmark operating envelope** — for each benchmark,
+     aggregates wall time / GC overhead / collection counts /
+     relative IQR across all variants × invocations and flags rows
+     against the `ENVELOPE` thresholds set at the top of the
+     notebook. Flags include `TOO_SHORT`, `TOO_LONG`,
+     `NO_GC_PRESSURE`, `GC_PATHOLOGICAL`,
+     `FEW_MAJOR_COLLECTIONS`, `HIGH_VARIANCE`. Tells you which
+     benchmarks need calibration before drawing strong conclusions
+     from the rest of the notebook.
 4. **Per-comparison detail (loop).** One subsection per comparison
    block. Each subsection is filtered to that block's variants
    (the union of every variant appearing as `a` or `b` in any pair)
