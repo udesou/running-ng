@@ -230,6 +230,24 @@ suites:
         build_script: "dune-bootstrap.build.sh"
         args: ""
 
+  # ocamlc-self-compile: invoke the variant's own ocamlc on a generated
+  # ~400k-line OCaml workload (concatenated JSOO benchmark sources × 30
+  # replicas, each in a unique module). Single observable OCaml process —
+  # the runtime under test executes ocamlc's code, exercising the
+  # ephemeron tables in typing/btype.ml, Hashtbl, AST allocation, and
+  # Marshal (.cmi writing). Bytecode (`ocamlc`) chosen over native
+  # (`ocamlopt`) so the workload is uniform across flambda/non-flambda
+  # variants — cross-variant deltas reflect runtime perf only.
+  # See ~/macro-benches/README.md §"Benchmark characteristics".
+  macro-ocamlc-self-compile:
+    type: OCamlBenchmarkSuite
+    timeout: 300
+    programs:
+      ocamlc_self_compile:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-self-compile"
+        build_script: "ocamlc-self-compile.build.sh"
+        args: ""
+
   # liquidsoap-lang: parse + typecheck liquidsoap scripts (DSL compiler).
   macro-liquidsoap-lang:
     type: OCamlBenchmarkSuite
@@ -342,6 +360,9 @@ benchmarks:
 
   macro-dune-bootstrap:
     - dune_bootstrap
+
+  macro-ocamlc-self-compile:
+    - ocamlc_self_compile
 
   macro-liquidsoap-lang:
     - liq_parse_typecheck
