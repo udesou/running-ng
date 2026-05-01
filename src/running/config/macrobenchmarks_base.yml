@@ -258,6 +258,25 @@ suites:
         build_script: "liquidsoap-lang.build.sh"
         args: "50000"
 
+  # liq-video-frames: synthetic reproduction of the GC-pacer / heap-growth
+  # pattern from ocaml/ocaml#13123 + the liquidsoap "ai-radio" workload.
+  # Allocates 1280×720 RGBA8 video frames as Bigarrays (~3.5 MiB each,
+  # off-heap with a finaliser) in a tight loop, with a persistent ~320 MiB
+  # int-array "deadweight" simulating liquidsoap's loaded standard library.
+  # Headline metrics are max_rss_kb and minor:major collection counts —
+  # wall_time is informative but not the primary signal.
+  # arg = number of frames to allocate; arg=10000 ≈ 20s wall on obelisk
+  # at default OCAMLRUNPARAM. RSS varies ~34% with space_overhead alone.
+  # See ~/macro-benches/README.md §"FFI / off-heap memory".
+  macro-liq-video-frames:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      liq_video_frames:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
+        build_script: "liq-video-frames.build.sh"
+        args: "10000"
+
   # pplacer: phylogenetic placement (bioinformatics).
   macro-pplacer:
     type: OCamlBenchmarkSuite
@@ -366,6 +385,9 @@ benchmarks:
 
   macro-liquidsoap-lang:
     - liq_parse_typecheck
+
+  macro-liq-video-frames:
+    - liq_video_frames
 
   macro-pplacer:
     - pplacer_testsuite
