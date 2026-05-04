@@ -258,6 +258,33 @@ suites:
         build_script: "liquidsoap-lang.build.sh"
         args: "50000"
 
+  # merlin: in-process driver replicating merlin's cram bench (the 7
+  # canonical IDE queries against a 51 319-line file). Spawns a typer
+  # domain alongside the main domain — the merlin-domains branch's
+  # parallel-typer feature using OCaml 5 domains and effects. Same
+  # Domain.spawn dance ocamlmerlin_server does in single mode, so we
+  # exercise the production code path. Two domains exactly: main +
+  # typer.
+  # arg = in-process loop count, read by merlin_bench.ml as
+  # Sys.argv.(1). Each iteration runs all 7 queries once. arg=4 → ~16s
+  # wall on obelisk after the first iteration's typer warmup.
+  #
+  # Requires OCaml 5.5+. The merlin-domains branch ships its own copy
+  # of OCaml's typer (src/ocaml/typing/) targeted at OCaml_5_5_0; on
+  # 5.4.1 and earlier the vendored typer trips an internal assertion
+  # because data-structure invariants differ across compiler
+  # versions. For multi-version sweeps, the user should override
+  # `benchmarks.macro-merlin: []` when 5.4 / earlier is in the matrix
+  # to avoid known-failing cells.
+  macro-merlin:
+    type: OCamlBenchmarkSuite
+    timeout: 180
+    programs:
+      merlin_bench:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/merlin"
+        build_script: "merlin.build.sh"
+        args: "4"
+
   # liq-video-frames: synthetic reproduction of the GC-pacer / heap-growth
   # pattern from ocaml/ocaml#13123 + the liquidsoap "ai-radio" workload.
   # Allocates 1280×720 RGBA8 video frames as Bigarrays (~3.5 MiB each,
@@ -385,6 +412,9 @@ benchmarks:
 
   macro-liquidsoap-lang:
     - liq_parse_typecheck
+
+  macro-merlin:
+    - merlin_bench
 
   macro-liq-video-frames:
     - liq_video_frames
