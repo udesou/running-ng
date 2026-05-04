@@ -413,8 +413,15 @@ benchmarks:
   macro-liquidsoap-lang:
     - liq_parse_typecheck
 
-  macro-merlin:
-    - merlin_bench
+  # macro-merlin: DISABLED pending upstream fix to a race in
+  # merlin-domains' typer-domain handoff. The vendored typer hits an
+  # `Invalid -> assert false` in `Types.rev_log` non-deterministically
+  # at N>=2 iterations of the cram-bench workload (see
+  # benchmarks/merlin/UPSTREAM_BUG.md for details). Re-enable by
+  # uncommenting the `- merlin_bench` line below once the race is
+  # fixed in the merlin-domains branch.
+  macro-merlin: []
+    # - merlin_bench
 
   macro-liq-video-frames:
     - liq_video_frames
