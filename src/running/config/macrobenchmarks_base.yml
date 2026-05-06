@@ -220,16 +220,6 @@ suites:
         # See ~/macro-benches/README.md §"Iteration counts".
         args: "6"
 
-  # dune-bootstrap: build dune from source (~100K LOC OCaml).
-  macro-dune-bootstrap:
-    type: OCamlBenchmarkSuite
-    timeout: 120
-    programs:
-      dune_bootstrap:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/dune-bootstrap"
-        build_script: "dune-bootstrap.build.sh"
-        args: ""
-
   # ocamlc-self-compile: invoke the variant's own ocamlc on a generated
   # ~400k-line OCaml workload (concatenated JSOO benchmark sources × 30
   # replicas, each in a unique module). Single observable OCaml process —
@@ -403,9 +393,6 @@ benchmarks:
 
   macro-owl:
     - owl_gc
-
-  macro-dune-bootstrap:
-    - dune_bootstrap
 
   macro-ocamlc-self-compile:
     - ocamlc_self_compile

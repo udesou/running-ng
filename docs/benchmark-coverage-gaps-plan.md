@@ -24,8 +24,11 @@ it with a synthetic kernel.
 
 Shipped: macro-benches `afa3bd6`, running-ng `e25cb69`.
 
-Closes: **Ephemeron**, **Marshal**. Augments (does *not* replace)
-`dune_bootstrap` — both stay; they answer different questions.
+Closes: **Ephemeron**, **Marshal**. Originally planned as a complement
+to `dune_bootstrap`, but `dune_bootstrap` was subsequently dropped
+(2026-05-06) — see "Decision: replace or augment" below for the original
+reasoning, then the addendum at the end of this section. `ocamlc_self_compile`
+is now the only compiler-internals macrobenchmark.
 
 Final shape:
 
@@ -57,27 +60,26 @@ are scattered through `parsing/`, `typing/`, and `bytecomp/`.
 Compilation also produces `.cmi` (typed-AST) and `.cmo`/`.cmx` files
 via `Marshal`, exercising the marshal path on real data.
 
-We currently have `dune_bootstrap` in this conceptual slot but it
-spawns subprocesses and the parent we measure does almost no work.
-`ocamlc -c <bigfile>.ml` is a single-process, fully observable
-compiler-throughput benchmark.
+We previously had `dune_bootstrap` in this conceptual slot but it
+spawned subprocesses and the parent we measured did almost no work
+(removed 2026-05-06). `ocamlc -c <bigfile>.ml` is a single-process,
+fully observable compiler-throughput benchmark.
 
 ### Decision: replace or augment `dune_bootstrap`?
 
-**Recommend augment.** Reasons:
+**Originally augment, ultimately replace** (decided 2026-05-06). The
+original reasoning was that `dune_bootstrap` was a real-world
+end-to-end metric — total time to bootstrap dune from source — and
+worth keeping alongside `ocamlc_self_compile` even though its
+parent-process GC stats were uninformative. The cross-process
+subprocess-bound nature was deemed acceptable given that `tag:
+external-work` would have made its observability story explicit.
 
-- `dune_bootstrap` is a real-world end-to-end metric: how long does
-  it take dune to bootstrap from source on this machine? That is
-  what users experience and is intrinsically valuable, even if the
-  parent's runtime stats are noise.
-- `ocamlc_self_compile` is a different angle: it isolates compiler
-  internals in one process, which the `dune_bootstrap` cross-process
-  setup cannot do.
-- Adding a `tag: external-work` to `dune_bootstrap` (when the tag
-  mechanism lands — see calibration triage doc) makes its
-  observability story explicit instead of broken.
-
-Keep both. They answer different questions.
+In practice the orchestrator-level signal turned out not to fit what
+we want to evaluate (only the parent OCaml process is observable,
+which is essentially idle while ocamlc child processes do all the
+work). `dune_bootstrap` was dropped from the suite on 2026-05-06.
+`ocamlc_self_compile` covers the compiler-internals slot on its own.
 
 ### Workload — what to compile
 
@@ -296,8 +298,8 @@ fake coverage.
 ## Recommended order
 
 1. **Phase 1 first** — `ocamlc_self_compile` is concrete, ready,
-   and the win-to-effort ratio is high (closes two gaps + improves
-   on `dune_bootstrap`).
+   and the win-to-effort ratio is high (closes two gaps + replaces
+   `dune_bootstrap`).
 2. **Discuss Phase 2 with manager** — sanity-check that promoting
    from Sandmark is acceptable, pick the 2–3 to start with.
 3. **Phase 2 implementation** — once approved.
@@ -312,5 +314,6 @@ fake coverage.
   pass already done.
 - **Doesn't address the `tag:` mechanism** for the health view —
   separate work tracked in `benchmark-calibration-triage.md`.
-- **Doesn't replace `dune_bootstrap`** — augments, per the recommendation
-  above.
+- ~~**Doesn't replace `dune_bootstrap`** — augments, per the recommendation
+  above.~~ Superseded 2026-05-06: `dune_bootstrap` was dropped from the
+  suite; `ocamlc_self_compile` is the sole compiler-internals macrobench.

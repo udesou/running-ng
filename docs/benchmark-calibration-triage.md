@@ -205,39 +205,26 @@ The envelope is a configurable Python dict at the top of Notebook B
 
 ### Tier 2 — investigate first, then act
 
-- [x] **`dune_bootstrap` — confirmed external-work; wall time is still useful**
+- [x] **`dune_bootstrap` — removed (subprocess-bound orchestrator)**
 
   Data: wall **55s**, GC **0.0%**, minor **11** / major **5**, RSS 14 MB,
   IQR 0.1%.
 
-  What it does: bootstraps `dune` from source via `ocaml boot/bootstrap.ml`.
-  Build script just creates a wrapper that runs the bootstrap.
+  What it did: bootstrapped `dune` from source via `ocaml boot/bootstrap.ml`.
+  `bootstrap.ml` uses `Sys.command` to spawn subprocesses and ultimately
+  `exec`s a `.duneboot.exe`, so the actual compiler work happened in child
+  processes that olly couldn't observe. olly only saw the orchestrating
+  parent (hence GC=0%, 11 minor / 5 major).
 
-  Investigation: read `bootstrap.ml`. It uses `Sys.command` (line 50, the
-  `runf` helper) to spawn subprocesses, and it compiles a `.duneboot.exe`
-  and execs it (line 116). The actual compiler work happens in
-  *child processes that olly can't observe* — olly attaches to a single
-  OCaml process via runtime_events, and only sees the orchestrating
-  parent.
+  Resolution: replaced in concept by `ocamlc_self_compile`, which exercises
+  the same compiler internals (Ephemeron tables, Hashtbl, Marshal, AST
+  allocation) but in a **single observable OCaml process**. Wall time is
+  still a compiler-throughput metric, but olly's stats now reflect the
+  workload. The orchestrator-level "end-to-end bootstrap time" signal
+  was deemed not worth the noisy/uninformative parent-process measurement.
 
-  Conclusion: this benchmark's **wall time is meaningful** as a
-  compiler-throughput metric (total bootstrap time on a real ~100K LOC
-  workload — the kind of macro-benchmark this proposal explicitly
-  wants), but its GC / allocation / IPC stats reflect only the parent
-  process and should be treated as nonsensical, not as evidence of a
-  benchmark problem.
-
-  Action: leave the benchmark in the suite, keep the wall-time signal,
-  and tag it so the health view stops flagging `NO_GC_PRESSURE`.
-  Mechanism is the shared "tags" follow-up below.
-
-  Long-term option (not now): replace with a single-process
-  compiler-throughput benchmark, e.g. `ocamlc -c <bigfile>.ml` on a
-  ~100K LOC concatenated file. That keeps the wall-time signal *and*
-  gives olly real allocation/GC stats from inside a single ocamlc
-  process.
-
-  Files: none to edit now (just doc).
+  Action: dropped 2026-05-06 from benchmarks/, configs, README, results
+  tables. `ocamlc_self_compile` is the replacement.
 
 - [x] **`pplacer_testsuite` — fixed via env-var in-process loop**
 

@@ -27,7 +27,7 @@ that vendors all dependencies via opam-monorepo.  Current benchmarks:
 - **Text/media:** cpdf (4 PDF operations)
 - **SMT / Proof:** alt-ergo (3), coq/rocq (corelib_stress)
 - **GC stress:** ahrefs-devkit (4)
-- **Databases/Compilers:** irmin, ocamlformat, dune-bootstrap, liquidsoap-lang
+- **Databases/Compilers:** irmin, ocamlformat, liquidsoap-lang
 - **Compression/Concurrency:** decompress, eio
 - **Data formats:** yojson
 - **Numerics:** zarith, owl
