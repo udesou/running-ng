@@ -3,6 +3,7 @@ import glob
 import json
 import logging
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -108,13 +109,46 @@ class Benchmark(object):
     ) -> Tuple[bytes, bytes, SubprocessrExit]:
         """Run benchmark with perf stat and olly gc-stats attached via a sync pipe.
 
+        Owns the per-invocation tmpdir holding the OCaml runtime_events ring
+        and intermediate perf/olly output. Always removes tmpdir before
+        returning — GC-heavy benchmarks (owl_gc, liq_video_frames) leave 100+
+        MB ring files behind, and over a multi-thousand-invocation run those
+        will fill the tmpfs and the next benchmark dies with SIGBUS (mmap
+        write fails on the ring buffer).
+        """
+        tmpdir = tempfile.mkdtemp(prefix="running-ng-events-")
+        # Warn early if the tmpfs is already low so the run can be aborted
+        # before we start producing SIGBUS-killed cells.
+        try:
+            free_mb = shutil.disk_usage(tmpdir).free // (1024 * 1024)
+            if free_mb < 1024:
+                logging.warning(
+                    "Only %d MiB free on tmpdir filesystem (%s); runtime_events ring may "
+                    "fail with SIGBUS. Free space before continuing.", free_mb, tmpdir)
+        except OSError:
+            pass
+        try:
+            return self._run_with_perf_and_olly_in_tmpdir(
+                tmpdir, cmd, env_args, cwd, modifier)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def _run_with_perf_and_olly_in_tmpdir(
+        self,
+        tmpdir: str,
+        cmd: List,
+        env_args: Dict[str, str],
+        cwd: Optional[Path],
+        modifier: 'PerfAndOllyAttach',
+    ) -> Tuple[bytes, bytes, SubprocessrExit]:
+        """Body of _run_with_perf_and_olly that uses an externally-owned tmpdir.
+
         Using SIGSTOP in preexec_fn deadlocks because Python's Popen blocks
         reading the internal errpipe until the child calls exec() (which closes
         the CLOEXEC fd). Instead, we block the child in preexec_fn by reading
         from a pipe: parent gets the pid, starts observers, then closes the write
         end so the child unblocks and proceeds to exec().
         """
-        tmpdir = tempfile.mkdtemp()
         env_args = env_args.copy()
         env_args["OCAML_RUNTIME_EVENTS_START"] = "1"
         env_args["OCAML_RUNTIME_EVENTS_DIR"] = tmpdir
