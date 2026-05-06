@@ -275,6 +275,24 @@ suites:
         build_script: "merlin.build.sh"
         args: "4"
 
+  # js_of_ocaml: compile the runtime's ocamlc.byte (~3.5 MB of bytecode,
+  # version-matched per runtime by construction) to JavaScript. Exercises
+  # jsoo's bytecode parser, SSA / IR pipeline, optimisation passes, and
+  # JS output. Wall ~8-10s per invocation.
+  #
+  # Vendored from the `ocaml-5.6` branch of jsoo (PR ocsigen/js_of_ocaml#2227)
+  # rather than the 6.2.0 release, because 6.2.0 hard-rejects OCaml >= 5.5.
+  # The branch supports 4.13 ≤ x < 5.7 — covers all our matrix runtimes.
+  # Requires Cmdliner 2.0+ (vendored via setup-monorepo.sh as v2.1.0).
+  macro-jsoo:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      jsoo:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
+        build_script: "jsoo.build.sh"
+        args: ""
+
   # liq-video-frames: synthetic reproduction of the GC-pacer / heap-growth
   # pattern from ocaml/ocaml#13123 + the liquidsoap "ai-radio" workload.
   # Allocates 1280×720 RGBA8 video frames as Bigarrays (~3.5 MiB each,
@@ -409,6 +427,9 @@ benchmarks:
   # fixed in the merlin-domains branch.
   macro-merlin: []
     # - merlin_bench
+
+  macro-jsoo:
+    - jsoo
 
   macro-liq-video-frames:
     - liq_video_frames
