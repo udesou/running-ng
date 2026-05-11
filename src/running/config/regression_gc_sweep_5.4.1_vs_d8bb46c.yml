@@ -1,0 +1,184 @@
+# =============================================================================
+# Regression-targeted GC parameter sweep — 5.4.1 vs d8bb46c (5.5-beta)
+# =============================================================================
+# Targets the 11 macrobenchmarks that regressed (≥5%) in any flag combo of the
+# version-effect table from results/2026-05-04-fp-flambda-5.4.1-vs-d8bb46c-monolith.md:
+#
+#   alt_ergo_fill, cpdf_merge, cpdf_scale, cpdf_squeeze, devkit_stre,
+#   liq_parse_typecheck, liq_video_frames, menhir_sysver, ocamlc_self_compile,
+#   ocamlformat_rocq, pplacer_testsuite
+#
+# Two sweeps:
+#   1. (s, o)  — 5×5 = 25 combos, applied to ALL 11 benchmarks.
+#   2. (M, m)  — 5×5 = 25 combos at default (s, o), applied to all 11 but
+#                only meaningful for the off-heap-allocating subset:
+#
+#                  alt_ergo_fill       (zarith Z.t custom blocks)
+#                  cpdf_merge          (camlpdf Bigarray streams)
+#                  cpdf_scale          (camlpdf Bigarray streams)
+#                  cpdf_squeeze        (camlpdf Bigarray streams)
+#                  liq_video_frames    (Bigarray + finaliser, by design)
+#                  pplacer_testsuite   (gsl + Bigarray matrices)
+#
+#                The other 5 benches will show ~no effect on (M, m) — drop
+#                them in post-analysis.
+#
+# Runtimes: just 5.4.1 baseline + d8bb46c (no fp/flambda flag combos), per
+# user request to keep the matrix small.
+#
+# Total cells per (sweep, runtime, bench): 25 × 2 × 11 = 550 per sweep,
+# × 2 sweeps = 1100 cells × 3 invocations = 3300 invocations.
+#
+# OCaml runtime param defaults (verified in d8bb46c runtime/caml/config.h):
+#   s = 262144  (Minor_heap_def)
+#   o = 120     (Percent_free_def, was 80 in older OCaml)
+#   M = 44      (Custom_major_ratio_def)
+#   m = 100     (Custom_minor_ratio_def)
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/regression_gc_sweep_5.4.1_vs_d8bb46c.yml \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "./macrobenchmarks_base.yml"
+
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]  
+
+# Override the inherited benchmark list to just the 11 regressing benches.
+# Suites not listed here keep whatever the base file set them to.
+overrides:
+  invocations: 3
+  benchmarks:
+    macro-menhir-monorepo: [menhir_sysver]
+    macro-cpdf-monorepo:   [cpdf_merge, cpdf_scale, cpdf_squeeze]
+    macro-alt-ergo-monorepo: [alt_ergo_fill]
+    macro-coq-monorepo: []
+    macro-devkit:       [devkit_stre]
+    macro-irmin:        []
+    macro-ocamlformat:  [ocamlformat_rocq]
+    macro-decompress:   []
+    macro-eio:          []
+    macro-sedlex:       []
+    macro-yojson:       []
+    macro-zarith:       []
+    macro-owl:          []
+    macro-ocamlc-self-compile: [ocamlc_self_compile]
+    macro-liquidsoap-lang:     [liq_parse_typecheck]
+    macro-merlin: []
+    macro-jsoo:   []
+    macro-liq-video-frames: [liq_video_frames]
+    macro-pplacer:          [pplacer_testsuite]
+
+# =============================================================================
+# Runtimes — 5.4.1 baseline + d8bb46c, no flag combos
+# =============================================================================
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+  ocaml-d8bb46c:
+    type: OCaml
+    commit: "d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a"
+
+# =============================================================================
+# Modifiers — add s, o, M, m on top of base (re, md, perf_grp1)
+# =============================================================================
+modifiers:
+  s:
+    type: OCamlRunParam
+    val: "s={0}"
+  o:
+    type: OCamlRunParam
+    val: "o={0}"
+  M:
+    type: OCamlRunParam
+    val: "M={0}"
+  m:
+    type: OCamlRunParam
+    val: "m={0}"
+
+# =============================================================================
+# Configs
+# =============================================================================
+# Two sweep families share one configs list. config_sweep below cross-products
+# (s, o) into any config string that does NOT already name those modifiers.
+# The (M, m) configs explicitly pin s-262144|o-120 so the s/o sweep is skipped
+# for them.
+# =============================================================================
+configs:
+  # --- (s, o) sweep — expanded to 5×5 = 25 variants per runtime by config_sweep
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2"
+
+  # --- (M, m) sweep — pinned at default (s=262144, o=120), 25 explicit variants
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-25"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-50"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-100"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-200"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-400"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-25"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-50"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-100"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-200"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-400"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-25"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-50"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-100"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-200"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-400"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-25"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-50"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-100"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-200"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-400"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-25"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-50"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-100"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-200"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-400"
+
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-25"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-50"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-100"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-200"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-11|m-400"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-25"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-50"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-100"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-200"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-22|m-400"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-25"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-50"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-100"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-200"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-44|m-400"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-25"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-50"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-100"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-200"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-88|m-400"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-25"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-50"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-100"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-200"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|s-262144|o-120|M-176|m-400"
+
+# (s, o) sweep applies only to configs that don't already pin s and o.
+config_sweep:
+  s: [65536, 131072, 262144, 524288, 1048576]
+  o: [80, 100, 120, 150, 200]
+
+# =============================================================================
+# Comparisons — version effect across each (s, o) and (M, m) combo
+# =============================================================================
+comparisons:
+  - label: "version effect (default GC params)"
+    a: ocaml-5.4.1
+    b: ocaml-d8bb46c
