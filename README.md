@@ -2,6 +2,13 @@
 
 This version of `running-ng` has been extended to run OCaml benchmarks with GC parameter sweeps. For information about the original project, see [the upstream `running-ng` repository](https://github.com/anupli/running-ng) and its [documentation](https://anupli.github.io/running-ng/).
 
+It orchestrates two companion benchmark repos:
+
+- [**benches**](https://github.com/udesou/benches) — sandmark-derived OCaml microbenchmarks (138 programs across simple, multicore, with-deps, with-packages).
+- [**macro-benches**](https://github.com/udesou/macro-benches) — DaCapo-style monorepo of real-world OCaml applications (menhir, cpdf, alt-ergo, coq/rocq, …) with all dependencies vendored.
+
+Both companion repos work standalone; running-ng adds per-runtime opam switch management, modifier composition (GC tuning, perf counters, runtime-events ring sizing), and parameter sweeps.
+
 ## Quick Start
 
 ```bash
@@ -15,7 +22,7 @@ bash ~/running-ng/install_deps.sh
 RUNNING_BENCH_DIR=/path/to/benches ./run_ocaml_bench_gc_sweep.sh
 ```
 
-The script expects a sibling `benches/` directory by default. Override with `RUNNING_BENCH_DIR`. Logs go to `gc-sweep-logs/` (override with `LOG_DIR`). The config file defaults to `src/running/config/ocaml_gc_sweep_example.yml` (override with `CONFIG_FILE`).
+The script expects a sibling `benches/` directory by default. Override with `RUNNING_BENCH_DIR`. Logs go to `gc-sweep-logs/` (override with `LOG_DIR`). The config file defaults to `src/running/config/examples/ocaml_gc_sweep_example.yml` (override with `CONFIG_FILE`).
 
 ### Macrobenchmarks
 
@@ -50,7 +57,7 @@ cd ~/macro-benches && make setup
 # Then run from running-ng:
 cd ~/running-ng
 RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-CONFIG_FILE=src/running/config/macrobenchmarks_monorepo.yml \
+CONFIG_FILE=src/running/config/experiments/macrobenchmarks_monorepo.yml \
   bash run_ocaml_bench_gc_sweep.sh
 ```
 
@@ -101,7 +108,7 @@ The system has three layers:
 
 ### The Config File
 
-The YAML config (`src/running/config/ocaml_gc_sweep_example.yml`) has 5 key sections:
+The YAML config (`src/running/config/examples/ocaml_gc_sweep_example.yml`) has 5 key sections:
 
 #### `runtimes` — Which OCaml compilers to test
 
@@ -316,7 +323,7 @@ The `.json` sidecar is the preferred input for analysis scripts. Old `.log` file
 |---|---|---|
 | `RUNNING_BENCH_DIR` | `../benches` (relative to script) | Root of the benchmark sources |
 | `LOG_DIR` | `gc-sweep-logs/` | Where log files are written |
-| `CONFIG_FILE` | `src/running/config/ocaml_gc_sweep_example.yml` | YAML config (also: `macrobenchmarks_monorepo.yml`, `fp_flambda_macrobenchmarks.yml`, `gc_sweep_all_versions.yml`) |
+| `CONFIG_FILE` | `src/running/config/examples/ocaml_gc_sweep_example.yml` | YAML config. Shipped configs: `examples/ocaml_gc_sweep_example.yml`, `experiments/macrobenchmarks_monorepo.yml`, `experiments/fp_flambda_macrobenchmarks.yml`, `experiments/gc_sweep_all_versions.yml`. Reusable bases live under `base/ocaml/`. |
 | `RUNNING_MACRO_BENCH_DIR` | n/a | Root of the `macro-benches` monorepo (required for `macrobenchmarks_monorepo.yml` and `fp_flambda_macrobenchmarks.yml`) |
 | `OLLY_BIN` | `~/runtime_events_tools/_build/install/default/bin` | Directory containing `olly` binary |
 
