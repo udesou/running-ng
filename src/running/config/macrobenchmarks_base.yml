@@ -328,6 +328,40 @@ suites:
         # See ~/macro-benches/README.md §"Iteration counts" for the pattern.
         args: "5"
 
+  # lavyek: multicore key-value store on Eio + kcas + io_uring (single
+  # OCaml process, multi-domain).  DaCapo-style fixed-work driver; the
+  # 4-domain cell is the calibrated target (~8s wall on monolith).  All
+  # 4 cells share the same nb=10_000_000 op budget so wall times reflect
+  # parallel scaling rather than work-budget differences.  Per-domain
+  # measurements on monolith with nb=10M:
+  #     1d ~25s   2d ~14s   4d ~8s   8d ~6s
+  # WAL files live under benchmarks/lavyek/wal/<name>/ and the driver
+  # cleans up after each invocation; an interrupted run may leave
+  # leftovers, so wal/ is gitignored.
+  #
+  # Requires md=8 and a smaller per-domain ring (re=22).  Wired via
+  # the re_par / md_par modifiers — see the modifiers section below.
+  macro-lavyek-monorepo:
+    type: OCamlBenchmarkSuite
+    timeout: 120
+    programs:
+      lavyek_kv_1d:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek"
+        build_script: "lavyek.build.sh"
+        args: "1 100 10000000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek/wal/lavyek_wal_1d"
+      lavyek_kv_2d:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek"
+        build_script: "lavyek.build.sh"
+        args: "2 100 10000000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek/wal/lavyek_wal_2d"
+      lavyek_kv_4d:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek"
+        build_script: "lavyek.build.sh"
+        args: "4 100 10000000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek/wal/lavyek_wal_4d"
+      lavyek_kv_8d:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek"
+        build_script: "lavyek.build.sh"
+        args: "8 100 10000000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek/wal/lavyek_wal_8d"
+
 # =============================================================================
 # Modifiers
 # =============================================================================
@@ -340,15 +374,58 @@ modifiers:
     val: "v=0x400"
   # Runtime events ring buffer size (log2 words per domain).  Bigger ring
   # reduces "Lost N events" from olly on GC-heavy workloads.
+  #
+  # Two separate (re, md) pairs — sequential macros vs the parallel
+  # lavyek suite — because md must be >= the actual domain count and the
+  # events file size = md * 2^e * 8 bytes:
+  #   - sequential: re-25|md-2  -> 512 MB file, 256 MB/domain ring
+  #     (owl needs >= re-25 — see owl_gc comment; re-23 already overflows)
+  #   - lavyek:     re-22|md-8  -> 256 MB file,  32 MB/domain ring
+  #     (md-8|re-25 would be 2 GB, right at the ftruncate boundary)
+  # Routing is via `excludes`: re/md skip lavyek; re_par/md_par skip
+  # everything else.  The anchor &non_lavyek_excludes is shared by
+  # re_par and md_par so the long suite list lives in one place.
   re:
     type: OCamlRunParam
     val: "e={0}"
-  # Max domains — total events file size = d * 2^e * 8 bytes.
-  # These macrobenchmarks are sequential (1 main domain), so d=2 minimises
-  # the events file size (128MB for md=2, re=23).
+    excludes: &lavyek_only_excludes
+      macro-lavyek-monorepo:
+        - lavyek_kv_1d
+        - lavyek_kv_2d
+        - lavyek_kv_4d
+        - lavyek_kv_8d
   md:
     type: OCamlRunParam
     val: "d={0}"
+    excludes: *lavyek_only_excludes
+  # Parallel-suite counterparts: only applied to lavyek programs.
+  re_par:
+    type: OCamlRunParam
+    val: "e={0}"
+    excludes: &non_lavyek_excludes
+      macro-menhir-monorepo: [menhir_ocamly, menhir_sql_parser, menhir_sysver]
+      macro-cpdf-monorepo: [cpdf_merge, cpdf_blacktext, cpdf_scale, cpdf_squeeze]
+      macro-alt-ergo-monorepo: [alt_ergo_fill, alt_ergo_yyll, alt_ergo_unsat_smt2]
+      macro-coq-monorepo: [coqc_corelib_stress]
+      macro-devkit: [devkit_htmlstream, devkit_stre, devkit_network, devkit_gzip]
+      macro-irmin: [irmin_mem_rw]
+      macro-ocamlformat: [ocamlformat_rocq]
+      macro-decompress: [test_decompress]
+      macro-eio: [eio_fiber_stream]
+      macro-sedlex: [sedlex_tokenize]
+      macro-yojson: [ydump_repeat]
+      macro-zarith: [zarith_pi]
+      macro-owl: [owl_gc]
+      macro-ocamlc-self-compile: [ocamlc_self_compile]
+      macro-liquidsoap-lang: [liq_parse_typecheck]
+      macro-merlin: [merlin_bench]
+      macro-jsoo: [jsoo]
+      macro-liq-video-frames: [liq_video_frames]
+      macro-pplacer: [pplacer_testsuite]
+  md_par:
+    type: OCamlRunParam
+    val: "d={0}"
+    excludes: *non_lavyek_excludes
   perf_grp1:
     type: PerfAndOllyAttach
     val: "task-clock,page-faults,cycles,instructions"
@@ -436,3 +513,9 @@ benchmarks:
 
   macro-pplacer:
     - pplacer_testsuite
+
+  macro-lavyek-monorepo:
+    - lavyek_kv_1d
+    - lavyek_kv_2d
+    - lavyek_kv_4d
+    - lavyek_kv_8d
