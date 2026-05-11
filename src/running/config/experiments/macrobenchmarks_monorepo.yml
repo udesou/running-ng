@@ -23,7 +23,7 @@
 # =============================================================================
 
 includes:
-  - "./macrobenchmarks_base.yml"
+  - "../base/ocaml/macro_base.yml"
 
 # Baseline-comparison run: 1 invocation, and coq's faster 300s timeout.
 overrides:

@@ -51,7 +51,7 @@ plugins:
       to: [361443]
 
 includes:
-  - "./macrobenchmarks_base.yml"
+  - "../base/ocaml/macro_base.yml"
 
 # =============================================================================
 # Runtimes — 12 variants

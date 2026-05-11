@@ -11,7 +11,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export RUNNING_BENCH_DIR="${RUNNING_BENCH_DIR:-$(cd "$ROOT_DIR/../benches" && pwd)}"
 
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/gc-sweep-logs}"
-CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/src/running/config/ocaml_gc_sweep_example.yml}"
+CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/src/running/config/examples/ocaml_gc_sweep_example.yml}"
 PYTHONPATH="$ROOT_DIR/src"
 OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"
 OLLY_BIN="${OLLY_BIN:-$OLLY_DIR/_build/install/default/bin}"

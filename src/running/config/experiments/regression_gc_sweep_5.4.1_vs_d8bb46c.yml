@@ -42,7 +42,7 @@
 # =============================================================================
 
 includes:
-  - "./macrobenchmarks_base.yml"
+  - "../base/ocaml/macro_base.yml"
 
 plugins:
   zulip:
