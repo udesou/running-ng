@@ -33,13 +33,12 @@ that vendors all dependencies via opam-monorepo.  Current benchmarks:
 - **Numerics:** zarith, owl
 - **Bioinformatics:** pplacer
 
-Three macrobenchmark configs are shipped:
+Two macrobenchmark configs are shipped:
 
 | Config | Purpose | Runtimes | Invocations |
 |---|---|---|---|
 | `macrobenchmarks_monorepo.yml` | Cross-runtime comparison at default GC | 5.4.1, trunk, OxCaml | 1 |
 | `fp_flambda_macrobenchmarks.yml` | FP × flambda 2×2 sweep | 4 variants of 5.4.1 | 3 |
-| `macrobenchmarks.yml` | Legacy (opam-install per switch) | configurable | 1 |
 
 To run the monorepo-based configs:
 
