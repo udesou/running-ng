@@ -142,7 +142,9 @@ Suites define available programs (path, args, timeout). The `benchmarks` section
 - **`OCamlMulticoreBenchmarkSuite`** — same but enforces OCaml >= 5
 - **`OCamlOxcamlBenchmarkSuite`** — like multicore, but **fails** if the runtime is not `type: OxCaml` (for benchmarks using OxCaml-specific APIs like `Domain.Safe`)
 
-All paths in the config use `${RUNNING_BENCH_DIR}` which is expanded at runtime from the environment variable set by the launch script.
+Suite paths use `${RUNNING_BENCH_DIR}` (for micro suites pointing at `~/benches/`) or `${RUNNING_MACRO_BENCH_DIR}` (for macro suites pointing at `~/macro-benches/`). Both are expanded at runtime from environment variables set by the launch shell.
+
+Inside each benchmark, the build script consumes a separate, identical set of env vars across both repos (`RUNNING_OCAML_BENCH_DIR`, `RUNNING_OCAML_OUTPUT`, `RUNNING_OCAML_RUNTIME_NAME`, `RUNNING_OCAML_SWITCH`) — see [benches/README.md §Build Script Contract](https://github.com/udesou/benches#build-script-contract) and [macro-benches/README.md §Build scripts](https://github.com/udesou/macro-benches#build-scripts).
 
 #### `modifiers` — How to tweak runs
 
@@ -324,7 +326,7 @@ The `.json` sidecar is the preferred input for analysis scripts. Old `.log` file
 | `RUNNING_BENCH_DIR` | `../benches` (relative to script) | Root of the benchmark sources |
 | `LOG_DIR` | `gc-sweep-logs/` | Where log files are written |
 | `CONFIG_FILE` | `src/running/config/examples/ocaml_gc_sweep_example.yml` | YAML config. Shipped configs: `examples/ocaml_gc_sweep_example.yml`, `experiments/macrobenchmarks_monorepo.yml`, `experiments/fp_flambda_macrobenchmarks.yml`, `experiments/gc_sweep_all_versions.yml`. Reusable bases live under `base/ocaml/`. |
-| `RUNNING_MACRO_BENCH_DIR` | n/a | Root of the `macro-benches` monorepo (required for `macrobenchmarks_monorepo.yml` and `fp_flambda_macrobenchmarks.yml`) |
+| `RUNNING_MACRO_BENCH_DIR` | n/a | Root of the `macro-benches` monorepo (required for any config that includes `base/ocaml/macro_base.yml`: `experiments/macrobenchmarks_monorepo.yml`, `experiments/fp_flambda_*.yml`, `experiments/regression_*.yml`, `examples/smoke_macro.yml`) |
 | `OLLY_BIN` | `~/runtime_events_tools/_build/install/default/bin` | Directory containing `olly` binary |
 
 ## Development Setup
