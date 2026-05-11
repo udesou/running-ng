@@ -4,8 +4,8 @@ This version of `running-ng` has been extended to run OCaml benchmarks with GC p
 
 It orchestrates two companion benchmark repos:
 
-- [**benches**](https://github.com/udesou/benches) — sandmark-derived OCaml microbenchmarks (138 programs across simple, multicore, with-deps, with-packages).
-- [**macro-benches**](https://github.com/udesou/macro-benches) — DaCapo-style monorepo of real-world OCaml applications (menhir, cpdf, alt-ergo, coq/rocq, …) with all dependencies vendored.
+- [**benches**](https://github.com/ocaml-bench/benches) — sandmark-derived OCaml microbenchmarks (138 programs across simple, multicore, with-deps, with-packages).
+- [**macro-benches**](https://github.com/ocaml-bench/macro-benches) — DaCapo-style monorepo of real-world OCaml applications (menhir, cpdf, alt-ergo, coq/rocq, …) with all dependencies vendored.
 
 Both companion repos work standalone; running-ng adds per-runtime opam switch management, modifier composition (GC tuning, perf counters, runtime-events ring sizing), and parameter sweeps.
 
@@ -27,7 +27,7 @@ The script expects a sibling `benches/` directory by default. Override with `RUN
 ### Macrobenchmarks
 
 Real-world OCaml applications (17 tools, 29 benchmark programs across 14
-categories) built from a single dune monorepo ([macro-benches](https://github.com/udesou/macro-benches))
+categories) built from a single dune monorepo ([macro-benches](https://github.com/ocaml-bench/macro-benches))
 that vendors all dependencies via opam-monorepo.  Current benchmarks:
 
 - **Text processing:** menhir (3 grammars), sedlex
@@ -51,7 +51,7 @@ To run the monorepo-based configs:
 
 ```bash
 # Clone and set up the macro-benches monorepo (one-time; ~10 min):
-git clone https://github.com/udesou/macro-benches.git ~/macro-benches
+git clone https://github.com/ocaml-bench/macro-benches.git ~/macro-benches
 cd ~/macro-benches && make setup
 
 # Then run from running-ng:
@@ -64,7 +64,7 @@ CONFIG_FILE=src/running/config/experiments/macrobenchmarks_monorepo.yml \
 The monorepo approach vendors all OCaml dependencies into a single
 dune workspace, ensuring identical source code across all runtimes —
 the only variable is the compiler.  See
-[macro-benches/README.md](https://github.com/udesou/macro-benches#readme)
+[macro-benches/README.md](https://github.com/ocaml-bench/macro-benches#readme)
 for setup details, patches applied to vendored sources, and a list
 of system dependencies.
 
@@ -144,7 +144,7 @@ Suites define available programs (path, args, timeout). The `benchmarks` section
 
 Suite paths use `${RUNNING_BENCH_DIR}` (for micro suites pointing at `~/benches/`) or `${RUNNING_MACRO_BENCH_DIR}` (for macro suites pointing at `~/macro-benches/`). Both are expanded at runtime from environment variables set by the launch shell.
 
-Inside each benchmark, the build script consumes a separate, identical set of env vars across both repos (`RUNNING_OCAML_BENCH_DIR`, `RUNNING_OCAML_OUTPUT`, `RUNNING_OCAML_RUNTIME_NAME`, `RUNNING_OCAML_SWITCH`) — see [benches/README.md §Build Script Contract](https://github.com/udesou/benches#build-script-contract) and [macro-benches/README.md §Build scripts](https://github.com/udesou/macro-benches#build-scripts).
+Inside each benchmark, the build script consumes a separate, identical set of env vars across both repos (`RUNNING_OCAML_BENCH_DIR`, `RUNNING_OCAML_OUTPUT`, `RUNNING_OCAML_RUNTIME_NAME`, `RUNNING_OCAML_SWITCH`) — see [benches/README.md §Build Script Contract](https://github.com/ocaml-bench/benches#build-script-contract) and [macro-benches/README.md §Build scripts](https://github.com/ocaml-bench/macro-benches#build-scripts).
 
 #### `modifiers` — How to tweak runs
 
