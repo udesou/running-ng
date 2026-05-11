@@ -1,0 +1,43 @@
+# =============================================================================
+# Smoke test — micro benchmarks
+# =============================================================================
+# Verifies the running-ng -> ~/benches/ pipeline:
+#   - opam-compiler creates a switch for the runtime
+#   - the suite's build script compiles cleanly into a binary
+#   - the benchmark runs, PerfAndOllyAttach captures JSON, sidecar written
+#
+# Two cheap benchmarks under one runtime, 1 invocation each. Total wall time
+# ~30-60s after the runtime switch + dune builds are warm.
+#
+# Usage:
+#   cd ~/running-ng
+#   RUNNING_BENCH_DIR=~/benches \
+#   CONFIG_FILE=src/running/config/examples/smoke_micro.yml \
+#   LOG_DIR=/tmp/smoke_micro \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/micro_base.yml"
+
+invocations: 1
+remote_host: null
+compress_logs: false
+minheap_multiplier: 1.0
+heap_range: 6
+spread_factor: 1
+
+# Override the base's `benchmarks:` block: only run two cheap simples.
+overrides:
+  benchmarks:
+    sandmark-sequential:
+      - almabench
+      - bdd
+
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+
+configs:
+  - "ocaml-5.4.1|perf_grp1"

@@ -1,0 +1,45 @@
+# =============================================================================
+# Smoke test — macro benchmarks (incl. lavyek parallel suite)
+# =============================================================================
+# Verifies the running-ng -> ~/macro-benches/ pipeline end-to-end:
+#   - sequential macro path (cpdf_merge, sedlex_tokenize) under re-25|md-2
+#   - lavyek parallel path (lavyek_kv_1d) under re_par-22|md_par-8
+#     — exercises the modifier `excludes:` routing in macro_base.yml
+#   - PerfAndOllyAttach JSON sidecars written for both paths
+#
+# One invocation each under OCaml 5.4.1.
+#
+# Prerequisites: ~/macro-benches/ must have been built via `make setup`.
+#
+# Usage:
+#   cd ~/running-ng
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/examples/smoke_macro.yml \
+#   LOG_DIR=/tmp/smoke_macro \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 1
+  # Narrow the suite to one quick sequential bench + one quick lavyek cell.
+  benchmarks:
+    macro-cpdf-monorepo:
+      - cpdf_merge
+    macro-sedlex:
+      - sedlex_tokenize
+    macro-lavyek-monorepo:
+      - lavyek_kv_1d
+
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+
+# Sequential macros get re-25|md-2 (excluded for lavyek);
+# lavyek gets re_par-22|md_par-8 (excluded for everything else).
+# Both routings are defined in macro_base.yml.
+configs:
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8"
