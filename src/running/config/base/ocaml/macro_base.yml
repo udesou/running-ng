@@ -317,19 +317,27 @@ suites:
       liq_video_frames_full:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
-        args: "10000"
+        args: "30000"
       liq_video_frames_page:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
-        args: "10000"
+        args: "30000"
       liq_video_frames_first:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
-        args: "10000"
+        args: "30000"
       liq_video_frames_none:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
-        args: "10000"
+        args: "30000"
+      # POOL=1 + TOUCH=full: AVFrame-style refcounted-pool semantics —
+      # the canonical reproduction of toots' ocaml#14533 free-lunch shape.
+      # Under M=250 this variant shows the dramatic CPU drop with no RSS
+      # growth that the mm-path TOUCH variants above don't exhibit.
+      liq_video_frames_pool:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
+        build_script: "liq-video-frames.build.sh"
+        args: "30000"
 
   # pplacer: phylogenetic placement (bioinformatics).
   macro-pplacer:
@@ -448,7 +456,7 @@ modifiers:
       macro-liquidsoap-lang: [liq_parse_typecheck]
       macro-merlin: [merlin_bench]
       macro-jsoo: [jsoo]
-      macro-liq-video-frames: [liq_video_frames_full, liq_video_frames_page, liq_video_frames_first, liq_video_frames_none]
+      macro-liq-video-frames: [liq_video_frames_full, liq_video_frames_page, liq_video_frames_first, liq_video_frames_none, liq_video_frames_pool]
       macro-pplacer: [pplacer_testsuite]
   md_par:
     type: OCamlRunParam
@@ -558,6 +566,7 @@ benchmarks:
     - liq_video_frames_page
     - liq_video_frames_first
     - liq_video_frames_none
+    - liq_video_frames_pool
 
   macro-pplacer:
     - pplacer_testsuite
