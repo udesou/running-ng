@@ -73,7 +73,7 @@ overrides:
     macro-liquidsoap-lang:     [liq_parse_typecheck]
     macro-merlin: []
     macro-jsoo:   []
-    macro-liq-video-frames: [liq_video_frames]
+    macro-liq-video-frames: [liq_video_frames_full, liq_video_frames_page, liq_video_frames_first, liq_video_frames_none]
     macro-pplacer:          [pplacer_testsuite]
 
 # =============================================================================
