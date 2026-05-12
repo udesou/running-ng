@@ -339,6 +339,15 @@ suites:
   # cleans up after each invocation; an interrupted run may leave
   # leftovers, so wal/ is gitignored.
   #
+  # CPU pinning: lavyek_bench.ml pins each worker domain to its own
+  # physical core via `ocaml-processor` (Processor.Affinity.set_cpus
+  # → pthread_setaffinity_np), keyed off id_domain.  This is what
+  # makes the 1d/2d/4d/8d wall times comparable run-to-run — without
+  # it the kernel migrates domains within whatever mask was inherited.
+  # The pin_lavyek modifier wraps the process in `taskset -c 0-15` to
+  # also fence the few helper threads (first iou-wrk + Eio setup) that
+  # spawn before pinning runs.  See benchmarks/lavyek/lavyek_bench.ml.
+  #
   # Requires md=8 and a smaller per-domain ring (re=22).  Wired via
   # the re_par / md_par modifiers — see the modifiers section below.
   macro-lavyek-monorepo:
@@ -425,6 +434,23 @@ modifiers:
   md_par:
     type: OCamlRunParam
     val: "d={0}"
+    excludes: *non_lavyek_excludes
+  # Process-level CPU mask for the lavyek suite — belt-and-braces on top
+  # of the per-domain pinning that lavyek_bench.ml does internally via
+  # ocaml-processor (each worker domain locks itself to a distinct
+  # physical core, cores 0..N-1).  A handful of Eio/io_uring helper
+  # threads spawn before the bench's pinning runs and would otherwise
+  # inherit the process default mask (every logical CPU); this wrapper
+  # confines them to the same physical-core set the workers use.
+  #
+  # Assumption: cores 0-15 are physical (smt=0).  This holds on the
+  # AMD Ryzen 9 9950X box where the suite is calibrated; on Intel
+  # SMT-enabled hardware where logical CPUs alternate physical/sibling,
+  # adjust the mask per-machine in the experiment file.  Lavyek-only
+  # via the shared anchor; sequential macros stay unmasked.
+  pin_lavyek:
+    type: Wrapper
+    val: "taskset -c 0-15"
     excludes: *non_lavyek_excludes
   perf_grp1:
     type: PerfAndOllyAttach

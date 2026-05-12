@@ -39,7 +39,7 @@ runtimes:
     version: "5.4.1"
 
 # Sequential macros get re-25|md-2 (excluded for lavyek);
-# lavyek gets re_par-22|md_par-8 (excluded for everything else).
-# Both routings are defined in macro_base.yml.
+# lavyek gets re_par-22|md_par-8 + pin_lavyek (taskset -c 0-15, lavyek-only).
+# All three routings are defined in macro_base.yml.
 configs:
-  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"

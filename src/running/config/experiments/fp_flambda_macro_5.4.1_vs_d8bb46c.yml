@@ -73,16 +73,18 @@ runtimes:
 # OCAMLRUNPARAM is routed per-benchmark via the modifier `excludes` machinery
 # in macrobenchmarks_base.yml: re/md only apply to sequential macros, while
 # re_par/md_par only apply to lavyek.  Sequential gets e=25,d=2; lavyek gets
-# e=22,d=8.
+# e=22,d=8.  pin_lavyek wraps lavyek runs in `taskset -c 0-15` so the few
+# Eio/io_uring helper threads that spawn before the bench's own per-domain
+# pinning are fenced to physical cores; sequential macros are untouched.
 configs:
-  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8"
-  - "ocaml-5.4.1-fp|perf_grp1|re-25|md-2|re_par-22|md_par-8"
-  - "ocaml-5.4.1-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8"
-  - "ocaml-5.4.1-fp-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8"
-  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|re_par-22|md_par-8"
-  - "ocaml-d8bb46c-fp|perf_grp1|re-25|md-2|re_par-22|md_par-8"
-  - "ocaml-d8bb46c-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8"
-  - "ocaml-d8bb46c-fp-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1-fp|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1-fp-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-d8bb46c-fp|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-d8bb46c-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-d8bb46c-fp-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
 
 # =============================================================================
 # Comparisons — declared pairs the visualisation should render.
