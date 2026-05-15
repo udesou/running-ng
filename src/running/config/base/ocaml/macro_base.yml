@@ -549,3 +549,343 @@ benchmarks:
     - lavyek_kv_2d
     - lavyek_kv_4d
     - lavyek_kv_8d
+
+# =============================================================================
+# Tags — runtime-feature classification of benchmarks
+# =============================================================================
+# Tags map each benchmark to the specific OCaml runtime mechanism(s) it
+# exercises on the *hot path* of its workload.  Source-grounded: every
+# `exercised_by:` claim is backed by a file:line citation under
+# `verified_at:` from the vendored sources (~/macro-benches/duniverse/,
+# vendor/) or from the OCaml compiler-libs.  See macro-benches/README.md
+# §"Runtime-feature coverage matrix" for the prose version.
+#
+# Schema (per tag):
+#   <tag-name>:
+#     description: <one-paragraph explanation of the runtime mechanism>
+#     exercised_by:                # hot-path programs (selected by RUNNING_TAG)
+#       <suite-name>: [<programs>]
+#     cold:                        # optional — present-but-cold uses (doc only;
+#       <suite-name>: [<programs>] # NOT selected by RUNNING_TAG)
+#     verified_at:                 # source citations
+#       - <repo-relative path>:<line> — <brief note>
+#     gap:                         # optional — required if exercised_by is empty
+#       <text explaining why no benchmark exercises this>
+#
+# Usage:
+#   # run only the benchmarks that exercise Weak.Make on the hot path:
+#   RUNNING_TAG=weak_refs \
+#     CONFIG_FILE=src/running/config/experiments/macrobenchmarks_monorepo.yml \
+#     bash run_ocaml_bench_gc_sweep.sh
+#
+#   # union of two tags (any program with either tag):
+#   RUNNING_TAG=weak_refs,effects ...
+#
+# Filter semantics: union across the named tags, intersected with the
+# experiment's `benchmarks:` block (so disabled benches like
+# macro-merlin stay disabled).  Coverage-gap tags (empty `exercised_by:`)
+# fail loudly — `RUNNING_TAG=ephemerons` exits with a `gap:` message
+# rather than silently running nothing.
+# =============================================================================
+tags:
+
+  # ---------------------------------------------------------------------
+  # Coverage gaps — no benchmark currently exercises these on the hot
+  # path.  Kept as named tags so the gap is discoverable + closable.
+  # ---------------------------------------------------------------------
+
+  ephemerons:
+    description: |
+      Ephemeron.K1 / K2 / Kn — used by hash-consing libraries and
+      type-checker caches.  Runtime: caml_ephe_*.
+    exercised_by: {}
+    cold:
+      macro-merlin: [merlin_bench]
+    verified_at:
+      - "duniverse/merlin/src/ocaml/typing/saved_parts.ml:3 — Ephemeron.K1 stash for parse-tree fragments (touched at parse time only)"
+      - "compiler-libs typing/btype.ml:46 — uses Hashtbl.Make, NOT Ephemeron (verified in 5.4.1 and trunk)"
+      - "duniverse/rocq/clib/cEphemeron.ml — used by Coq VM backend, but coq_corelib_stress.v is kernel-only and does not reach the VM"
+    gap: |
+      No benchmark exercises ephemerons on the hot path.  The OCaml
+      compiler-libs at 5.4.1 and trunk use Hashtbl.Make in typing/btype.ml.
+      Merlin's saved_parts.ml is cold and merlin_bench is also currently
+      disabled.  Coq's CEphemeron is reached only by the VM backend, not
+      the kernel reduction workload.  Closing this gap requires either
+      re-enabling merlin_bench *and* finding a heavier ephemeron user
+      (Saved_parts is small) or porting a sandmark ephemeron microbench.
+
+  kcas:
+    description: |
+      Lock-free multi-CAS via the kcas library.  Runtime: contention on
+      caml_atomic_* under MCAS retry loops.
+    exercised_by: {}
+    verified_at:
+      - "duniverse/lavyek/dune-project — lists kcas + kcas_data as deps"
+      - "grep -rn 'Kcas\\.\\|Kcas_data\\.\\|Loc\\.' duniverse/lavyek/src/ — returns nothing"
+      - "duniverse/lavyek/REMOVED.md:22 — module Queue = Kcas_data.Queue removed as vestige"
+    gap: |
+      Lavyek's dune-project lists kcas/kcas_data as deps, but the actual
+      in-memory index, compaction queue, and Bloom filter are hand-rolled
+      Atomic.compare_and_set loops (memtable.ml, chunk_file.ml,
+      memfilter.ml, compact.ml).  kcas itself is never invoked from any
+      benchmark in the suite.  A standalone benchmark wrapping kcas
+      directly (e.g. a kcas_data.Hashtbl workload) would close this.
+
+  # ---------------------------------------------------------------------
+  # Single-feature tags — each maps to a specific runtime mechanism.
+  # Highest diagnostic precision: "I changed X, run RUNNING_TAG=X."
+  # ---------------------------------------------------------------------
+
+  weak_refs:
+    description: |
+      Weak.Make / Weak.create — hash-consing of structurally-identical
+      terms via weak hashsets.  Runtime: caml_weak_*.  Suite's only
+      hot-path Weak workload.
+    exercised_by:
+      macro-alt-ergo-monorepo:
+        - alt_ergo_fill
+        - alt_ergo_yyll
+        - alt_ergo_unsat_smt2
+    verified_at:
+      - "duniverse/alt-ergo/src/lib/util/hconsing.ml:51 — module Make ... WHT.create where WHT = Weak.Make (H_t); every theory-term constructor goes through this weak hashset"
+
+  effects:
+    description: |
+      Effect.perform — OCaml 5 effects.  Includes Eio's use of effects
+      under the hood (every Fiber.fork_promise / Stream op / yield
+      flows through Effect.perform + deep try_with).
+    exercised_by:
+      macro-eio:
+        - eio_fiber_stream
+      macro-lavyek-monorepo:
+        - lavyek_kv_1d
+        - lavyek_kv_2d
+        - lavyek_kv_4d
+        - lavyek_kv_8d
+    cold:
+      macro-merlin: [merlin_bench]    # cancellation control flow; disabled
+    verified_at:
+      - "duniverse/eio/lib_eio/core/suspend.ml:6 — Effect.perform (Suspend fn)"
+      - "duniverse/eio/lib_eio/core/fiber.ml:11 — Effect.perform (Fork (...))"
+      - "duniverse/eio/lib_eio/core/cancel.ml:123 — Effect.perform Get_context"
+
+  domains:
+    description: |
+      Domain.spawn / Domain.join — real OCaml domain creation
+      (multi-OS-threaded).  Distinct from `effects` (which Eio uses
+      single-domain too) and from `atomics` (which doesn't require
+      multiple domains).
+    exercised_by:
+      macro-lavyek-monorepo:
+        - lavyek_kv_2d
+        - lavyek_kv_4d
+        - lavyek_kv_8d
+    cold:
+      macro-merlin: [merlin_bench]              # disabled
+      macro-lavyek-monorepo: [lavyek_kv_1d]     # nb_domains=1 takes inline branch, no Domain.spawn
+    verified_at:
+      - "benchmarks/lavyek/lavyek_bench.ml:123 — `if id_domain = 0 then fn () else Domain_manager.run dmgr fn`"
+      - "benchmarks/merlin/merlin_bench.ml:113 — Domain.spawn @@ Mpipeline.domain_typer shared"
+
+  atomics:
+    description: |
+      Atomic.* operations on the hot path — caml_atomic_*.  Includes
+      compare_and_set, fetch_and_add, exchange.  Distinct from `kcas`
+      (which is a library on top of Atomic).
+    exercised_by:
+      macro-eio:
+        - eio_fiber_stream
+      macro-lavyek-monorepo:
+        - lavyek_kv_1d
+        - lavyek_kv_2d
+        - lavyek_kv_4d
+        - lavyek_kv_8d
+    cold:
+      macro-merlin: [merlin_bench]                                       # Domain_msg cancellation flag; disabled
+      macro-devkit: [devkit_stre, devkit_htmlstream, devkit_network, devkit_gzip]
+                                                                         # ocaml-re internal Atomic at regex-compile time only
+    verified_at:
+      - "duniverse/lavyek/src/memtable.ml:25-67 — Atomic.make, get, compare_and_set, incr on bucket arrays"
+      - "duniverse/lavyek/src/chunk_file.ml:9-18 — Atomic.compare_and_set on pending-writes tuple"
+      - "duniverse/lavyek/src/memfilter.ml:7-15 — Atomic.compare_and_set on Bloom filter bits"
+      - "duniverse/eio/lib_eio/sem_state.ml:79-168 — Atomic.fetch_and_add/exchange/CAS for semaphore internals"
+      - "benchmarks/lavyek/lavyek_bench.ml — Atomic.fetch_and_add chunk dispatcher"
+
+  marshal:
+    description: |
+      Marshal.to_* / from_* — OCaml's binary serialization.  Runtime:
+      caml_output_value*, caml_input_value*.
+    exercised_by:
+      macro-ocamlc-self-compile:
+        - ocamlc_self_compile
+    cold:
+      macro-liquidsoap-lang: [liq_parse_typecheck]    # cache.ml:75 disabled at default
+      macro-jsoo: [jsoo]                              # parse_bytecode.ml:462 custom-block introspection
+    verified_at:
+      - "compiler-libs file_formats/cmi_format.ml:87 — Compression.output_value oc (cmi.cmi_name, cmi.cmi_sign)"
+      - "compiler-libs bytecomp/emitcode.ml:33 — Marshal.to_channel outchan obj (bytecode emission)"
+
+  signals:
+    description: |
+      Sys.set_signal handlers and their delivery.  Runtime:
+      caml_install_signal_handler + caml_record_signal.  Suite registers
+      handlers but no benchmark exercises high-frequency delivery in a
+      tight loop.
+    exercised_by:
+      macro-alt-ergo-monorepo:
+        - alt_ergo_unsat_smt2
+    cold:
+      macro-alt-ergo-monorepo: [alt_ergo_fill, alt_ergo_yyll]
+                                                # handlers registered but no --timelimit so timer never fires
+    verified_at:
+      - "duniverse/alt-ergo/src/bin/common/signals_profiling.ml:32-89 — installs SIGINT, SIGVTALRM, SIGPROF"
+      - "experiments use --timelimit 15 only on alt_ergo_unsat_smt2, which arms SIGVTALRM"
+
+  lwt:
+    description: |
+      Lwt cooperative-threading promises — Lwt.bind continuations.  Hot
+      path goes through Lwt's scheduler on every async op.
+    exercised_by:
+      macro-irmin:
+        - irmin_mem_rw
+    verified_at:
+      - "benchmarks/irmin/irmin_mem_rw.ml — `>>=` chains for every store op (write 3000 + read 3000 + 20000 mixed)"
+      - "duniverse/irmin/src/irmin/mem/irmin_mem.ml — let* desugaring in find/set/test_and_set"
+
+  off_heap_accounting:
+    description: |
+      caml_alloc_custom_mem off-heap accounting and its interaction
+      with the major-heap pacer (custom_major_ratio M, space_overhead).
+      The only benchmark whose wall+RSS Pareto front actually moves
+      with M.
+    exercised_by:
+      macro-liq-video-frames:
+        - liq_video_frames_pool
+    cold:
+      macro-owl: [owl_gc]                               # allocates custom blocks but sizes too small to swing pacer
+      macro-zarith: [zarith_pi]                         # same
+      macro-decompress: [test_decompress]               # same
+    verified_at:
+      - "benchmarks/liq-video-frames/liq_video_frames.ml — POOL=1 path calls caml_alloc_custom_mem with mem = 921 600/230 400 bytes per frame"
+      - "benchmarks/liq-video-frames/pool_stubs.c:34 — caml_alloc_custom_mem(&pool_ops, sizeof(intnat), sz)"
+      - "ocaml/ocaml#14533 — the issue this benchmark reproduces"
+
+  # ---------------------------------------------------------------------
+  # Allocation-shape tags — cross-cutting allocator-pattern tags.  Lower
+  # precision than single-feature tags (4–6 benchmarks each) but useful
+  # for FFI / custom-block regressions.
+  # ---------------------------------------------------------------------
+
+  custom_block_finalisation:
+    description: |
+      caml_alloc_custom / caml_alloc_custom_mem allocation plus the
+      finalize callback registered in the custom_operations struct.
+      Includes Bigarrays (via caml_ba_finalize), Zarith Z.t (GMP-aware
+      finaliser), zlib z_stream blocks, sqlite3 statement handles, GSL
+      workspaces (via Gc.finalise).  Distinct from `bigarrays` (a
+      proper subset — Bigarray IS one kind of custom block).
+    exercised_by:
+      macro-zarith: [zarith_pi]                              # Z.t custom block; caml_alloc_custom + ml_z_custom_ops
+      macro-owl: [owl_gc]                                    # Bigarray.Array2 custom blocks
+      macro-liq-video-frames: [liq_video_frames_pool]        # Bigarray planes + pool_stubs.c caml_alloc_custom_mem
+      macro-decompress: [test_decompress]                    # Bigstringaf-backed Bigarrays
+      macro-devkit: [devkit_gzip]                            # z_stream custom block via camlzip C stubs
+      macro-pplacer: [pplacer_testsuite]                     # GSL Vector/Matrix + sqlite3 handles, Gc.finalise registered
+    verified_at:
+      - "duniverse/Zarith/caml_z.c:323-324 — caml_alloc_custom + ml_z_custom_ops"
+      - "benchmarks/liq-video-frames/pool_stubs.c:34 — caml_alloc_custom_mem"
+      - "duniverse/gsl-ocaml/src/{vector,sum,eigen,odeiv,integration}.ml — Gc.finalise _free"
+      - "compiler-libs runtime/bigarray.c — caml_ba_alloc registers caml_ba_finalize"
+
+  bigarrays:
+    description: |
+      Bigarray allocation (caml_ba_alloc) — bulk off-heap byte data
+      with header on the OCaml heap.  A proper subset of
+      `custom_block_finalisation` (every Bigarray is a custom block
+      with caml_ba_finalize as its `finalize` op), but worth its own
+      tag because Bigarray-specific regressions hit a narrower code
+      path.
+    exercised_by:
+      macro-owl: [owl_gc]                                    # 100×100 Float64 Array2, hot
+      macro-liq-video-frames: [liq_video_frames_pool]        # 1280×720 YUV420 Array1 char planes
+      macro-decompress: [test_decompress]                    # Bigstringaf I/O buffers
+      macro-ocamlc-self-compile: [ocamlc_self_compile]       # bytecode emit buffer
+    verified_at:
+      - "compiler-libs bytecomp/emitcode.ml:53 — `Bigarray.Array1.create Bigarray.Char Bigarray.c_layout` for the emit buffer"
+      - "benchmarks/owl/owl_gc.ml:79 — Bigarray.Array2.create Bigarray.Float64"
+      - "benchmarks/liq-video-frames/liq_video_frames.ml:102-104 — Bigarray.Array1.create Bigarray.Char per frame"
+
+  ffi_bulk:
+    description: |
+      Bulk FFI stub calls in inner loops — OpenBLAS, GMP, GSL, sqlite3,
+      zlib via C bindings.  Sensitive to per-call stub overhead
+      (caml_enter_blocking_section / caml_leave_blocking_section
+      round-trips, argument marshaling).
+    exercised_by:
+      macro-owl: [owl_gc]                                    # OpenBLAS GEMM per Mat.dot
+      macro-zarith: [zarith_pi]                              # GMP per arithmetic op
+      macro-pplacer: [pplacer_testsuite]                     # GSL + sqlite3
+      macro-devkit: [devkit_gzip]                            # zlib via camlzip C stubs
+    cold:
+      macro-decompress: [test_decompress]                    # pure-OCaml zlib — explicitly an FFI-free counterpart to devkit_gzip
+    verified_at:
+      - "benchmarks/owl/owl_gc.ml:13 — Mat.dot dispatches to OpenBLAS GEMM"
+      - "duniverse/Zarith/caml_z.c — every Z.{add,mul,div} is a GMP stub"
+      - "duniverse/gsl-ocaml/src/*.ml + duniverse/sqlite3-ocaml/lib/sqlite3_stubs.c"
+
+  # ---------------------------------------------------------------------
+  # Eio / multicore tags — overlap with `effects` and `domains`, but
+  # narrower (e.g. io_uring isolates the kernel-side ring path; eio_fibers
+  # excludes plain user-defined Effect handlers).
+  # ---------------------------------------------------------------------
+
+  eio_fibers:
+    description: |
+      Eio.Fiber.* / Eio.Stream / Eio.Switch — Eio's fiber-API surface.
+      Subset of `effects` (every Eio call performs effects under the
+      hood), but a narrower tag for Eio-specific regressions.
+    exercised_by:
+      macro-eio:
+        - eio_fiber_stream
+      macro-lavyek-monorepo:
+        - lavyek_kv_1d
+        - lavyek_kv_2d
+        - lavyek_kv_4d
+        - lavyek_kv_8d
+    verified_at:
+      - "benchmarks/eio/eio_bench.ml — Eio.Stream.add/take, Eio.Fiber.both/all, Eio_main.run"
+      - "benchmarks/lavyek/lavyek_bench.ml — Fiber.fork_promise, Fiber.all, Fiber.yield via Eio"
+
+  io_uring:
+    description: |
+      Real io_uring async I/O via eio_linux's Uring.t.  Per-domain
+      kernel-side rings (iou-wrk-* helper threads), sqe submission,
+      cqe polling.  Note: eio_fiber_stream uses Eio but its workload
+      is in-memory only — it never hits the ring.
+    exercised_by:
+      macro-lavyek-monorepo:
+        - lavyek_kv_1d
+        - lavyek_kv_2d
+        - lavyek_kv_4d
+        - lavyek_kv_8d
+    cold:
+      macro-eio: [eio_fiber_stream]    # uses Eio scheduler but Stream is in-memory; no ring traffic
+    verified_at:
+      - "duniverse/eio/lib_eio_linux/sched.ml:50,115-117,189-190 — Uring.t integration"
+      - "benchmarks/lavyek/lavyek_bench.ml — per-domain WAL writes go through io_uring"
+
+  pthread_affinity:
+    description: |
+      pthread_setaffinity_np via ocaml-processor's Processor.Affinity.
+      Per-domain CPU pinning makes multi-domain wall times reproducible
+      across runs (without it, the kernel migrates domains within the
+      inherited mask).
+    exercised_by:
+      macro-lavyek-monorepo:
+        - lavyek_kv_1d
+        - lavyek_kv_2d
+        - lavyek_kv_4d
+        - lavyek_kv_8d
+    verified_at:
+      - "benchmarks/lavyek/lavyek_bench.ml:59 — Processor.Affinity.set_cpus [physical_cpus.(id_domain mod n)]"
+      - "duniverse/processor/ — pthread_setaffinity_np stubs"

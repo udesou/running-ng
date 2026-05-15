@@ -73,6 +73,161 @@ class Configuration(object):
     def get(self, name: str) -> Any:
         return self.__items.get(name)
 
+    def validate_tags(self) -> None:
+        """Cross-check the ``tags:`` block — every ``(suite, program)`` listed
+        under any tag's ``exercised_by:`` or ``cold:`` must exist in
+        ``suites:``.  Each tag entry must either name at least one
+        ``exercised_by:`` program *or* carry a ``gap:`` note (so an empty
+        tag is intentional, not a typo).
+
+        Errors here mean the tags block has fallen out of sync with the
+        suite definitions — typo, program rename, or new gap that wasn't
+        annotated.  This method is a no-op when no ``tags:`` block is
+        present.
+
+        Must be called before :meth:`resolve_class` for the same reason
+        :meth:`validate` is — the suite definitions are still raw dicts
+        at that point.
+        """
+        tags = self.__items.get("tags") or {}
+        if not tags:
+            return
+        suites = self.__items.get("suites") or {}
+
+        errors: list = []
+        for tag_name, tag_entry in tags.items():
+            if not isinstance(tag_entry, dict):
+                errors.append(
+                    f"tag `{tag_name}` must be a mapping; got "
+                    f"{type(tag_entry).__name__}"
+                )
+                continue
+            for key in ("exercised_by", "cold"):
+                ref = tag_entry.get(key) or {}
+                if not isinstance(ref, dict):
+                    errors.append(
+                        f"tag `{tag_name}`.{key} must be a mapping of "
+                        f"suite -> [programs]; got {type(ref).__name__}"
+                    )
+                    continue
+                for suite_name, programs in ref.items():
+                    if suite_name not in suites:
+                        errors.append(
+                            f"tag `{tag_name}`.{key} references unknown "
+                            f"suite `{suite_name}`"
+                        )
+                        continue
+                    suite_programs = (suites[suite_name] or {}).get("programs") or {}
+                    if not isinstance(programs, list):
+                        errors.append(
+                            f"tag `{tag_name}`.{key}.{suite_name} must be "
+                            f"a list of program names"
+                        )
+                        continue
+                    for prog in programs:
+                        if prog not in suite_programs:
+                            errors.append(
+                                f"tag `{tag_name}`.{key} references unknown "
+                                f"program `{prog}` in suite `{suite_name}`"
+                            )
+            exercised = tag_entry.get("exercised_by") or {}
+            gap = tag_entry.get("gap")
+            if not exercised and not gap:
+                errors.append(
+                    f"tag `{tag_name}` has no `exercised_by:` programs and "
+                    f"no `gap:` note. Add a `gap:` field if no benchmark "
+                    f"exercises this tag (so the gap is documented), or "
+                    f"populate `exercised_by:`."
+                )
+
+        if errors:
+            raise ValueError(
+                "Tag validation failed:\n  - " + "\n  - ".join(errors)
+            )
+
+    def apply_tag_filter(self, tag_names: list) -> None:
+        """Restrict ``benchmarks:`` to the union of programs listed under
+        the named tag(s) in the ``tags:`` block.  Intended to be driven
+        by the ``RUNNING_TAG`` environment variable; comma-separated
+        names are union'd.
+
+        Semantics:
+
+        * **Union across tags.**  A program is kept if it appears under
+          ``exercised_by:`` of *any* named tag.
+        * **Intersection with existing ``benchmarks:``.**  The filter
+          never re-enables a program that is already excluded — if
+          ``benchmarks.<suite>`` is ``[]`` (e.g. ``macro-merlin`` is
+          disabled), no tag will revive it.  This matters for benches
+          we keep tag-listed but disable for reasons unrelated to the
+          runtime feature they exercise (upstream race, parked, etc.).
+        * **``cold:`` is ignored** for filtering — it's documentation
+          only, used by :meth:`validate_tags` to track presence-but-
+          cold uses.
+
+        Raises ``ValueError`` if:
+
+        * the configuration has no ``tags:`` block;
+        * any of ``tag_names`` is not defined under ``tags:``;
+        * the filter result is empty across every suite (catches typos
+          in tag names, all-gap tag sets, and cases where every tagged
+          benchmark happens to be disabled in ``benchmarks:``).
+        """
+        tags = self.__items.get("tags")
+        if not tags:
+            raise ValueError(
+                "RUNNING_TAG is set but the configuration has no `tags:` "
+                "block.  Make sure you include a config that defines tags "
+                "(e.g. base/ocaml/macro_base.yml)."
+            )
+
+        unknown = [t for t in tag_names if t not in tags]
+        if unknown:
+            available = ", ".join(sorted(tags.keys())) or "(none)"
+            raise ValueError(
+                "Unknown tag(s) in RUNNING_TAG: {}. Available tags: {}.".format(
+                    unknown, available
+                )
+            )
+
+        selected: dict = {}
+        for t in tag_names:
+            exercised = (tags[t] or {}).get("exercised_by") or {}
+            for suite, programs in exercised.items():
+                selected.setdefault(suite, set()).update(programs)
+
+        existing = self.__items.get("benchmarks") or {}
+        filtered: dict = {}
+        for suite, programs in existing.items():
+            wanted = selected.get(suite, set())
+            filtered[suite] = [p for p in programs if p in wanted]
+        self.__items["benchmarks"] = filtered
+
+        total_kept = sum(len(v) for v in filtered.values())
+        if total_kept == 0:
+            gap_tags = [t for t in tag_names if not ((tags[t] or {}).get("exercised_by") or {})]
+            if gap_tags == list(tag_names):
+                raise ValueError(
+                    "After applying RUNNING_TAG={!r}, no benchmarks remain: "
+                    "all named tags are coverage gaps (`exercised_by:` is "
+                    "empty).  See `gap:` notes in the tags block.".format(
+                        tag_names
+                    )
+                )
+            raise ValueError(
+                "After applying RUNNING_TAG={!r}, no benchmarks remain.  "
+                "Either the tag(s) reference programs that are excluded in "
+                "the `benchmarks:` block, or the named tag(s) include "
+                "coverage gaps with empty `exercised_by:`.".format(tag_names)
+            )
+
+        logging.info(
+            "RUNNING_TAG=%s applied: kept %d program(s) across %d suite(s)",
+            ",".join(tag_names),
+            total_kept,
+            sum(1 for v in filtered.values() if v),
+        )
+
     def validate(self) -> None:
         """Cross-check ``runtimes:`` / ``configs:`` / ``comparisons:`` consistency.
 

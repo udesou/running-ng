@@ -68,6 +68,43 @@ the only variable is the compiler.  See
 for setup details, patches applied to vendored sources, and a list
 of system dependencies.
 
+### Selecting benchmarks by runtime-feature tag (`RUNNING_TAG`)
+
+Every macrobench is tagged in `src/running/config/base/ocaml/macro_base.yml` under the `tags:` block, mapping each benchmark to the OCaml runtime mechanism it exercises on its hot path. Tags are source-grounded — each `exercised_by:` claim carries `verified_at:` file:line citations from the vendored sources or compiler-libs. See [macro-benches/README.md §"Runtime-feature coverage matrix"](https://github.com/ocaml-bench/macro-benches#runtime-feature-coverage-matrix) for the human-readable matrix.
+
+To run only the benchmarks that exercise a specific tag, set the `RUNNING_TAG` environment variable:
+
+```bash
+# Run only the benchmarks that exercise Weak.Make on the hot path:
+RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+RUNNING_TAG=weak_refs \
+CONFIG_FILE=src/running/config/experiments/macrobenchmarks_monorepo.yml \
+  bash run_ocaml_bench_gc_sweep.sh
+# → kept 3 program(s) across 1 suite(s)  (alt_ergo_{fill,yyll,unsat_smt2})
+
+# Union of two tags (any program with either tag):
+RUNNING_TAG=weak_refs,effects ...
+# → 8 programs: 3 alt-ergo + eio_fiber_stream + 4 lavyek cells
+```
+
+Semantics:
+
+- **Union across tags.** Comma-separated names are unioned — a program is kept if it appears under `exercised_by:` of *any* named tag.
+- **Intersection with `benchmarks:`.** The filter never re-enables a program that is excluded by the experiment's `benchmarks:` block (e.g. the currently-disabled `macro-merlin: []` stays disabled).
+- **Coverage-gap tags fail loudly.** Tags with empty `exercised_by:` (currently `ephemerons` and `kcas` — see the gap notes in `macro_base.yml`) error out rather than silently running nothing.
+- **Typos fail loudly too.** Unknown tag names produce a `ValueError` listing the available tags.
+
+The full set of 16 tags shipped today, grouped by category:
+
+| Category | Tags |
+|---|---|
+| Coverage gaps (no benchmark — error if selected) | `ephemerons`, `kcas` |
+| Single-feature (precise diagnostic signal) | `weak_refs`, `effects`, `domains`, `atomics`, `marshal`, `signals`, `lwt`, `off_heap_accounting` |
+| Allocation shape (cross-cutting allocator patterns) | `custom_block_finalisation`, `bigarrays`, `ffi_bulk` |
+| Eio / multicore (narrower than `effects`) | `eio_fibers`, `io_uring`, `pthread_affinity` |
+
+The `tags:` block in `macro_base.yml` is the single source of truth — adding or modifying tags there propagates to every experiment config that includes the base. Tag validation (`apply_tag_filter`'s schema + reference checks) runs on every config load, so a typo in `exercised_by:` (e.g. renamed program) errors out before any benchmarks run.
+
 ## Prerequisites
 
 Run `install_deps.sh` to install everything automatically, or set up manually:

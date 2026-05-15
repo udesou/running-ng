@@ -499,7 +499,27 @@ def run(args):
         # else. Errors here mean a typo or structurally-broken block; better
         # to fail before benchmarks run.
         configuration.validate()
-        # Save metadata
+        # Tag-block validation runs regardless of whether RUNNING_TAG is set
+        # — catches typos in the tags: block (e.g. renamed program) at
+        # config load time, before benchmarks run.
+        configuration.validate_tags()
+        # Tag-based subset selection via RUNNING_TAG env var. Comma-separated
+        # names are union'd; the result intersects with the existing
+        # benchmarks: block (so tags can't re-enable explicitly-disabled
+        # benches like the currently-disabled macro-merlin). See
+        # Configuration.apply_tag_filter for full semantics.
+        running_tag = os.environ.get("RUNNING_TAG")
+        if running_tag:
+            tag_names = [t.strip() for t in running_tag.split(",") if t.strip()]
+            if not tag_names:
+                raise ValueError(
+                    "RUNNING_TAG is set but resolves to an empty list after "
+                    "parsing.  Use e.g. RUNNING_TAG=weak_refs or "
+                    "RUNNING_TAG=weak_refs,effects."
+                )
+            configuration.apply_tag_filter(tag_names)
+        # Save metadata — after the tag filter, so the persisted runbms.yml
+        # reflects what actually ran rather than the pre-filter superset.
         if not is_dry_run():
             with (log_dir / "runbms.yml").open("w") as fd:
                 configuration.save_to_file(fd)
