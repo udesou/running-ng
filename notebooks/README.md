@@ -43,7 +43,7 @@ Two reader profiles:
 |---|---|---|---|
 | A — Regression Dashboard | `A_regression_dashboard.ipynb` | Layer 1 + instruction-count headline | matplotlib only, heavily commented, ratios-first |
 | B — Runtime Behaviour Explorer | `B_runtime_behaviour.ipynb` | All three layers, absolute values | seaborn allowed (violin / ECDF) |
-| C — GC Parameter Sweep | (not yet) | — | Deferred until a sweep dataset exists; `scripts/plot_gc_sweep.py` is the current placeholder |
+| C — GC Parameter Sweep | `C_gc_parameter_sweep.ipynb` | Wall time + max RSS over the swept axes | matplotlib heatmaps + Pareto scatter; axis-agnostic (detects which of `{s, o, M, m, ...}` actually vary) |
 
 A populates the parquet cache at `cache/macrobench.parquet`. B reads
 from that cache. Run A first.
@@ -134,7 +134,7 @@ it is treated as a single invocation.
 ### 5.2 Filename scheme
 
 ```
-<benchmark>.<iter>.<sub_iter>.ocaml-<version>[-<flags>][.s-<S>.o-<O>].perf_grp<N>.re-<R>.md-<M>[.macro-<repo>].log
+<benchmark>.<iter>.<sub_iter>.ocaml-<version>[-<flags>].perf_grp<N>.re-<R>.md-<M>[.<gc_key>-<gc_val>]*[.macro-<repo>].log
 ```
 
 Field by field:
@@ -145,15 +145,19 @@ Field by field:
 | `iter`, `sub_iter` | int | `0.0` | Run-level repetition indices. *Not* the invocation axis — invocations come from the sidecar NDJSON lines |
 | `version` | release tag, git SHA, branch name | `5.4.1`, `d8bb46c`, `trunk` | OCaml compiler version. The loader accepts anything `runbms` produces here |
 | `flags` | one of `fp`, `flambda`, `fp-flambda` or absent | `flambda` | Compiler options. Absent → `"baseline"` in the loader |
-| `s-<S>`, `o-<O>` | int, optional | `s-262144.o-120` | GC parameters for sweep runs (`s` = minor heap size, `o` = space overhead). Absent in runtime-comparison runs; the loader stores `NaN` when missing |
 | `perf_grp<N>` | int | `perf_grp1` | Which pre-defined perf counter group was collected |
 | `re-<R>` | int | `re-23` | runtime_events ring size |
 | `md-<M>` | int | `md-2` | maximum number of domains |
+| `<gc_key>-<gc_val>` | int, zero or more, any order | `s-262144.o-120.M-11.m-100` | GC sweep parameters. Known keys land in dedicated columns (`s` minor heap, `o` space overhead, `M`, `m`); unknown keys land in `gc_params_extra` as a dict |
 | `macro-<repo>` | lowercase with hyphens, optional | `macro-alt-ergo-monorepo` | Source repository of the macro-benchmark. Absent for micro-benchmarks |
 
-The loader at `notebooks/macrobench_loader.py` implements this scheme
-in one regex and one small helper (`_split_ocaml`). A re-implementer
-should copy those two functions and the regex.
+GC sweep tokens are **order-agnostic**: `runbms` may emit them in any
+sequence between `md-<M>` and `.macro-<repo>` (or `.log`). The loader
+splits the token soup with a secondary regex (`GC_PARAM_RE` in
+`macrobench_loader.py`); to add a new dedicated column, append the key
+to `KNOWN_GC_PARAMS`. The loader at `notebooks/macrobench_loader.py`
+implements this scheme in one header regex plus the GC-param helper. A
+re-implementer should copy those plus `_split_ocaml`.
 
 ### 5.3 Olly sidecar schema
 
@@ -586,10 +590,12 @@ alongside as the "impact" signal.
 - **System-state surfacing.** Render a per-run metadata card when
   running-ng starts writing uptime / CPU frequency / tuned status /
   NFS version / BIOS info into sidecars.
-- **Notebook C — GC parameter sweep.** Heatmaps over (minor heap,
-  space overhead), Pareto-optimal identification. Deferred until a
-  sweep dataset exists; `scripts/plot_gc_sweep.py` is the current
-  placeholder.
+- **Notebook C — GC parameter sweep.** Landed. Heatmaps and Pareto
+  scatters per (variant, sub-sweep) across whichever of
+  `{s, o, M, m}` actually vary; "three best" config picks (best wall,
+  best RSS, best Pareto) with worst-case per-benchmark regression
+  surfaced; cross-runtime Δ% heatmaps driven by `runbms.yml`'s
+  `comparisons:` block.
 
 ## 12. Out of scope
 

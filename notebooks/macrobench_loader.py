@@ -3,10 +3,15 @@
 Filename scheme::
 
     <benchmark>.<iter>.<sub_iter>.ocaml-<ocaml>
-        [.s-<S>.o-<O>]       # optional: GC parameter sweep
         .perf_grp<N>.re-<R>.md-<M>
-        .macro-<repo>        # optional: macro-bench repository label
+        [.<gc_key>-<gc_val>]*   # zero or more GC sweep params, any order
+        [.macro-<repo>]         # optional: macro-bench repository label
         .log
+
+GC sweep tokens (``s``, ``o``, ``M``, ``m``, ...) appear in whatever order
+``runbms`` emits them. Known keys land in dedicated columns; unknown keys
+are preserved in ``gc_params_extra`` as a dict so future axes don't need
+a loader change.
 
 The ``<ocaml>`` segment embeds dots (e.g. ``5.4.1-flambda``) and an
 optional trailing flag combo drawn from ``{fp, flambda, fp-flambda}``;
@@ -38,15 +43,22 @@ FILENAME_RE = re.compile(
     r"\.(?P<iter>\d+)"
     r"\.(?P<sub_iter>\d+)"
     r"\.ocaml-(?P<ocaml>[\w.-]+?)"
-    r"(?:\.s-(?P<s>\d+)\.o-(?P<o>\d+))?"
     r"\.perf_grp(?P<perf_grp>\d+)"
     r"\.re-(?P<re>\d+)"
     r"\.md-(?P<md>\d+)"
+    r"(?P<gc_params>(?:\.[A-Za-z]+-\d+)*)"
     r"(?:\.macro-(?P<macro_repo>[a-z0-9-]+))?"
     r"\.log$"
 )
 
+GC_PARAM_RE = re.compile(r"\.(?P<key>[A-Za-z]+)-(?P<val>\d+)")
+
 KNOWN_FLAG_SUFFIXES = ("fp-flambda", "flambda", "fp")
+
+# GC sweep keys with a dedicated column. Extend this tuple when a new
+# axis becomes part of routine sweeps; unknown keys still load into
+# ``gc_params_extra`` and won't break older notebooks.
+KNOWN_GC_PARAMS: tuple[str, ...] = ("s", "o", "M", "m")
 
 
 def _split_ocaml(ocaml: str) -> tuple[str, str]:
@@ -57,26 +69,43 @@ def _split_ocaml(ocaml: str) -> tuple[str, str]:
     return ocaml, "baseline"
 
 
+def _parse_gc_params(gc_params: str) -> tuple[dict[str, int], dict[str, int]]:
+    """Split the GC-param token soup into (known, extra) integer maps."""
+    known: dict[str, int] = {}
+    extra: dict[str, int] = {}
+    for m in GC_PARAM_RE.finditer(gc_params):
+        key = m.group("key")
+        val = int(m.group("val"))
+        if key in KNOWN_GC_PARAMS:
+            known[key] = val
+        else:
+            extra[key] = val
+    return known, extra
+
+
 def _parse_filename(name: str) -> dict | None:
     m = FILENAME_RE.match(name)
     if not m:
         return None
     fields = m.groupdict()
     version, flags = _split_ocaml(fields["ocaml"])
-    return {
+    known, extra = _parse_gc_params(fields["gc_params"] or "")
+    row: dict = {
         "benchmark": fields["benchmark"],
         "iter": int(fields["iter"]),
         "sub_iter": int(fields["sub_iter"]),
         "version": version,
         "flags": flags,
         "variant": f"{version}/{flags}",
-        "s": int(fields["s"]) if fields["s"] is not None else np.nan,
-        "o": int(fields["o"]) if fields["o"] is not None else np.nan,
         "perf_grp": int(fields["perf_grp"]),
         "re": int(fields["re"]),
         "md": int(fields["md"]),
         "macro_repo": fields["macro_repo"] or None,
+        "gc_params_extra": extra or None,
     }
+    for key in KNOWN_GC_PARAMS:
+        row[key] = known[key] if key in known else np.nan
+    return row
 
 
 def _flatten_olly(olly: dict | None) -> dict:
