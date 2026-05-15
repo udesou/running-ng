@@ -301,39 +301,16 @@ suites:
   # (LIQ_DW_MB, default 100). Headline metrics are max_rss_kb and
   # minor:major collection counts; wall_time captures the GC-pacer effect.
   #
-  # The four TOUCH variants decompose the contribution of mutator memory
-  # access to RSS shape under M=250:
-  #   full  — memset every pixel (real pipeline: decode + render + encode)
-  #   page  — one write per 4 KiB page (commits every page, no memset cost)
-  #   first — write byte 0 only (only first page committed per frame)
-  #   none  — no writes (reserved-but-uncommitted virtual memory)
+  # POOL=1 + TOUCH=full: AVFrame-style refcounted-pool semantics — the
+  # canonical reproduction of toots' ocaml#14533 free-lunch shape. Under
+  # M=250 this variant shows the dramatic CPU drop with no RSS growth.
   # See ~/macro-benches/benchmarks/liq-video-frames/liq_video_frames.ml
   # for the full env-knob catalogue (LIQ_POOL, LIQ_CHURN, LIQ_PACE_FPS).
-  # arg = number of iterations; arg=10000 ≈ 4–20s wall depending on TOUCH.
+  # arg = number of iterations; arg=30000 ≈ 4–20s wall.
   macro-liq-video-frames:
     type: OCamlBenchmarkSuite
     timeout: 120
     programs:
-      liq_video_frames_full:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
-        build_script: "liq-video-frames.build.sh"
-        args: "30000"
-      liq_video_frames_page:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
-        build_script: "liq-video-frames.build.sh"
-        args: "30000"
-      liq_video_frames_first:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
-        build_script: "liq-video-frames.build.sh"
-        args: "30000"
-      liq_video_frames_none:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
-        build_script: "liq-video-frames.build.sh"
-        args: "30000"
-      # POOL=1 + TOUCH=full: AVFrame-style refcounted-pool semantics —
-      # the canonical reproduction of toots' ocaml#14533 free-lunch shape.
-      # Under M=250 this variant shows the dramatic CPU drop with no RSS
-      # growth that the mm-path TOUCH variants above don't exhibit.
       liq_video_frames_pool:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
@@ -456,7 +433,7 @@ modifiers:
       macro-liquidsoap-lang: [liq_parse_typecheck]
       macro-merlin: [merlin_bench]
       macro-jsoo: [jsoo]
-      macro-liq-video-frames: [liq_video_frames_full, liq_video_frames_page, liq_video_frames_first, liq_video_frames_none, liq_video_frames_pool]
+      macro-liq-video-frames: [liq_video_frames_pool]
       macro-pplacer: [pplacer_testsuite]
   md_par:
     type: OCamlRunParam
@@ -562,10 +539,6 @@ benchmarks:
     - jsoo
 
   macro-liq-video-frames:
-    - liq_video_frames_full
-    - liq_video_frames_page
-    - liq_video_frames_first
-    - liq_video_frames_none
     - liq_video_frames_pool
 
   macro-pplacer:

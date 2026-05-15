@@ -5,20 +5,20 @@
 # version-effect table from results/2026-05-04-fp-flambda-5.4.1-vs-d8bb46c-monolith.md:
 #
 #   alt_ergo_fill, cpdf_merge, cpdf_scale, cpdf_squeeze, devkit_stre,
-#   liq_parse_typecheck, liq_video_frames, menhir_sysver, ocamlc_self_compile,
-#   ocamlformat_rocq, pplacer_testsuite
+#   liq_parse_typecheck, liq_video_frames_pool, menhir_sysver,
+#   ocamlc_self_compile, ocamlformat_rocq, pplacer_testsuite
 #
 # Two sweeps:
 #   1. (s, o)  — 5×5 = 25 combos, applied to ALL 11 benchmarks.
 #   2. (M, m)  — 5×5 = 25 combos at default (s, o), applied to all 11 but
 #                only meaningful for the off-heap-allocating subset:
 #
-#                  alt_ergo_fill       (zarith Z.t custom blocks)
-#                  cpdf_merge          (camlpdf Bigarray streams)
-#                  cpdf_scale          (camlpdf Bigarray streams)
-#                  cpdf_squeeze        (camlpdf Bigarray streams)
-#                  liq_video_frames    (Bigarray + finaliser, by design)
-#                  pplacer_testsuite   (gsl + Bigarray matrices)
+#                  alt_ergo_fill            (zarith Z.t custom blocks)
+#                  cpdf_merge               (camlpdf Bigarray streams)
+#                  cpdf_scale               (camlpdf Bigarray streams)
+#                  cpdf_squeeze             (camlpdf Bigarray streams)
+#                  liq_video_frames_pool    (refcounted-pool Bigarrays, #14533)
+#                  pplacer_testsuite        (gsl + Bigarray matrices)
 #
 #                The other 5 benches will show ~no effect on (M, m) — drop
 #                them in post-analysis.
@@ -73,7 +73,7 @@ overrides:
     macro-liquidsoap-lang:     [liq_parse_typecheck]
     macro-merlin: []
     macro-jsoo:   []
-    macro-liq-video-frames: [liq_video_frames_full, liq_video_frames_page, liq_video_frames_first, liq_video_frames_none, liq_video_frames_pool]
+    macro-liq-video-frames: [liq_video_frames_pool]
     macro-pplacer:          [pplacer_testsuite]
 
 # =============================================================================

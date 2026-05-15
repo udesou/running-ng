@@ -1,44 +1,37 @@
 # =============================================================================
-# Off-heap (M, o) parameter sweep — 5.4.1 vs d8bb46c (5.5-beta)
+# Regression-targeted (s, o) sweep — 5.4.1 vs d8bb46c (5.5-beta)
 # =============================================================================
-# Targets the macrobenchmarks whose allocation pattern is dominated by
-# off-heap / custom-block allocations (plus owl_gc and zarith_pi as additional
-# allocation-heavy workloads):
+# Targets the 13 macrobenchmarks that regressed (≥5% on any flag combo) in the
+# 2026-05-12 monolith N=10 run (results/2026-05-12-fp-flambda-5.4.1-vs-d8bb46c-monolith-N10.md):
 #
-#   alt_ergo_fill            (zarith Z.t custom blocks)
-#   cpdf_merge               (camlpdf Bigarray streams)
-#   cpdf_scale               (camlpdf Bigarray streams)
-#   cpdf_squeeze             (camlpdf Bigarray streams)
-#   liq_video_frames_pool    (refcounted-pool Bigarrays, ocaml#14533)
-#   pplacer_testsuite        (gsl + Bigarray matrices)
-#   owl_gc                   (Bigarray-backed ndarray, finalisers)
-#   zarith_pi                (zarith Z.t custom blocks)
+#   alt_ergo_fill, cpdf_merge, cpdf_scale, cpdf_squeeze, devkit_stre, jsoo,
+#   liq_parse_typecheck, liq_video_frames_pool, menhir_sysver,
+#   ocamlc_self_compile, ocamlformat_rocq, pplacer_testsuite, zarith_pi
 #
-# Sweep:
-#   (M, o)  — 7×5 = 35 combos per runtime per bench.
-#             M ∈ {11, 22, 44, 88, 125, 176, 250}
-#             o ∈ {40, 80, 100, 120, 150}
+# Note: liq_video_frames_pool was flagged only on -fp in the 5-12 run (other 3
+# flag combos sub-5%) — likely sampling noise, but included here so it gets
+# (s, o) coverage. _pool is also swept (M, o) in the companion off-heap config
+# (it's the ocaml#14533 cell).
 #
-# Crossed against M (custom-major-ratio) rather than fixed-default, because
-# the 2026-05-08 regression sweep showed that on off-heap workloads M is the
-# dominant lever for the 5.5-beta pacer cost (see
-# results/2026-05-08-regression-gc-sweep-monolith.md §3). o is included to
-# probe whether mid-heap pacing aggressiveness interacts with M on this
-# subset (the previous sweep fixed o=120 throughout).
+# Sweep grid (per user spec, 2026-05-13):
+#   s ∈ {131072, 262144, 524288, 1048576, 2097152}   (1/2× → 8× default)
+#   o ∈ {40, 80, 120, 150, 200}                       (1/3× → 1.67× default)
+#   → 5 × 5 = 25 cells per (bench, runtime)
 #
 # Runtimes: 5.4.1 baseline + d8bb46c, no fp/flambda flag combos.
 #
-# Total cells: 35 × 2 × 8 = 560, × 3 invocations = 1680 invocations.
+# Total invocations: 25 × 2 × 13 × 3 = 1950.
 #
 # OCaml runtime param defaults (verified in d8bb46c runtime/caml/config.h):
-#   s = 262144  (Minor_heap_def)        — fixed at default
+#   s = 262144  (Minor_heap_def)        — sweep
 #   o = 120     (Percent_free_def)      — sweep
-#   M = 44      (Custom_major_ratio_def) — sweep
+#   M = 44      (Custom_major_ratio_def) — fixed at default
 #   m = 100     (Custom_minor_ratio_def) — fixed at default
 #
 # Usage:
 #   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-#   CONFIG_FILE=src/running/config/experiments/offheap_M_o_sweep_5.4.1_vs_d8bb46c.yml \
+#   CONFIG_FILE=src/running/config/experiments/regression_s_o_sweep_2026_05_13.yml \
+#   LOG_DIR=$PWD/gc-sweep-logs-regression-s-o-2026-05-13 \
 #     bash run_ocaml_bench_gc_sweep.sh
 # =============================================================================
 
@@ -52,29 +45,29 @@ plugins:
       type: private
       to: [361443]
 
-# Restrict to the off-heap-allocating subset (+ owl_gc, zarith_pi).
 overrides:
   invocations: 3
   benchmarks:
-    macro-menhir-monorepo:     []
+    macro-menhir-monorepo:     [menhir_sysver]
     macro-cpdf-monorepo:       [cpdf_merge, cpdf_scale, cpdf_squeeze]
     macro-alt-ergo-monorepo:   [alt_ergo_fill]
     macro-coq-monorepo:        []
-    macro-devkit:              []
+    macro-devkit:              [devkit_stre]
     macro-irmin:               []
-    macro-ocamlformat:         []
+    macro-ocamlformat:         [ocamlformat_rocq]
     macro-decompress:          []
     macro-eio:                 []
     macro-sedlex:              []
     macro-yojson:              []
     macro-zarith:              [zarith_pi]
-    macro-owl:                 [owl_gc]
-    macro-ocamlc-self-compile: []
-    macro-liquidsoap-lang:     []
+    macro-owl:                 []
+    macro-ocamlc-self-compile: [ocamlc_self_compile]
+    macro-liquidsoap-lang:     [liq_parse_typecheck]
     macro-merlin:              []
-    macro-jsoo:                []
+    macro-jsoo:                [jsoo]
     macro-liq-video-frames:    [liq_video_frames_pool]
     macro-pplacer:             [pplacer_testsuite]
+    macro-lavyek-monorepo:     []
 
 # =============================================================================
 # Runtimes — 5.4.1 baseline + d8bb46c, no flag combos
@@ -88,31 +81,31 @@ runtimes:
     commit: "d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a"
 
 # =============================================================================
-# Modifiers — M and o swept; s and m left at default
+# Modifiers — s and o swept; M and m left at default
 # =============================================================================
 modifiers:
-  M:
+  s:
     type: OCamlRunParam
-    val: "M={0}"
+    val: "s={0}"
   o:
     type: OCamlRunParam
     val: "o={0}"
 
 # =============================================================================
-# Configs — base config strings; config_sweep below cross-products (M, o)
+# Configs — base config strings; config_sweep below cross-products (s, o)
 # =============================================================================
 configs:
   - "ocaml-5.4.1|perf_grp1|re-25|md-2"
   - "ocaml-d8bb46c|perf_grp1|re-25|md-2"
 
 config_sweep:
-  M: [11, 22, 44, 88, 125, 176, 250]
-  o: [40, 80, 100, 120, 150]
+  s: [131072, 262144, 524288, 1048576, 2097152]
+  o: [40, 80, 120, 150, 200]
 
 # =============================================================================
-# Comparisons — version effect at each (M, o) cell
+# Comparisons — version effect at each (s, o) cell
 # =============================================================================
 comparisons:
-  - label: "version effect (M, o) sweep"
+  - label: "version effect (s, o) sweep"
     a: ocaml-5.4.1
     b: ocaml-d8bb46c
