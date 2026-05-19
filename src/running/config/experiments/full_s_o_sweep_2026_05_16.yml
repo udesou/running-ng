@@ -1,0 +1,92 @@
+# =============================================================================
+# Full-suite (s, o) sweep — 5.4.1 vs d8bb46c (5.5-beta)
+# =============================================================================
+# Runs ALL macrobenchmarks (per macro_base.yml `benchmarks:`) across the full
+# (s, o) grid, 5 invocations per cell. Companion to the regression-targeted
+# variant (regression_s_o_sweep_2026_05_13.yml), which restricted to the 13
+# benches that regressed in the 2026-05-12 monolith N=10 run.
+#
+# Sweep grid (per user spec, 2026-05-13):
+#   s ∈ {131072, 262144, 524288, 1048576, 2097152}   (1/2× → 8× default)
+#   o ∈ {40, 80, 120, 150, 200}                       (1/3× → 1.67× default)
+#   → 5 × 5 = 25 cells per (bench, runtime)
+#
+# Runtimes: 5.4.1 baseline + d8bb46c (5.5-beta), no fp/flambda flag combos.
+#
+# Benchmarks: full base list (macro-merlin stays disabled at the base level
+# pending the merlin-domains typer race — see macro_base.yml). 31 enabled
+# programs across 19 active suites.
+#
+# Total invocations: 25 × 2 × 31 × 5 = 7750.
+#
+# OCaml runtime param defaults (verified in d8bb46c runtime/caml/config.h):
+#   s = 262144  (Minor_heap_def)        — sweep
+#   o = 120     (Percent_free_def)      — sweep
+#   M = 44      (Custom_major_ratio_def) — fixed at default
+#   m = 100     (Custom_minor_ratio_def) — fixed at default
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/full_s_o_sweep_2026_05_16.yml \
+#   LOG_DIR=$PWD/gc-sweep-logs-full-s-o-2026-05-16 \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
+
+overrides:
+  invocations: 5
+
+# =============================================================================
+# Runtimes — 5.4.1 baseline + d8bb46c (5.5-beta), no flag combos
+# =============================================================================
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+  ocaml-d8bb46c:
+    type: OCaml
+    commit: "d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a"
+
+# =============================================================================
+# Modifiers — s and o swept; M and m left at default
+# =============================================================================
+modifiers:
+  s:
+    type: OCamlRunParam
+    val: "s={0}"
+  o:
+    type: OCamlRunParam
+    val: "o={0}"
+
+# =============================================================================
+# Configs — base config strings; config_sweep below cross-products (s, o)
+# =============================================================================
+configs:
+  # NB: re_par-22|md_par-8|pin_lavyek are required because the lavyek suite is
+  # enabled. See macro_base.yml file-header / macro-lavyek-monorepo suite
+  # `required_modifiers:`. Without them lavyek runs with olly's default 8 MB
+  # ring and silently drops events on the 8-domain workload.
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+
+config_sweep:
+  s: [131072, 262144, 524288, 1048576, 2097152]
+  o: [40, 80, 120, 150, 200]
+
+# =============================================================================
+# Comparisons — version effect at each (s, o) cell
+# =============================================================================
+comparisons:
+  - label: "version effect (s, o) sweep"
+    a: ocaml-5.4.1
+    b: ocaml-d8bb46c
+
