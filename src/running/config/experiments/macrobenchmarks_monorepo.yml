@@ -49,6 +49,6 @@ runtimes:
 # Configs — no sweep, baseline comparison at default GC settings
 # =============================================================================
 configs:
-  - "ocaml-5.4.1|perf_grp1"
-  - "ocaml-trunk|perf_grp1"
-  - "oxcaml-trunk|perf_grp1"
+  - "ocaml-5.4.1|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-trunk|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "oxcaml-trunk|perf_grp1|re_par-22|md_par-8|pin_lavyek"

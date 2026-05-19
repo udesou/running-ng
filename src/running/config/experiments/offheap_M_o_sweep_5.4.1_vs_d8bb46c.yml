@@ -102,8 +102,8 @@ modifiers:
 # Configs — base config strings; config_sweep below cross-products (M, o)
 # =============================================================================
 configs:
-  - "ocaml-5.4.1|perf_grp1|re-25|md-2"
-  - "ocaml-d8bb46c|perf_grp1|re-25|md-2"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
 
 config_sweep:
   M: [11, 22, 44, 88, 125, 176, 250]

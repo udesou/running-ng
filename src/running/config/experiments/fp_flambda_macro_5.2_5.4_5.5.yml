@@ -113,20 +113,20 @@ runtimes:
 # =============================================================================
 configs:
   # 5.2.1
-  - "ocaml-5.2.1|perf_grp1|re-25|md-2"
-  - "ocaml-5.2.1-fp|perf_grp1|re-25|md-2"
-  - "ocaml-5.2.1-flambda|perf_grp1|re-25|md-2"
-  - "ocaml-5.2.1-fp-flambda|perf_grp1|re-25|md-2"
+  - "ocaml-5.2.1|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.2.1-fp|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.2.1-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.2.1-fp-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
   # 5.4.1
-  - "ocaml-5.4.1|perf_grp1|re-25|md-2"
-  - "ocaml-5.4.1-fp|perf_grp1|re-25|md-2"
-  - "ocaml-5.4.1-flambda|perf_grp1|re-25|md-2"
-  - "ocaml-5.4.1-fp-flambda|perf_grp1|re-25|md-2"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1-fp|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1-fp-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
   # 5.5-beta (d8bb46c)
-  - "ocaml-d8bb46c|perf_grp1|re-25|md-2"
-  - "ocaml-d8bb46c-fp|perf_grp1|re-25|md-2"
-  - "ocaml-d8bb46c-flambda|perf_grp1|re-25|md-2"
-  - "ocaml-d8bb46c-fp-flambda|perf_grp1|re-25|md-2"
+  - "ocaml-d8bb46c|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-d8bb46c-fp|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-d8bb46c-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-d8bb46c-fp-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
 
 # =============================================================================
 # Comparisons — 7 blocks

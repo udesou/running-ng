@@ -56,11 +56,11 @@ runtimes:
 # The sweep appends s-{val}|o-{val} to each, generating 49 variants per base.
 
 configs:
-  - "ocaml-4.14.3|perf_grp1"
-  - "ocaml-5.1.0|perf_grp1"
-  - "ocaml-5.4.1|perf_grp1"
-  - "ocaml-trunk|perf_grp1"
-  - "oxcaml-trunk|perf_grp1|re-25|md-9"
+  - "ocaml-4.14.3|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.1.0|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-trunk|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "oxcaml-trunk|perf_grp1|re-25|md-9|re_par-22|md_par-8|pin_lavyek"
 
 config_sweep:
   s: [32768, 65536, 131072, 262144, 524288, 1048576, 2097152]

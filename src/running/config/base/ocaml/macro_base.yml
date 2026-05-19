@@ -16,6 +16,38 @@
 #   - Input files in ~/macro-benches/benchmarks/<tool>/
 #
 # Env vars referenced by ${RUNNING_MACRO_BENCH_DIR} must be set before running.
+#
+# -----------------------------------------------------------------------------
+# REQUIRED modifier set when including the lavyek (multi-domain) suite
+# -----------------------------------------------------------------------------
+# If your config's `benchmarks:` block enables `macro-lavyek-monorepo` (it is
+# enabled by default in this base — opt out by setting `macro-lavyek-monorepo: []`
+# in your derived config), the config-string entries MUST include the parallel
+# modifier triple `|re_par-22|md_par-8|pin_lavyek` in addition to the sequential
+# `|re-<N>|md-<M>` you use for everything else.
+#
+# Canonical full-suite config-string template:
+#
+#   configs:
+#     - "<runtime>|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+#
+# Note: `re_par` and `md_par` REQUIRE explicit values (`-22`, `-8`). The bare
+# tokens `re_par|md_par` render to the literal string `e={0}` / `d={0}` and
+# break OCAMLRUNPARAM at runtime. `pin_lavyek` takes no value (Wrapper-type
+# modifier with a fixed `taskset -c 0-15` payload).
+#
+# Reason: `re`/`md` are scoped to non-lavyek programs via `excludes`, and `re_par`/
+# `md_par`/`pin_lavyek` are scoped to lavyek-only. Omitting the parallel triple
+# means lavyek runs with olly's default 8 MB per-domain ring (e=23), which
+# overflows on the 10M-op workload across 8 domains and silently drops events
+# — the per-domain wall-time then falls back to `now - boot_time`, producing
+# garbage wall_time values (commonly observed as ~ -4.7M seconds, the system
+# uptime). See `2026-05-16-full-s-o-sweep-monolith.md` §Methodology for the
+# observed-in-the-wild failure.
+#
+# Suites that need this set their `required_modifiers:` field (see
+# `macro-lavyek-monorepo` below). running-ng silently accepts the field today;
+# it's a documented contract for config authors and a future validation hook.
 # =============================================================================
 
 invocations: 3
@@ -354,9 +386,24 @@ suites:
   #
   # Requires md=8 and a smaller per-domain ring (re=22).  Wired via
   # the re_par / md_par modifiers — see the modifiers section below.
+  #
+  # *** REQUIRED CONFIG-STRING MODIFIERS ***
+  # Any config that enables this suite MUST add `|re_par-22|md_par-8|pin_lavyek`
+  # to its config-string entries (the values are required — bare `re_par|md_par`
+  # tokens render to the literal `e={0}` / `d={0}` and break OCAMLRUNPARAM).
+  # Without these, lavyek runs with olly's default 8 MB per-domain ring, which
+  # overflows on the 10M-op multi-domain workload and silently drops
+  # runtime_events.  Lost begin events make olly fall back to `now - boot_time`
+  # for the per-domain wall, producing negative top-level wall_time on the
+  # order of -4.7M seconds.  See the file-header note.
+  #
+  # The `required_modifiers:` field below is documentation today (running-ng
+  # ignores unknown suite kwargs); leaving it machine-readable so a future
+  # config-validator can pick it up.
   macro-lavyek-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 120
+    required_modifiers: [re_par, md_par, pin_lavyek]
     programs:
       lavyek_kv_1d:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek"
@@ -398,6 +445,15 @@ modifiers:
   # Routing is via `excludes`: re/md skip lavyek; re_par/md_par skip
   # everything else.  The anchor &non_lavyek_excludes is shared by
   # re_par and md_par so the long suite list lives in one place.
+  #
+  # *** Including configs MUST list all five of re-N|md-M|re_par-22|md_par-8|
+  #     pin_lavyek when lavyek is enabled. ***  re/md alone leaves lavyek with
+  #     olly's default 8 MB ring; the resulting event loss surfaces as negative
+  #     top-level wall_time (~ -4.7M s, system uptime).  The `_par` modifiers
+  #     REQUIRE explicit values (`re_par-22`, `md_par-8`) — the bare token
+  #     `re_par` renders to the literal `e={0}` and breaks OCAMLRUNPARAM.
+  #     `pin_lavyek` is a Wrapper with no value.  See file-header note and
+  #     2026-05-16-full-s-o-sweep-monolith.md §Methodology.
   re:
     type: OCamlRunParam
     val: "e={0}"
