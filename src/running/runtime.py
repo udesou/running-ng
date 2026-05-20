@@ -41,6 +41,15 @@ class Runtime(object):
     def get_cache_key(self) -> str:
         return "{}-{}".format(type(self).__name__.lower(), self.name)
 
+    def get_run_env_overrides(self) -> Dict[str, str]:
+        """Env vars the benchmark process should inherit at run time.
+
+        Default is empty.  Subclasses that produce runtime-local tools
+        (e.g. a per-switch olly binary) override this to advertise them
+        to the observer subprocesses without polluting PATH.
+        """
+        return {}
+
 
 class DummyRuntime(Runtime):
     def __init__(self, executable: str):
@@ -372,6 +381,115 @@ class OCaml(Runtime):
             )
 
     @staticmethod
+    def _build_olly_in_switch(
+        switch_name: str, olly_dir: Path, olly_ref: Optional[str]
+    ) -> Path:
+        """Install runtime_events_tools into *switch_name*'s bin/.
+
+        Returns the absolute path to the freshly-installed olly binary so
+        each OCaml runtime can advertise an olly built against its own
+        stdlib (RUNNING_OLLY_BIN).  Saves and restores ``HEAD`` in
+        *olly_dir* so the user's working tree is not left on a different
+        ref if olly_ref was given.
+        """
+        opam = OCaml._find_opam()
+        bin_dir = Path(subprocess.run(
+            [opam, "var", "bin", "--switch={}".format(switch_name)],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip())
+        olly_bin = bin_dir / "olly"
+
+        saved_head = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(olly_dir), capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if saved_head == "HEAD":
+            saved_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(olly_dir), capture_output=True, text=True, check=True,
+            ).stdout.strip()
+
+        try:
+            if olly_ref and olly_ref != saved_head:
+                OCaml._run_checked(
+                    ["git", "checkout", olly_ref], cwd=olly_dir,
+                )
+
+            head_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(olly_dir), capture_output=True, text=True, check=True,
+            ).stdout.strip()
+
+            # A sentinel records which runtime_events_tools commit produced
+            # the olly binary already in this switch.  If the source hasn't
+            # changed, skip the rebuild — opam install + dune build is slow.
+            sentinel = bin_dir / ".olly-built-from"
+            if (
+                olly_bin.exists()
+                and sentinel.exists()
+                and sentinel.read_text().strip() == head_sha
+            ):
+                logging.info(
+                    "olly already current in switch '%s' (HEAD %s)",
+                    switch_name, head_sha[:8],
+                )
+                return olly_bin
+
+            logging.info(
+                "Building olly in switch '%s' from %s (HEAD %s)",
+                switch_name, olly_dir, head_sha[:8],
+            )
+            try:
+                OCaml._run_checked([
+                    opam, "install", ".", "--deps-only",
+                    "--switch={}".format(switch_name), "--yes",
+                ], cwd=olly_dir)
+            except subprocess.CalledProcessError:
+                # Released dune (3.22.1) does not build against OCaml 5.6
+                # trunk — stdune's stringLabels signature drifted.  3.23.1
+                # has the fix.  Don't go further (3.24+) because the `coq`
+                # dune-project extension is deleted there and the
+                # macro-benches duniverse still uses `(using coq 0.8)`.
+                logging.info(
+                    "opam install failed in '%s'; pinning dune to 3.23.1 and retrying",
+                    switch_name,
+                )
+                OCaml._run_checked([
+                    opam, "pin", "add", "dune",
+                    "git+https://github.com/ocaml/dune.git#3.23.1",
+                    "--switch={}".format(switch_name), "--yes", "--no-action",
+                ])
+                OCaml._run_checked([
+                    opam, "install", ".", "--deps-only",
+                    "--switch={}".format(switch_name), "--yes",
+                ], cwd=olly_dir)
+
+            switch_env = OCaml._parse_opam_env(switch_name)
+            OCaml._run_checked(
+                ["dune", "build", "@install"], cwd=olly_dir, env=switch_env,
+            )
+            OCaml._run_checked(
+                ["dune", "install", "--prefix",
+                 subprocess.run(
+                     [opam, "var", "prefix", "--switch={}".format(switch_name)],
+                     capture_output=True, text=True, check=True,
+                 ).stdout.strip()],
+                cwd=olly_dir, env=switch_env,
+            )
+
+            if not olly_bin.exists():
+                raise RuntimeError(
+                    "dune install succeeded but no binary at {}".format(olly_bin)
+                )
+            sentinel.write_text(head_sha)
+            return olly_bin
+        finally:
+            if olly_ref and olly_ref != saved_head:
+                OCaml._run_checked(
+                    ["git", "checkout", saved_head], cwd=olly_dir,
+                )
+
+    @staticmethod
     def _get_opam_root() -> Path:
         """Return the opam root directory (typically ~/.opam)."""
         opam = OCaml._find_opam()
@@ -439,7 +557,9 @@ class OCaml(Runtime):
         super().__init__(**kwargs)
         self.version: Optional[str] = kwargs.get("version")
         self.commit: Optional[str] = kwargs.get("commit", kwargs.get("hash"))
+        self.olly_ref: Optional[str] = kwargs.get("olly_ref")
         self._satellite_switches: Dict[str, str] = {}  # benchmark_name -> switch_name
+        self._olly_bin: Optional[Path] = None
 
         executable = kwargs.get("executable")
         if executable:
@@ -475,6 +595,23 @@ class OCaml(Runtime):
                     )
                 )
 
+            # If runtime_events_tools is available, build olly into this switch.
+            # Each runtime gets its own olly binary linked against its compiler,
+            # so that runtimes that change the runtime_events enum (e.g.
+            # ocaml/ocaml#14796) can ship a matching olly source via olly_ref.
+            olly_dir_env = os.environ.get("OLLY_DIR")
+            if olly_dir_env and Path(olly_dir_env).is_dir():
+                try:
+                    self._olly_bin = OCaml._build_olly_in_switch(
+                        self._switch_name, Path(olly_dir_env), self.olly_ref,
+                    )
+                except (subprocess.CalledProcessError, RuntimeError) as exc:
+                    logging.warning(
+                        "Failed to build olly into switch '%s': %s. "
+                        "Falling back to olly from PATH.",
+                        self._switch_name, exc,
+                    )
+
     def get_executable(self) -> Path:
         return self.executable
 
@@ -489,7 +626,10 @@ class OCaml(Runtime):
             exe_dir = str(self.executable.parent)
             env["PATH"] = "{}:{}".format(exe_dir, env.get("PATH", ""))
             return env
-        return OCaml._parse_opam_env(self._switch_name)
+        env = OCaml._parse_opam_env(self._switch_name)
+        if self._olly_bin is not None:
+            env["RUNNING_OLLY_BIN"] = str(self._olly_bin)
+        return env
 
     def ensure_benchmark_switch(self, benchmark_name: str) -> str:
         """Create (or reuse) a per-benchmark satellite switch.
@@ -514,11 +654,20 @@ class OCaml(Runtime):
     def get_benchmark_switch_env(self, benchmark_name: str) -> Dict[str, str]:
         """Return an environment dict with a per-benchmark satellite switch activated."""
         satellite = self.ensure_benchmark_switch(benchmark_name)
-        return OCaml._parse_opam_env(satellite)
+        env = OCaml._parse_opam_env(satellite)
+        if self._olly_bin is not None:
+            env["RUNNING_OLLY_BIN"] = str(self._olly_bin)
+        return env
 
     def get_benchmark_switch_name(self, benchmark_name: str) -> Optional[str]:
         """Return the satellite switch name for a benchmark, or None if not created."""
         return self._satellite_switches.get(benchmark_name)
+
+    def get_run_env_overrides(self) -> Dict[str, str]:
+        overrides: Dict[str, str] = {}
+        if self._olly_bin is not None:
+            overrides["RUNNING_OLLY_BIN"] = str(self._olly_bin)
+        return overrides
 
     def get_cache_key(self) -> str:
         # The cache key must uniquely identify the compiler being used — two

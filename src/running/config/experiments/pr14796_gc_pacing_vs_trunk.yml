@@ -1,0 +1,75 @@
+# =============================================================================
+# PR #14796 (new GC-pacing) vs PR merge-base trunk — macrobenchmarks
+# =============================================================================
+# Compares Damien's gc-pacing-new branch against the trunk commit it was
+# branched from, so the delta isolates the PR's effect from later trunk drift.
+#
+# Runtimes:
+#   - ocaml-trunk-40b47fd: ocaml/ocaml @ 40b47fdeaa4cc91ef2c8fdb618e8c328c1cdf4a9
+#                         (= merge-base of damiendoligez/ocaml#gc-pacing-new
+#                         and ocaml/ocaml#trunk)
+#   - ocaml-gc-pacing:    udesou/ocaml @ gc-pacing-new+stdlib-events
+#                         (= damiendoligez/gc-pacing-new + a one-commit stdlib
+#                         patch that syncs otherlibs/runtime_events/runtime_events.{ml,mli}
+#                         with the new C-side ev_runtime_counter enum.
+#                         Upstream PR is missing this; without it the
+#                         OCaml-side decoder silently misreads counter events.)
+#
+# olly_ref selects the runtime_events_tools branch built into each runtime's
+# switch — trunk uses main, gc-pacing uses gc-pacing-compat, which adapts
+# olly_gc_stats to the renamed EV_C_MAJOR_ALLOCATED_* constructors.
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/pr14796_gc_pacing_vs_trunk.yml \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
+
+overrides:
+  invocations: 10
+  # Lavyek temporarily disabled: gc-pacing emits ~16x more major-GC events,
+  # overflowing the re_par-22 ring buffer and corrupting wall_time.  Re-enable
+  # with re_par-23 (or a more permissive ring size) once the rest validates.
+  # Dotted selector — the override() method only merges at the leaf, so the
+  # plain `benchmarks:` form would have replaced the whole base-inherited dict.
+  benchmarks.macro-lavyek-monorepo: []
+
+# =============================================================================
+# Runtimes
+# =============================================================================
+runtimes:
+  ocaml-trunk-40b47fd:
+    type: OCaml
+    commit: "40b47fdeaa4cc91ef2c8fdb618e8c328c1cdf4a9"
+    olly_ref: "main"
+
+  ocaml-gc-pacing:
+    type: OCaml
+    repo: "https://github.com/udesou/ocaml.git"
+    commit: "gc-pacing-new+stdlib-events"
+    olly_ref: "gc-pacing-compat"
+
+# =============================================================================
+# Configs — default GC params, same modifier triple as other macro experiments
+# =============================================================================
+configs:
+  - "ocaml-trunk-40b47fd|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-gc-pacing|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+
+# =============================================================================
+# Comparisons
+# =============================================================================
+comparisons:
+  - label: "gc-pacing PR vs trunk merge-base"
+    a: ocaml-trunk-40b47fd
+    b: ocaml-gc-pacing

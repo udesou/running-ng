@@ -1,0 +1,64 @@
+# =============================================================================
+# Smoke test for pr14796_gc_pacing_vs_trunk.yml
+# =============================================================================
+# Exercises the per-runtime olly_ref / RUNNING_OLLY_BIN plumbing end-to-end:
+#   - trunk-40b47fd runtime builds olly from runtime_events_tools main
+#   - gc-pacing runtime builds olly from gc-pacing-compat (new event names)
+#   - both runtimes feed olly.json sidecars with non-empty stats
+#
+# One invocation each, narrowed to two fast benches (sequential + lavyek).
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/pr14796_smoke.yml \
+#   LOG_DIR=/tmp/pr14796_smoke \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-cpdf-monorepo: [cpdf_merge]
+    macro-lavyek-monorepo: [lavyek_kv_1d]
+    macro-menhir-monorepo: []
+    macro-alt-ergo-monorepo: []
+    macro-coq-monorepo: []
+    macro-devkit: []
+    macro-irmin: []
+    macro-ocamlformat: []
+    macro-decompress: []
+    macro-eio: []
+    macro-sedlex: []
+    macro-yojson: []
+    macro-zarith: []
+    macro-owl: []
+    macro-ocamlc-self-compile: []
+    macro-liquidsoap-lang: []
+    macro-merlin: []
+    macro-jsoo: []
+    macro-liq-video-frames: []
+    macro-pplacer: []
+
+runtimes:
+  ocaml-trunk-40b47fd:
+    type: OCaml
+    commit: "40b47fdeaa4cc91ef2c8fdb618e8c328c1cdf4a9"
+    olly_ref: "main"
+
+  ocaml-gc-pacing:
+    type: OCaml
+    repo: "https://github.com/udesou/ocaml.git"
+    commit: "gc-pacing-new+stdlib-events"
+    olly_ref: "gc-pacing-compat"
+
+configs:
+  - "ocaml-trunk-40b47fd|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-gc-pacing|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+
+comparisons:
+  - label: "smoke"
+    a: ocaml-trunk-40b47fd
+    b: ocaml-gc-pacing

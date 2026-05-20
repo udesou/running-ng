@@ -293,8 +293,16 @@ class Benchmark(object):
             # --output to redirect JSON to a file and leave stderr for the
             # warnings we want to discard.
             olly_output = os.path.join(tmpdir, "olly.json")
+            # env_args carries RUNNING_OLLY_BIN when the OCaml runtime built
+            # a switch-local olly against its own stdlib — needed for runtimes
+            # that change the runtime_events enum (e.g. ocaml/ocaml#14796).
+            # Fall back to the parent env then to olly on PATH.
+            olly_bin = env_args.get(
+                "RUNNING_OLLY_BIN",
+                os.environ.get("RUNNING_OLLY_BIN", "olly"),
+            )
             olly_p = subprocess.Popen(
-                ["olly", "gc-stats", "--json", "--output", olly_output,
+                [olly_bin, "gc-stats", "--json", "--output", olly_output,
                  "--attach", "{}:{}".format(tmpdir, ocaml_pid)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -391,6 +399,7 @@ class Benchmark(object):
             cmd = self.get_full_args(runtime)
             cmd = [os.path.expandvars(x) for x in cmd]
             env_args = os.environ.copy()
+            env_args.update(runtime.get_run_env_overrides())
             env_args.update(self.env_args)
             effective_cwd = self.override_cwd if self.override_cwd else cwd
 

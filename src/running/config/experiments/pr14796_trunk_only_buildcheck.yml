@@ -1,0 +1,31 @@
+# =============================================================================
+# Build-check: trunk-40b47fd only, no gc-pacing
+# =============================================================================
+# Validates that the macro-benches monorepo builds cleanly against the PR
+# merge-base (40b47fd) with dune 3.23.1 — separating "does trunk build?"
+# from "does gc-pacing build?".
+#
+# Usage:
+#   cd ~/running-ng
+#   export OLLY_DIR=~/runtime_events_tools
+#   export RUNNING_MACRO_BENCH_DIR=~/macro-benches
+#   eval $(opam env --switch=running-ng-tools --set-switch)
+#   PYTHONPATH=src python3 -m running buildbms \
+#     src/running/config/experiments/pr14796_trunk_only_buildcheck.yml
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 1
+  benchmarks.macro-lavyek-monorepo: []
+
+runtimes:
+  ocaml-trunk-40b47fd:
+    type: OCaml
+    commit: "40b47fdeaa4cc91ef2c8fdb618e8c328c1cdf4a9"
+    olly_ref: "main"
+
+configs:
+  - "ocaml-trunk-40b47fd|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
