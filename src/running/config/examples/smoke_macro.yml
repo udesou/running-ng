@@ -30,8 +30,11 @@ overrides:
       - cpdf_merge
     macro-sedlex:
       - sedlex_tokenize
-    macro-lavyek-monorepo:
-      - lavyek_kv_1d
+    # lavyek lives in a private repo and is disabled in the base config
+    # (see macro_base.yml). Re-enable the cell below — and the clone in
+    # setup-monorepo.sh — if you have lavyek access.
+    macro-lavyek-monorepo: []
+    #   - lavyek_kv_1d
 
 runtimes:
   ocaml-5.4.1:

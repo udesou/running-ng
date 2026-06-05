@@ -622,11 +622,20 @@ benchmarks:
   macro-pplacer:
     - pplacer_testsuite
 
-  macro-lavyek-monorepo:
-    - lavyek_kv_1d
-    - lavyek_kv_2d
-    - lavyek_kv_4d
-    - lavyek_kv_8d
+  # macro-lavyek-monorepo: DISABLED — the lavyek library lives in a PRIVATE
+  # repo (github.com/tarides/lavyek), so builds without access to it cannot
+  # vendor the suite. Skipped here the same way macro-merlin is: the suite
+  # definition, modifier `excludes`, and tags above stay intact, only the
+  # enabled-program list is emptied. The clone + test-build are likewise
+  # skipped in macro-benches/scripts/setup-monorepo.sh. Re-enable by
+  # uncommenting the four cells below (and the clone + test-build lines in
+  # setup-monorepo.sh) once you have lavyek access. NB: when re-enabled,
+  # config-strings must add |re_par-22|md_par-8|pin_lavyek (see file header).
+  macro-lavyek-monorepo: []
+    # - lavyek_kv_1d
+    # - lavyek_kv_2d
+    # - lavyek_kv_4d
+    # - lavyek_kv_8d
 
 # =============================================================================
 # Tags — runtime-feature classification of benchmarks
