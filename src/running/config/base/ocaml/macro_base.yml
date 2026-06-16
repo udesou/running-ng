@@ -151,6 +151,15 @@ suites:
         build_script: "frama-c.build.sh"
         args: "sqlite"
 
+  macro-goblint-monorepo:
+    type: OCamlBenchmarkSuite
+    timeout: 300
+    programs:
+      goblint:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
+        build_script: "goblint.build.sh"
+        args: ""
+
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 900
@@ -563,6 +572,9 @@ benchmarks:
   macro-frama-c-monorepo:
     - frama_c_eva_t
     - frama_c_eva_sqlite
+
+  macro-goblint-monorepo:
+    - goblint
 
   macro-coq-monorepo:
     - coqc_corelib_stress
