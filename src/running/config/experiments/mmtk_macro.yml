@@ -1,0 +1,74 @@
+# =============================================================================
+# MMTk macro-benches — ocaml-mmtk vs the stock OCaml it forks from
+# =============================================================================
+# Canonical MMTk config.  Both runtimes pinned by commit:
+#   - ocaml-mmtk-14d1b8f : udesou/ocaml-mmtk @ 5.5+mmtk tip, built by running-ng
+#     (type: OCamlMMTk -> opam compiler create; the MMTk build quirks — cargo
+#     network + `setarch -R` for ASLR — are handled automatically).
+#   - ocaml-5.5.0-rc1    : the stock commit the fork is based on (4090d6db).
+#
+# MMTk specifics, all carried by the OCamlMMTk runtime (no launch wrapper):
+#   - MMTK_PLAN is a run-time choice; only Immix / StickyImmix do native code.
+#   - MMTK_HEAP_SIZE_MB is a FIXED heap (see minheap usage below).
+#   - Every MMTk process runs ASLR-disabled: running-ng prefixes each build/run
+#     command with `setarch -R` (Runtime.get_command_prefix), so the stock
+#     scripts work unchanged.
+#   - No olly/perf: MMTk doesn't emit the stock runtime_events GC counters.
+#     Use MMTK_VERBOSE=1 to see plan/heap/GC activity instead.
+#
+# Build all:
+#   cd ~/running-ng
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/mmtk_macro.yml \
+#     bash build_ocaml_binaries_gc_sweep.sh
+#
+# Build + run (timing):
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/mmtk_macro.yml \
+#   LOG_DIR=/tmp/mmtk_macro \
+#     bash run_ocaml_bench_gc_sweep.sh
+#
+# Per-benchmark minheap (smallest MMTK_HEAP_SIZE_MB that completes; the mmtk_heap
+# modifier below is overridden per search step, base runtime is auto-skipped):
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches PYTHONPATH=src \
+#     python3 -m running minheap \
+#       src/running/config/experiments/mmtk_macro.yml /tmp/mmtk_minheap.yml -a 2
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+# Inherits the full `benchmarks:` set from macro_base.
+overrides:
+  invocations: 1
+
+# Bounds for `minheap` (ignored by runbms/buildbms).
+maxheap: 8192
+attempts: 2
+
+modifiers:
+  mmtk_immix:
+    type: EnvVar
+    var: "MMTK_PLAN"
+    val: "Immix"
+  mmtk_sticky:
+    type: EnvVar
+    var: "MMTK_PLAN"
+    val: "StickyImmix"
+  mmtk_heap:
+    type: EnvVar
+    var: "MMTK_HEAP_SIZE_MB"
+    val: "8192"
+
+runtimes:
+  ocaml-mmtk-14d1b8f:
+    type: OCamlMMTk
+    commit: "14d1b8f68aeb7b283ff62ecfba3ecfc61cf8252e"
+  ocaml-5.5.0-rc1:
+    type: OCaml
+    commit: "4090d6db952ecae1cd0c3493c16d89cacc2bf8c6"
+
+configs:
+  - "ocaml-mmtk-14d1b8f|time_stats|mmtk_heap|mmtk_immix"
+  - "ocaml-mmtk-14d1b8f|time_stats|mmtk_heap|mmtk_sticky"
+  - "ocaml-5.5.0-rc1|time_stats"
