@@ -9,7 +9,7 @@
 # Runtimes:
 #   - ocaml-5.4.1            : released 5.4.1
 #   - ocaml-d8bb46c          : 5.5.0~beta1 (fixed commit)
-#   - ocaml-trunk-cfb30145   : trunk / 5.6 (fixed commit, post 2026-05-22 rebase)
+#   - ocaml-trunk-fb4f451    : trunk / 5.6 (fb4f451, 2026-06-16 — post Ctype.Unify fix; goblint builds)
 #
 # Builds all 19 active tools (30 programs), incl. frama-c (eva_t + eva_sqlite).
 # merlin and lavyek stay disabled (upstream race / private repo).
@@ -41,12 +41,12 @@ runtimes:
     commit: "d8bb46c39bf5fcafb513a8ba18e667d3f8c2600a"
     olly_ref: "main"
 
-  ocaml-trunk-cfb30145:
+  ocaml-trunk-fb4f451:
     type: OCaml
-    commit: "cfb30145d9e6bbf99c15e875604d5d5fd320589e"
+    commit: "fb4f45126447ef0efbcdd82759bbb7a9f065cb21"
     olly_ref: "main"
 
 configs:
   - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
   - "ocaml-d8bb46c|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
-  - "ocaml-trunk-cfb30145|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-trunk-fb4f451|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
