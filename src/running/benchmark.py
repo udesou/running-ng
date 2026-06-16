@@ -388,7 +388,7 @@ class Benchmark(object):
             )
             return b"", b"", SubprocessrExit.Dryrun
         else:
-            cmd = self.get_full_args(runtime)
+            cmd = list(runtime.get_command_prefix()) + self.get_full_args(runtime)
             cmd = [os.path.expandvars(x) for x in cmd]
             env_args = os.environ.copy()
             env_args.update(self.env_args)
@@ -712,6 +712,9 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         else:
             cmd = [str(build_script)]
         cmd.extend(self.build_args)
+        # Runtime-specific launcher prefix (e.g. OCamlMMTk needs `setarch -R`
+        # so the MMTk compiler doesn't flake while building the benchmark).
+        cmd = list(runtime.get_command_prefix()) + cmd
         logging.info("Building OCaml benchmark %s with command: %s", self.name, " ".join(cmd))
         subprocess.run(cmd, cwd=str(self.benchmark_dir), env=env, check=True)
 

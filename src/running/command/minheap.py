@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional, DefaultDict
 from running.config import Configuration
 from pathlib import Path
-from running.runtime import NativeExecutable, OCaml, Runtime
+from running.runtime import NativeExecutable, OCaml, OCamlMMTk, Runtime
 from running.benchmark import Benchmark, SubprocessrExit
 from running.suite import BenchmarkSuite
 from running.util import parse_config_str, config_str_encode
@@ -94,7 +94,11 @@ def run_with_persistence(result: Dict[str, Any], minheap_dir: Path, result_file:
             result[c_encoded] = {}
         runtime, mods = parse_config_str(configuration, c)
         print("{} ".format(c_encoded))
-        if isinstance(runtime, NativeExecutable) or isinstance(runtime, OCaml):
+        # OCamlMMTk has a fixed heap (MMTK_HEAP_SIZE_MB) so minheap is well
+        # defined; plain OCaml grows its heap on demand and never OOMs on a
+        # fixed budget, so it (and bare native executables) are skipped.
+        if (isinstance(runtime, NativeExecutable)
+                or (isinstance(runtime, OCaml) and not isinstance(runtime, OCamlMMTk))):
             logging.warning(
                 "Minheap measurement not supported for {}".format(type(runtime).__name__))
             continue

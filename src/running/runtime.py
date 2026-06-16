@@ -1,4 +1,4 @@
-from running.modifier import JVMArg, Modifier, JSArg
+from running.modifier import JVMArg, Modifier, JSArg, EnvVar
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 import logging
@@ -41,6 +41,15 @@ class Runtime(object):
     def get_cache_key(self) -> str:
         return "{}-{}".format(type(self).__name__.lower(), self.name)
 
+    def get_command_prefix(self) -> List[str]:
+        """Tokens prepended to every benchmark *build* and *run* command.
+
+        Default is empty.  A runtime whose processes need a launcher wrapper
+        (e.g. OCamlMMTk needs ``setarch -R`` to disable ASLR for MMTk's
+        fixed-address metadata mmap) overrides this, so the requirement is
+        carried by the runtime itself rather than a bespoke launch script.
+        """
+        return []
 
 class DummyRuntime(Runtime):
     def __init__(self, executable: str):
@@ -458,7 +467,9 @@ class OCaml(Runtime):
                 raise ValueError("Use either `version` or `commit`/`hash`, not both.")
 
             self._switch_name = "{}-{}".format(self.SWITCH_PREFIX, self.name)
-            OCaml._ensure_switch(kwargs, self._switch_name)
+            # Dispatch via type(self) so subclasses (e.g. OCamlMMTk) can
+            # override how the switch is built.
+            type(self)._ensure_switch(kwargs, self._switch_name)
 
             # Resolve the executable from the switch's bin directory.
             opam = OCaml._find_opam()
@@ -572,6 +583,155 @@ class OCaml(Runtime):
                 )
             )
         return int(m.group(1))
+
+
+@register(Runtime)
+class OCamlMMTk(OCaml):
+    """OCaml built against MMTk (udesou/ocaml-mmtk).
+
+    Identical to OCaml for build/switch purposes, but unlike stock OCaml the
+    MMTk runtime has a *fixed* heap whose size is set at run time via the
+    ``MMTK_HEAP_SIZE_MB`` environment variable.  That makes minheap binary
+    search well-defined (stock OCaml grows its heap on demand and never OOMs
+    on a fixed budget, which is why the base OCaml runtime is excluded from
+    minheap measurement).
+
+    The collector itself is chosen separately via ``MMTK_PLAN`` (Immix /
+    StickyImmix for native code) — supply it as an EnvVar modifier in the
+    config; minheap depends on the plan, so measure per plan.
+
+    NOTE: every MMTk process must run with ASLR disabled (``setarch -R``);
+    otherwise MMTk's fixed-address metadata mmap flakes with
+    "failed to mmap meta memory: File exists".  Launch the whole pipeline
+    (runbms / minheap) under setarch -R so all children inherit it.
+
+    Config forms::
+
+        # built + managed by running-ng (recommended, reproducible):
+        mmtk:
+          type: OCamlMMTk
+          commit: "<sha or branch, e.g. 5.5+mmtk>"   # repo defaults to the fork
+
+        # pre-built tree (no switch management):
+        mmtk:
+          type: OCamlMMTk
+          executable: "/path/to/_install/bin/ocaml"
+    """
+
+    DEFAULT_REPO = "https://github.com/udesou/ocaml-mmtk.git"
+
+    def __init__(self, **kwargs):
+        # For commit/version-based builds, default the repo to the MMTk fork
+        # (stock OCaml's default repo would be wrong).  Executable mode needs
+        # no repo.
+        if not kwargs.get("executable") and "repo" not in kwargs:
+            kwargs["repo"] = OCamlMMTk.DEFAULT_REPO
+        super().__init__(**kwargs)
+
+    def get_command_prefix(self) -> List[str]:
+        # Every MMTk process (benchmark build AND run) must run with ASLR
+        # disabled, else MMTk's fixed-address metadata mmap flakes
+        # ("failed to mmap meta memory: File exists").  Carrying this on the
+        # runtime means the stock launch scripts work unchanged — no setarch
+        # wrapper needed.  (The compiler build handles ASLR separately, via
+        # opam's wrap-build-commands; see _ensure_switch.)
+        return ["setarch", os.uname().machine, "-R"]
+
+    def get_heapsize_modifier(self, size: int) -> Modifier:
+        # `size` is in MB (minheap's binary search works in MB units, matching
+        # the "{}M" labels it prints).  MMTK_HEAP_SIZE_MB takes MB directly.
+        return EnvVar(
+            name="mmtk_heap_{}M".format(size),
+            var="MMTK_HEAP_SIZE_MB",
+            val=str(size),
+        )
+
+    # opam build/install command wrappers.  Two MMTk-specific needs vs stock
+    # OCaml drive these:
+    #   1. cargo fetches crates DURING `make`, but opam's default wrapper
+    #      (sandbox.sh) uses `--unshare-net` -> no network.  Replacing it with a
+    #      plain `setarch` wrapper drops bubblewrap, so cargo can reach the net.
+    #   2. MMTk's fixed-address metadata mmap flakes under ASLR.  Wrapping the
+    #      build *command itself* with `setarch -R` is required because:
+    #        - opam RESETS the no-randomize personality when it spawns builds
+    #          (so wrapping the outer `opam` process is useless), and
+    #        - bubblewrap also resets the personality to 0,
+    #      so the no-randomize bit must be (re)applied on the actual build
+    #      command, which is exactly what a wrap-build-commands wrapper does.
+    _WRAP_KEYS = ("wrap-build-commands", "wrap-install-commands")
+
+    @staticmethod
+    def _set_opam_wrappers(opam: str, value: Optional[str],
+                           saved: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
+        """Set the global build/install wrappers to *value* (an opam list
+        literal), returning a snapshot of the previous values.  Pass
+        ``value=None`` with the snapshot to restore the originals exactly
+        (including the ``{os = ...}`` filter)."""
+        if value is not None:
+            snap: Dict[str, str] = {}
+            for k in OCamlMMTk._WRAP_KEYS:
+                r = subprocess.run(
+                    [opam, "option", "--global", k],
+                    capture_output=True, text=True,
+                )
+                snap[k] = r.stdout.strip()
+                subprocess.run(
+                    [opam, "option", "--global", "{}={}".format(k, value)],
+                    check=True, capture_output=True, text=True,
+                )
+            return snap
+        for k in OCamlMMTk._WRAP_KEYS:
+            orig = (saved or {}).get(k) or "[]"
+            subprocess.run(
+                [opam, "option", "--global", "{}={}".format(k, orig)],
+                capture_output=True, text=True,
+            )
+        return None
+
+    @staticmethod
+    def _ensure_switch(kwargs: Dict[str, Any], switch_name: str):
+        """Build the MMTk compiler switch via ``opam compiler create``.
+
+        Temporarily replaces opam's build/install wrappers with
+        ``["setarch" "<arch>" "-R"]`` for the duration of the build (see
+        ``_WRAP_KEYS`` for why), then restores them.
+
+        dune/ocamlfind are intentionally NOT installed into the switch: the
+        macro monorepo and micro builds use dune from the tools switch on PATH
+        and the mmtk compiler (first on PATH) from this switch.
+        """
+        if OCaml._switch_exists(switch_name):
+            logging.info("Reusing existing opam switch '%s'", switch_name)
+            return
+
+        opam = OCaml._find_opam()
+        source = OCaml._opam_compiler_source(kwargs)
+        configure_args = kwargs.get("configure_args", [])
+        machine = os.uname().machine
+
+        cmd: List[str] = [
+            opam, "compiler", "create", source, "--switch", switch_name,
+        ]
+        if configure_args:
+            cmd.extend(["--configure-command",
+                        "./configure " + " ".join(configure_args)])
+
+        env = dict(os.environ)
+        cargo_bin = os.path.join(os.path.expanduser("~"), ".cargo", "bin")
+        env["PATH"] = "{}:{}".format(cargo_bin, env.get("PATH", ""))
+        env.setdefault("MMTK_HEAP_SIZE_MB", "8192")
+
+        wrapper = '["setarch" "{}" "-R"]'.format(machine)
+        saved = OCamlMMTk._set_opam_wrappers(opam, wrapper)
+        try:
+            logging.info(
+                "Building MMTk compiler switch '%s' from '%s' "
+                "(build wrapped in `setarch %s -R`, cargo on PATH)",
+                switch_name, source, machine,
+            )
+            OCaml._run_checked(cmd, env=env)
+        finally:
+            OCamlMMTk._set_opam_wrappers(opam, None, saved=saved)
 
 
 @register(Runtime)

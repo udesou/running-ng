@@ -17,10 +17,15 @@ def setup_parser(subparsers):
         "buildbms",
         help="Build all benchmark binaries without running them",
     )
+    parser.set_defaults(which="buildbms")
     parser.add_argument("CONFIG", type=Path, help="Configuration file")
 
 
 def run(args) -> bool:
+    # Guard on the subcommand: every command carries a CONFIG, so without this
+    # buildbms (listed before minheap in MODULES) would intercept them.
+    if args.get("which") != "buildbms":
+        return False
     if "CONFIG" not in args or args["CONFIG"] is None:
         return False
 
