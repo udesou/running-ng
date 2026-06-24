@@ -697,6 +697,10 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
             switch_name = runtime.get_switch_name()
 
         env.update(self.build_env)
+        # Runtime build-env overrides (e.g. OCamlMMTk's fixed MMTk heap +
+        # libmmtk_ocaml.a on LIBRARY_PATH).  Applied last; the runtime folds in
+        # any existing value it wants to preserve.
+        env.update(runtime.get_build_env_overrides())
         env["RUNNING_OCAML_OUTPUT"] = str(out_binary)
         env["RUNNING_OCAML_BENCH_DIR"] = str(self.benchmark_dir)
         env["RUNNING_OCAML_RUNTIME_NAME"] = runtime.name

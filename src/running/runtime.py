@@ -51,6 +51,17 @@ class Runtime(object):
         """
         return []
 
+    def get_build_env_overrides(self) -> Dict[str, str]:
+        """Env-var overrides for the benchmark *build* environment.
+
+        Applied last (after the suite's build_env), so they take effect; a
+        runtime that wants to preserve an existing/explicit value should fold
+        it in itself (by reading the environment).  Default is empty.  See
+        OCamlMMTk, which uses this to give the build a generous fixed MMTk heap
+        and to put libmmtk_ocaml.a on LIBRARY_PATH.
+        """
+        return {}
+
 class DummyRuntime(Runtime):
     def __init__(self, executable: str):
         super().__init__(name="dummy")
@@ -636,6 +647,38 @@ class OCamlMMTk(OCaml):
         # wrapper needed.  (The compiler build handles ASLR separately, via
         # opam's wrap-build-commands; see _ensure_switch.)
         return ["setarch", os.uname().machine, "-R"]
+
+    # Fixed MMTk heap for benchmark builds.  MMTK_HEAP_SIZE_MB is unset during
+    # builds (config modifiers apply only at run time), so MMTk would use a
+    # small default heap and large tools (alt-ergo, frama-c) OOM while being
+    # compiled/run during their build.  setdefault, so an explicit export or
+    # build_env value still wins.
+    BUILD_HEAP_SIZE_MB = "16384"
+
+    def get_build_env_overrides(self) -> Dict[str, str]:
+        # An explicit MMTK_HEAP_SIZE_MB export still wins.
+        overrides = {
+            "MMTK_HEAP_SIZE_MB": os.environ.get(
+                "MMTK_HEAP_SIZE_MB", OCamlMMTk.BUILD_HEAP_SIZE_MB
+            )
+        }
+        # MMTk puts a bare `-lmmtk_ocaml` (no -L) into ocamlc -config's
+        # {bytecomp,native}_c_libraries.  Third-party dune-configurator feature
+        # probes (lwt's pthread detect, ctypes' machdep, owl's cblas) link a
+        # test program with those c_libraries but WITHOUT the compiler's stdlib
+        # -L, so `ld` can't find -lmmtk_ocaml, the probe "fails", and the
+        # library mis-detects the feature -> the real build then hits a
+        # #error / missing symbol.  libmmtk_ocaml.a lives in the compiler's
+        # stdlib dir, so putting that on LIBRARY_PATH lets ld resolve it.
+        # (The proper fix belongs upstream in ocaml-mmtk: don't emit a bare
+        # -lmmtk_ocaml in c_libraries — carry its -L or use an absolute path.)
+        stdlib = self.executable.parent.parent / "lib" / "ocaml"
+        if (stdlib / "libmmtk_ocaml.a").exists():
+            existing = os.environ.get("LIBRARY_PATH", "")
+            overrides["LIBRARY_PATH"] = (
+                "{}:{}".format(stdlib, existing) if existing else str(stdlib)
+            )
+        return overrides
 
     def get_heapsize_modifier(self, size: int) -> Modifier:
         # `size` is in MB (minheap's binary search works in MB units, matching
