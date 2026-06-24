@@ -1,9 +1,9 @@
 # =============================================================================
-# Build-check: trunk-40b47fd only, no gc-pacing
+# Build-check: trunk-cfb30145 only, no gc-pacing
 # =============================================================================
 # Validates that the macro-benches monorepo builds cleanly against the PR
-# merge-base (40b47fd) with dune 3.23.1 — separating "does trunk build?"
-# from "does gc-pacing build?".
+# merge-base (cfb30145, post 2026-05-22 rebase) with dune 3.23.1 —
+# separating "does trunk build?" from "does gc-pacing build?".
 #
 # Usage:
 #   cd ~/running-ng
@@ -22,10 +22,10 @@ overrides:
   benchmarks.macro-lavyek-monorepo: []
 
 runtimes:
-  ocaml-trunk-40b47fd:
+  ocaml-trunk-cfb30145:
     type: OCaml
-    commit: "40b47fdeaa4cc91ef2c8fdb618e8c328c1cdf4a9"
+    commit: "cfb30145d9e6bbf99c15e875604d5d5fd320589e"
     olly_ref: "main"
 
 configs:
-  - "ocaml-trunk-40b47fd|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-trunk-cfb30145|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"

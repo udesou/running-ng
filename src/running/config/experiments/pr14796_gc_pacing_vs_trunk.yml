@@ -4,13 +4,12 @@
 # Compares Damien's gc-pacing-new branch against the trunk commit it was
 # branched from, so the delta isolates the PR's effect from later trunk drift.
 #
-# Runtimes:
-#   - ocaml-trunk-40b47fd: ocaml/ocaml @ 40b47fdeaa4cc91ef2c8fdb618e8c328c1cdf4a9
-#                         (= merge-base of damiendoligez/ocaml#gc-pacing-new
-#                         and ocaml/ocaml#trunk)
-#   - ocaml-gc-pacing:    udesou/ocaml @ gc-pacing-new+stdlib-events
-#                         (= damiendoligez/gc-pacing-new + a one-commit stdlib
-#                         patch that syncs otherlibs/runtime_events/runtime_events.{ml,mli}
+# Runtimes (post-2026-05-22 PR refresh):
+#   - ocaml-trunk-cfb30145: ocaml/ocaml @ cfb30145d9e6bbf99c15e875604d5d5fd320589e
+#                         (= current merge-base of the rebased PR)
+#   - ocaml-gc-pacing:     udesou/ocaml @ gc-pacing-new+stdlib-events
+#                         (= damiendoligez/gc-pacing-new @ 11772775 + a one-commit
+#                         stdlib patch that syncs otherlibs/runtime_events/runtime_events.{ml,mli}
 #                         with the new C-side ev_runtime_counter enum.
 #                         Upstream PR is missing this; without it the
 #                         OCaml-side decoder silently misreads counter events.)
@@ -36,7 +35,7 @@ plugins:
       to: [361443]
 
 overrides:
-  invocations: 10
+  invocations: 5
   # Lavyek temporarily disabled: gc-pacing emits ~16x more major-GC events,
   # overflowing the re_par-22 ring buffer and corrupting wall_time.  Re-enable
   # with re_par-23 (or a more permissive ring size) once the rest validates.
@@ -48,9 +47,9 @@ overrides:
 # Runtimes
 # =============================================================================
 runtimes:
-  ocaml-trunk-40b47fd:
+  ocaml-trunk-cfb30145:
     type: OCaml
-    commit: "40b47fdeaa4cc91ef2c8fdb618e8c328c1cdf4a9"
+    commit: "cfb30145d9e6bbf99c15e875604d5d5fd320589e"
     olly_ref: "main"
 
   ocaml-gc-pacing:
@@ -60,10 +59,21 @@ runtimes:
     olly_ref: "gc-pacing-compat"
 
 # =============================================================================
+# Modifiers — s and o swept; M and m left at default
+# =============================================================================
+modifiers:
+  s:
+    type: OCamlRunParam
+    val: "s={0}"
+  o:
+    type: OCamlRunParam
+    val: "o={0}"
+
+# =============================================================================
 # Configs — default GC params, same modifier triple as other macro experiments
 # =============================================================================
 configs:
-  - "ocaml-trunk-40b47fd|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-trunk-cfb30145|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
   - "ocaml-gc-pacing|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
 
 # =============================================================================
@@ -71,5 +81,9 @@ configs:
 # =============================================================================
 comparisons:
   - label: "gc-pacing PR vs trunk merge-base"
-    a: ocaml-trunk-40b47fd
+    a: ocaml-trunk-cfb30145
     b: ocaml-gc-pacing
+
+config_sweep:
+  s: [131072, 262144, 524288, 1048576, 2097152]
+  o: [40, 80, 120, 150, 200]
