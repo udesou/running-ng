@@ -1,0 +1,119 @@
+# =============================================================================
+# MMTk cross-runtime comparison — monorepo macro-benchmarks
+# =============================================================================
+# Compares OCaml MMTk against OCaml 4, OCaml 5 trunk, and OxCaml across the
+# full monorepo macro-benchmark suite.  The four GC strategies in the matrix:
+#
+#   ocaml-4.14.3           — classic OCaml GC (stop-the-world, generational)
+#   ocaml-trunk            — OCaml 5 stock (concurrent minor, multicore)
+#   oxcaml-trunk           — Jane Street OxCaml (poll-insertion, multidomain)
+#   ocaml-mmtk / Immix     — MMTk Immix plan (whole-heap tracing, no nursery)
+#   ocaml-mmtk / StickyImmix — MMTk StickyImmix (generational Immix)
+#
+# Most interesting benchmarks for MMTk vs stock GC:
+#   weak_refs heavy:   alt_ergo_{fill,yyll,unsat_smt2}
+#   custom blocks:     zarith_pi, pplacer_testsuite, owl_gc, liq_video_frames_pool
+#   allocation churn:  irmin_mem_rw, ocamlc_self_compile, coqc_corelib_stress
+#   parsing/typing:    menhir_ocamly, liq_parse_typecheck, jsoo
+#   compute-bound:     devkit_gzip (GC ~1 % — useful as a regression canary)
+#
+# MMTk specifics:
+#   - MMTK_PLAN is a run-time env-var; both plans share one compiled binary.
+#   - MMTK_HEAP_SIZE_MB is a FIXED ceiling (stock OCaml grows dynamically).
+#     8 192 MB here means MMTk will rarely hit GC pressure.  RSS comparisons
+#     are only meaningful at per-benchmark minheap values — use mmtk_macro.yml
+#     for that workflow.
+#   - MMTk does not emit OCaml runtime_events.  All configs use time_stats
+#     (wall + RSS from /usr/bin/time) for a uniform, overhead-free comparison.
+#     For perf + olly GC stats on stock runtimes, use macrobenchmarks_monorepo.yml.
+#   - ASLR is disabled automatically (setarch -R prefix in OCamlMMTk runtime).
+#
+# Caveats:
+#   - ocaml-mmtk-14d1b8f forks from 5.5.0-rc1 (4090d6db), not from the exact
+#     ocaml-trunk commit pinned here; stock vs MMTk comparisons carry a small
+#     rc→trunk delta.
+#   - macro-eio is disabled: it requires OCaml >= 5.2 effects and will not
+#     build under ocaml-4.14.3.  Re-enable when OCaml 4 is dropped.
+#   - macro-merlin and macro-lavyek-monorepo remain disabled (see macro_base).
+#
+# Build:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/mmtk_macrobenchmarks_monorepo.yml \
+#     bash build_ocaml_binaries_gc_sweep.sh
+#
+# Run:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/mmtk_macrobenchmarks_monorepo.yml \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 1
+  suites.macro-coq-monorepo.timeout: 300
+
+# Disable OCaml 5-only suites that won't build under ocaml-4.14.3.
+benchmarks:
+  macro-eio: []
+
+# =============================================================================
+# MMTk modifiers
+# =============================================================================
+modifiers:
+  s:
+    type: OCamlRunParam
+    val: "s={0}"
+  o:
+    type: OCamlRunParam
+    val: "o={0}"
+  mmtk_immix:
+    type: EnvVar
+    var: "MMTK_PLAN"
+    val: "Immix"
+  mmtk_sticky:
+    type: EnvVar
+    var: "MMTK_PLAN"
+    val: "StickyImmix"
+  # Fixed heap ceiling for MMTk.  At 8 192 MB most benchmarks will see very
+  # few collections; raise if a benchmark OOMs, lower to explore GC pressure.
+  mmtk_heap:
+    type: EnvVar
+    var: "MMTK_HEAP_SIZE_MB"
+    val: "8192"
+
+# =============================================================================
+# Runtimes
+# =============================================================================
+runtimes:
+  ocaml-4.14.3:
+    type: OCaml
+    version: "4.14.3"
+  # Pinned to the same commits as macrobenchmarks_monorepo.yml.
+  ocaml-trunk:
+    type: OCaml
+    commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
+  oxcaml-trunk:
+    type: OxCaml
+    commit: "068b25529286862035eaf827230f7ffa86659c49"
+    configure_args: ["--enable-poll-insertion", "--enable-multidomain"]
+  ocaml-mmtk-14d1b8f:
+    type: OCamlMMTk
+    commit: "14d1b8f68aeb7b283ff62ecfba3ecfc61cf8252e"
+
+# =============================================================================
+# Configs
+# =============================================================================
+# GC defaults enforced explicitly so they appear in filenames and the CSV:
+#   OCaml 4.14:  s=262144 (256 KB minor heap), o=80  (space overhead %)
+#   OCaml 5.5+:  s=262144 (256 KB minor heap), o=120 (space overhead %; raised
+#                from 80 in OCaml 5 to reduce major GC frequency)
+#   MMTk:        fixed heap via MMTK_HEAP_SIZE_MB=8192; s and o are ignored
+configs:
+  - "ocaml-4.14.3|time_stats|s-262144|o-80"
+  - "ocaml-trunk|time_stats|s-262144|o-120"
+  - "oxcaml-trunk|time_stats|s-262144|o-120"
+  # MMTk: no runtime_events → time_stats only.  s/o omitted: not honoured.
+  - "ocaml-mmtk-14d1b8f|time_stats|mmtk_heap|mmtk_immix"
+  - "ocaml-mmtk-14d1b8f|time_stats|mmtk_heap|mmtk_sticky"

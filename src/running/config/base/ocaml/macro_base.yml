@@ -77,6 +77,7 @@ suites:
   macro-menhir-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 600
+    # always_build: true
     programs:
       menhir_ocamly:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
@@ -101,6 +102,7 @@ suites:
   macro-cpdf-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 300
+    # always_build: true
     programs:
       cpdf_merge:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
@@ -121,6 +123,7 @@ suites:
 
   macro-alt-ergo-monorepo:
     type: OCamlBenchmarkSuite
+    # always_build: true
     timeout: 300
     programs:
       alt_ergo_fill:
@@ -149,6 +152,7 @@ suites:
   macro-frama-c-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 300
+    # always_build: true
     programs:
       frama_c_eva_t:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
@@ -162,6 +166,7 @@ suites:
   macro-goblint-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 300
+    # always_build: true
     programs:
       goblint:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
@@ -171,6 +176,7 @@ suites:
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 900
+    # always_build: true
     programs:
       coqc_corelib_stress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
@@ -179,6 +185,7 @@ suites:
 
   macro-devkit:
     type: OCamlBenchmarkSuite
+    # always_build: true
     timeout: 600
     programs:
       devkit_htmlstream:
@@ -209,6 +216,7 @@ suites:
   macro-irmin:
     type: OCamlBenchmarkSuite
     timeout: 300
+    # always_build: true
     programs:
       irmin_mem_rw:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
@@ -218,6 +226,7 @@ suites:
   macro-ocamlformat:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       ocamlformat_rocq:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
@@ -227,6 +236,7 @@ suites:
   macro-decompress:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       test_decompress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
@@ -237,6 +247,7 @@ suites:
   macro-eio:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       eio_fiber_stream:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
@@ -246,6 +257,7 @@ suites:
   macro-sedlex:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       sedlex_tokenize:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
@@ -255,6 +267,7 @@ suites:
   macro-yojson:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       ydump_repeat:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
@@ -264,6 +277,7 @@ suites:
   macro-zarith:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       zarith_pi:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
@@ -273,6 +287,7 @@ suites:
   macro-owl:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       owl_gc:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
@@ -299,6 +314,7 @@ suites:
   macro-ocamlc-self-compile:
     type: OCamlBenchmarkSuite
     timeout: 300
+    # always_build: true
     programs:
       ocamlc_self_compile:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-self-compile"
@@ -309,6 +325,7 @@ suites:
   macro-liquidsoap-lang:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       liq_parse_typecheck:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
@@ -336,6 +353,7 @@ suites:
   macro-merlin:
     type: OCamlBenchmarkSuite
     timeout: 180
+    # always_build: true
     programs:
       merlin_bench:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/merlin"
@@ -354,6 +372,7 @@ suites:
   macro-jsoo:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       jsoo:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
@@ -377,6 +396,7 @@ suites:
   macro-liq-video-frames:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       liq_video_frames_pool:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
@@ -387,6 +407,7 @@ suites:
   macro-pplacer:
     type: OCamlBenchmarkSuite
     timeout: 120
+    # always_build: true
     programs:
       pplacer_testsuite:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
@@ -439,6 +460,7 @@ suites:
     type: OCamlBenchmarkSuite
     timeout: 120
     required_modifiers: [re_par, md_par, pin_lavyek]
+    # always_build: true
     programs:
       lavyek_kv_1d:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek"

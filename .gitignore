@@ -133,3 +133,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# clustering experiment — ignore raw benchmark run dirs, keep markdown logs
+experiments/clustering/logs/turing-*/
+experiments/clustering/data/
