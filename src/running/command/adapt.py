@@ -116,8 +116,35 @@ def run(args) -> bool:
     _check_versions(adapter)
 
     out = args.get("out") or (run_dir / "contract")
+    cmd = [str(adapter), str(run_dir), str(out)]
+
+    # Resolve runbms.yml's runtime identity here, in Python, where PyYAML handles
+    # anchors/merge keys that the OCaml YAML reader rejects. Hand the adapter a
+    # clean JSON so it gets authoritative runtime identity (configure_args etc.)
+    # rather than falling back to filename parsing.
+    runbms = run_dir / "runbms.yml"
+    rt_tmp = None
+    if runbms.exists():
+        try:
+            import yaml, json, tempfile
+            cfg = yaml.safe_load(runbms.read_text())
+            runtimes = cfg.get("runtimes") if isinstance(cfg, dict) else None
+            if runtimes:
+                fd = tempfile.NamedTemporaryFile("w", suffix=".runtimes.json", delete=False)
+                json.dump(runtimes, fd)
+                fd.close()
+                rt_tmp = fd.name
+                cmd += ["--runtimes", rt_tmp]
+        except Exception as e:
+            logger.warning("could not pre-resolve %s (%s); adapter will use its own parse", runbms, e)
+
     logger.info("adapting %s -> %s (via %s)", run_dir, out, adapter)
-    rc = subprocess.run([str(adapter), str(run_dir), str(out)]).returncode
+    rc = subprocess.run(cmd).returncode
+    if rt_tmp:
+        try:
+            os.remove(rt_tmp)
+        except OSError:
+            pass
     if rc != 0:
         logger.error("contract-adapter failed (rc=%d)", rc)
     return True
