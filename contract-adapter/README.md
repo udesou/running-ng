@@ -31,10 +31,20 @@ opam pin add bench-contract <path-to-ocaml-bench-dashboard>   # once
 
 ## Use
 
+Directly:
 ```sh
 bin/adapter <legacy-run-dir> <out-dir>   # legacy run dir -> contract artifacts
 bin/adapter --schema-version             # contract version this adapter was built against
 ```
+
+Or via running-ng (recommended — adds the schema_version switch + version check):
+```sh
+python3 -m running adapt <legacy-run-dir>            # -> <run>/contract/
+python3 -m running adapt <run> -c <config.yml>       # skips the adapter if the config sets schema_version
+```
+`running adapt` locates this binary (`--adapter`, `$RUNNING_CONTRACT_ADAPTER`, or
+`contract-adapter/bin/adapter`) and warns if it was built against an older schema
+than the installed `bench-contract` package.
 
 ## Schema-version awareness
 
