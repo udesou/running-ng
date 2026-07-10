@@ -5,9 +5,12 @@ metadata + raw `olly_*`/`perf_*` NDJSON sidecars) into **data-contract** artifac
 that the ingestor and dashboard consume:
 
 ```
-<out-dir>/manifest.json       # run manifest (configs, machine, comparisons, _produced_by)
-<out-dir>/measurements.json   # one contract measurement record per invocation
+<out-dir>/manifest.json               # run manifest (configs, machine, comparisons, _produced_by)
+<out-dir>/measurements/olly.ndjson    # olly's per-invocation measurement records (NDJSON)
+<out-dir>/measurements/perf.ndjson    # perf's records; the ingestor merges the two by identity
 ```
+(Per-tool NDJSON — olly and perf write separately and the ingestor merges records
+sharing `(run_id, config_id, benchmark, invocation)`.)
 
 This is the **only** component that knows the legacy on-disk layout. It exists so
 the current (unversioned) runner interoperates with the contract without changing

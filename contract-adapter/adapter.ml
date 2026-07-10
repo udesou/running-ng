@@ -371,6 +371,15 @@ let write_json path json =
   output_char oc '\n';
   close_out oc
 
+(* Split a combined measurement into a per-tool partial: only that tool's metrics
+   and raw_ref. olly and perf thus land in separate NDJSON files, and the ingestor
+   merges them back by identity — matching how a native runner (where the tools
+   finish independently) would emit. *)
+let partial_for_tool (m : Contract.measurement) (tool : string) : Contract.measurement option =
+  let metrics = List.filter (fun (x : Contract.metric) -> x.source = tool) m.metrics in
+  let raw_ref = List.filter (fun (k, _) -> k = tool) m.raw_ref in
+  if metrics = [] && raw_ref = [] then None else Some { m with metrics; raw_ref }
+
 let () =
   match Sys.argv with
   | [| _; "--schema-version" |] ->
@@ -392,9 +401,37 @@ let () =
       if !bad > 0 then (Printf.eprintf "FATAL: %d invalid artifact(s); not writing\n%!" !bad; exit 1);
       mkdir_p out_dir;
       write_json (Filename.concat out_dir "manifest.json") (Contract.manifest_to_yojson man);
-      write_json (Filename.concat out_dir "measurements.json")
-        (`List (List.map Contract.measurement_to_yojson ms));
-      Printf.eprintf "adapter: wrote %d measurements + manifest for run %s to %s\n%!"
+      (* per-tool NDJSON under measurements/ ; one buffer per tool, written once *)
+      let mdir = Filename.concat out_dir "measurements" in
+      mkdir_p mdir;
+      let tools = [ "olly"; "perf" ] in
+      let bufs = Hashtbl.create 4 in
+      let buf tool =
+        match Hashtbl.find_opt bufs tool with
+        | Some b -> b
+        | None -> let b = Buffer.create 65536 in Hashtbl.add bufs tool b; b
+      in
+      List.iter
+        (fun m ->
+          List.iter
+            (fun tool ->
+              match partial_for_tool m tool with
+              | None -> ()
+              | Some p ->
+                  Buffer.add_string (buf tool) (Yojson.Safe.to_string (Contract.measurement_to_yojson p));
+                  Buffer.add_char (buf tool) '\n')
+            tools)
+        ms;
+      List.iter
+        (fun tool ->
+          match Hashtbl.find_opt bufs tool with
+          | None -> ()
+          | Some b ->
+              let oc = open_out (Filename.concat mdir (tool ^ ".ndjson")) in
+              Buffer.output_buffer oc b;
+              close_out oc)
+        tools;
+      Printf.eprintf "adapter: wrote %d measurements as per-tool NDJSON + manifest for run %s to %s\n%!"
         (List.length ms) run_id out_dir
   | _ ->
       prerr_endline "usage: adapter <legacy-run-dir> <out-dir>";
