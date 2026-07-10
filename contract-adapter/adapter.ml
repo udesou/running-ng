@@ -162,12 +162,16 @@ let config_of_meta (m : meta) : Contract.config_descriptor =
 (* Sidecar reading                                                      *)
 (* ------------------------------------------------------------------ *)
 
+(* Reads plain or gzipped NDJSON. .gz is decompressed via `gunzip -c` (avoids a
+   zlib/camlzip dependency); other people's logs may ship compressed. *)
 let read_lines path =
-  let ic = open_in path in
+  let gz = ends_with ".gz" path in
+  let ic = if gz then Unix.open_process_in (Printf.sprintf "gunzip -c -- %s" (Filename.quote path)) else open_in path in
+  let close () = if gz then ignore (Unix.close_process_in ic) else close_in ic in
   let rec loop acc =
     match input_line ic with
     | line -> loop (if String.trim line = "" then acc else line :: acc)
-    | exception End_of_file -> close_in ic; List.rev acc
+    | exception End_of_file -> close (); List.rev acc
   in
   loop []
 
@@ -250,7 +254,9 @@ let load dir =
   let run_id = run_id_of_dir dir in
   let files = Sys.readdir dir |> Array.to_list in
   let ollys =
-    List.filter (fun f -> starts_with "olly_" f && ends_with ".json" f && not (ends_with ".gz" f)) files
+    List.filter
+      (fun f -> starts_with "olly_" f && (ends_with ".json" f || ends_with ".json.gz" f))
+      files
   in
   let measurements = ref [] in
   let configs = Hashtbl.create 16 in
@@ -258,9 +264,14 @@ let load dir =
   List.iter
     (fun olly_file ->
       let base = strip_prefix "olly_" olly_file in
-      let base = String.sub base 0 (String.length base - String.length ".json") in
+      let base =
+        if ends_with ".json.gz" base then String.sub base 0 (String.length base - String.length ".json.gz")
+        else String.sub base 0 (String.length base - String.length ".json")
+      in
       match parse_meta base with
-      | None -> ()
+      | None ->
+          (* fail loud: a sidecar we can't place is reported, never silently dropped *)
+          Printf.eprintf "WARN: skipping %s — filename did not parse to contract metadata\n%!" olly_file
       | Some meta ->
           let cfg = config_of_meta meta in
           if not (Hashtbl.mem configs cfg.config_id) then Hashtbl.add configs cfg.config_id cfg;
@@ -268,9 +279,16 @@ let load dir =
           if not (Hashtbl.mem benches bkey) then
             Hashtbl.add benches bkey Contract.{ name = meta.benchmark; suite = meta.suite; tags = [] };
           let olly_recs = json_lines (Filename.concat dir olly_file) in
-          let perf_file = "perf_" ^ base ^ ".json" in
+          (* perf sidecar may be plain or gzipped *)
+          let perf_json = "perf_" ^ base ^ ".json" in
+          let perf_gz = perf_json ^ ".gz" in
+          let perf_file =
+            if List.mem perf_json files then Some perf_json
+            else if List.mem perf_gz files then Some perf_gz
+            else None
+          in
           let perf_recs =
-            if List.mem perf_file files then json_lines (Filename.concat dir perf_file) else []
+            match perf_file with Some pf -> json_lines (Filename.concat dir pf) | None -> []
           in
           let n =
             if perf_recs = [] then List.length olly_recs
@@ -289,8 +307,10 @@ let load dir =
                   invocation = i;
                   metrics = olly_metrics olly @ perf_metrics perf;
                   raw_ref =
-                    [ ("olly", Printf.sprintf "%s#L%d" olly_file (i + 1));
-                      ("perf", Printf.sprintf "%s#L%d" perf_file (i + 1)) ];
+                    ("olly", Printf.sprintf "%s#L%d" olly_file (i + 1))
+                    :: (match perf_file with
+                       | Some pf -> [ ("perf", Printf.sprintf "%s#L%d" pf (i + 1)) ]
+                       | None -> []);
                 }
             in
             measurements := m :: !measurements
