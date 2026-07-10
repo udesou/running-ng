@@ -49,6 +49,20 @@ python3 -m running adapt <run> -c <config.yml>       # skips the adapter if the 
 `contract-adapter/bin/adapter`) and warns if it was built against an older schema
 than the installed `bench-contract` package.
 
+## Runtime identity from runbms.yml
+
+Runtime **kind / version / commit / options** come from the run's `runbms.yml`
+(the authoritative merged config running-ng writes), keyed by the runtime name in
+the filename — the filename is only the join key. `options` are the raw
+`configure_args`, the same source a native runner reads, so `config_id` matches
+across adapter and native.
+
+`runbms.yml` often uses YAML anchors/merge keys (from `macro_base`), which the
+OCaml YAML reader rejects. **`running adapt` resolves them via PyYAML** and hands
+the adapter a clean `--runtimes` JSON, so it always gets authoritative identity.
+Invoking `bin/adapter` directly still works but falls back to filename-derived
+identity (with a warning) on anchor-using configs.
+
 ## Schema-version awareness
 
 `bin/adapter --schema-version` prints the `bench-contract` schema version the

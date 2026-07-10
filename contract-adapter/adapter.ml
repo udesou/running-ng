@@ -147,8 +147,88 @@ let parse_meta base : meta option =
         }
   | _ -> None
 
-let config_of_meta (m : meta) : Contract.config_descriptor =
-  let runtime = Contract.{ kind = m.kind; version = m.version; commit = None; options = m.options } in
+(* ------------------------------------------------------------------ *)
+(* runbms.yml — the authoritative run metadata running-ng writes.       *)
+(* Runtime identity (kind/version/commit/options) comes from here, keyed *)
+(* by the runtime NAME in the filename; the filename is only the join    *)
+(* key. Options are the raw configure_args — the same source a native    *)
+(* runner reads — so config_id matches across adapter and native.        *)
+(* ------------------------------------------------------------------ *)
+
+type rt_identity = { rk : string; rv : string option; rc : string option; ro : string list }
+
+let read_file path =
+  let ic = open_in_bin path in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic;
+  s
+
+let read_runtimes dir : (string, rt_identity) Hashtbl.t =
+  let tbl = Hashtbl.create 16 in
+  let add_runtimes runtimes =
+    List.iter
+      (fun (name, spec) ->
+        match spec with
+        | `O fields ->
+            let s k = match List.assoc_opt k fields with Some (`String v) -> Some v | _ -> None in
+            let opts =
+              match List.assoc_opt "configure_args" fields with
+              | Some (`A l) -> List.filter_map (function `String s -> Some s | _ -> None) l
+              | _ -> []
+            in
+            Hashtbl.replace tbl name
+              { rk = (match s "type" with Some t -> t | None -> "OCaml"); rv = s "version"; rc = s "commit"; ro = opts }
+        | _ -> ())
+      runtimes
+  in
+  let path = Filename.concat dir "runbms.yml" in
+  if Sys.file_exists path then begin
+    match Yaml.of_string (read_file path) with
+    | Ok (`O top) -> (
+        match List.assoc_opt "runtimes" top with Some (`O r) -> add_runtimes r | _ -> ())
+    | Ok _ -> ()
+    | Error (`Msg e) ->
+        Printf.eprintf
+          "WARN: could not parse %s (%s); falling back to filename identity. \
+           Use `running adapt` (resolves YAML anchors via PyYAML) for authoritative identity.\n%!"
+          path e
+  end;
+  tbl
+
+(* Runtimes provided as JSON (e.g. by `running adapt`, which resolves runbms.yml's
+   YAML anchors/merges via PyYAML). Same shape as runbms.yml's `runtimes:` block. *)
+let runtimes_from_json path : (string, rt_identity) Hashtbl.t =
+  let tbl = Hashtbl.create 16 in
+  (try
+     match Yojson.Safe.from_file path with
+     | `Assoc runtimes ->
+         List.iter
+           (fun (name, spec) ->
+             match spec with
+             | `Assoc fields ->
+                 let s k = match List.assoc_opt k fields with Some (`String v) -> Some v | _ -> None in
+                 let opts =
+                   match List.assoc_opt "configure_args" fields with
+                   | Some (`List l) -> List.filter_map (function `String s -> Some s | _ -> None) l
+                   | _ -> []
+                 in
+                 Hashtbl.replace tbl name
+                   { rk = (match s "type" with Some t -> t | None -> "OCaml"); rv = s "version"; rc = s "commit"; ro = opts }
+             | _ -> ())
+           runtimes
+     | _ -> ()
+   with e -> Printf.eprintf "WARN: could not read runtimes json %s: %s\n%!" path (Printexc.to_string e));
+  tbl
+
+let config_of_meta (rts : (string, rt_identity) Hashtbl.t) (m : meta) : Contract.config_descriptor =
+  (* prefer authoritative identity from runbms.yml; fall back to filename parse *)
+  let kind, version, commit, options =
+    match Hashtbl.find_opt rts m.runtime_name with
+    | Some id -> (id.rk, (match id.rv with Some v -> v | None -> m.version), id.rc, id.ro)
+    | None -> (m.kind, m.version, None, m.options)
+  in
+  let runtime = Contract.{ kind; version; commit; options } in
   {
     config_id = Registry.canonical_config_id runtime m.dimensions;
     runtime;
@@ -250,8 +330,9 @@ let perf_metrics perf =
 let run_id_of_dir dir =
   Filename.basename (if ends_with "/" dir then String.sub dir 0 (String.length dir - 1) else dir)
 
-let load dir =
+let load ?runtimes dir =
   let run_id = run_id_of_dir dir in
+  let rts = match runtimes with Some m -> m | None -> read_runtimes dir in
   let files = Sys.readdir dir |> Array.to_list in
   let ollys =
     List.filter
@@ -273,7 +354,7 @@ let load dir =
           (* fail loud: a sidecar we can't place is reported, never silently dropped *)
           Printf.eprintf "WARN: skipping %s — filename did not parse to contract metadata\n%!" olly_file
       | Some meta ->
-          let cfg = config_of_meta meta in
+          let cfg = config_of_meta rts meta in
           if not (Hashtbl.mem configs cfg.config_id) then Hashtbl.add configs cfg.config_id cfg;
           let bkey = meta.benchmark ^ "\x00" ^ meta.suite in
           if not (Hashtbl.mem benches bkey) then
@@ -380,14 +461,8 @@ let partial_for_tool (m : Contract.measurement) (tool : string) : Contract.measu
   let raw_ref = List.filter (fun (k, _) -> k = tool) m.raw_ref in
   if metrics = [] && raw_ref = [] then None else Some { m with metrics; raw_ref }
 
-let () =
-  match Sys.argv with
-  | [| _; "--schema-version" |] ->
-      (* the contract version this adapter was built against; running-ng compares
-         it to the installed bench-contract package to detect an outdated adapter *)
-      print_endline Contract.schema_version
-  | [| _; legacy_dir; out_dir |] ->
-      let run_id, ms, cfgs, benches = load legacy_dir in
+let run_adapt ?runtimes legacy_dir out_dir =
+      let run_id, ms, cfgs, benches = load ?runtimes legacy_dir in
       let man = build_manifest run_id cfgs benches in
       (* self-validate *)
       let bad = ref 0 in
@@ -433,6 +508,32 @@ let () =
         tools;
       Printf.eprintf "adapter: wrote %d measurements as per-tool NDJSON + manifest for run %s to %s\n%!"
         (List.length ms) run_id out_dir
+
+let usage () =
+  prerr_endline "usage: adapter <legacy-run-dir> <out-dir> [--runtimes <json>]";
+  prerr_endline "       adapter --schema-version";
+  exit 2
+
+let () =
+  let argv = Sys.argv in
+  match argv with
+  | [| _; "--schema-version" |] ->
+      (* the contract version this adapter was built against; running-ng compares
+         it to the installed bench-contract package to detect an outdated adapter *)
+      print_endline Contract.schema_version
   | _ ->
-      prerr_endline "usage: adapter <legacy-run-dir> <out-dir>";
-      exit 2
+      let legacy = ref None and out = ref None and runtimes = ref None in
+      let i = ref 1 in
+      while !i < Array.length argv do
+        (match argv.(!i) with
+         | "--runtimes" when !i + 1 < Array.length argv ->
+             runtimes := Some (runtimes_from_json argv.(!i + 1));
+             incr i
+         | s when !legacy = None -> legacy := Some s
+         | s when !out = None -> out := Some s
+         | s -> Printf.eprintf "adapter: unexpected argument %s\n%!" s);
+        incr i
+      done;
+      (match (!legacy, !out) with
+       | Some legacy_dir, Some out_dir -> run_adapt ?runtimes:!runtimes legacy_dir out_dir
+       | _ -> usage ())
