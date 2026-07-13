@@ -221,6 +221,75 @@ let runtimes_from_json path : (string, rt_identity) Hashtbl.t =
    with e -> Printf.eprintf "WARN: could not read runtimes json %s: %s\n%!" path (Printexc.to_string e));
   tbl
 
+(* ------------------------------------------------------------------ *)
+(* Comparisons — mirror the native (Python) mapping: running-ng's a/b   *)
+(* blocks -> contract inter-runtime comparisons, so adapted-legacy and   *)
+(* native manifests carry the same comparisons.                          *)
+(* ------------------------------------------------------------------ *)
+
+let rec yaml_to_json (y : Yaml.value) : Yojson.Safe.t =
+  match y with
+  | `Null -> `Null
+  | `Bool b -> `Bool b
+  | `Float f -> `Float f
+  | `String s -> `String s
+  | `A l -> `List (List.map yaml_to_json l)
+  | `O l -> `Assoc (List.map (fun (k, v) -> (k, yaml_to_json v)) l)
+
+(* comparison blocks from a JSON file (passed by `running adapt`, PyYAML-resolved) *)
+let comparisons_from_json path : Yojson.Safe.t list =
+  try match Yojson.Safe.from_file path with `List l -> l | _ -> [] with _ -> []
+
+(* comparison blocks straight from runbms.yml (direct bin/adapter, anchor-free) *)
+let comparisons_from_yaml dir : Yojson.Safe.t list =
+  let path = Filename.concat dir "runbms.yml" in
+  if not (Sys.file_exists path) then []
+  else
+    match Yaml.of_string (read_file path) with
+    | Ok (`O top) -> (
+        match List.assoc_opt "comparisons" top with Some (`A l) -> List.map yaml_to_json l | _ -> [])
+    | _ -> []
+
+let runtime_selector (rts : (string, rt_identity) Hashtbl.t) name : Contract.selector =
+  match Hashtbl.find_opt rts name with
+  | Some id ->
+      [ ("runtime.version", `String (match id.rv with Some v -> v | None -> name)) ]
+      @ (if id.ro <> [] then [ ("runtime.options", `List (List.map (fun o -> `String o) id.ro)) ] else [])
+      @ (match id.rc with Some c -> [ ("runtime.commit", `String c) ] | None -> [])
+  | None -> [ ("runtime.version", `String name) ]
+
+let comp_names = function
+  | `String s -> [ s ]
+  | `List l -> List.filter_map (function `String s -> Some s | _ -> None) l
+  | _ -> []
+
+let map_comparisons (blocks : Yojson.Safe.t list) rts : Contract.comparison list =
+  List.concat_map
+    (fun block ->
+      match block with
+      | `Assoc fields -> (
+          match (List.assoc_opt "a" fields, List.assoc_opt "b" fields) with
+          | Some a, Some b ->
+              let mode = match List.assoc_opt "mode" fields with Some (`String m) -> Some m | _ -> Some "pairwise" in
+              let label = match List.assoc_opt "label" fields with Some (`String l) -> Some l | _ -> None in
+              List.map
+                (fun base ->
+                  Contract.
+                    {
+                      kind = "inter";
+                      label;
+                      over = Some (`String "runtime");
+                      mode;
+                      baseline = Some (runtime_selector rts base);
+                      variants = Some (List.map (runtime_selector rts) (comp_names b));
+                      fix = None;
+                      baseline_at = None;
+                    })
+                (comp_names a)
+          | _ -> [])
+      | _ -> [])
+    blocks
+
 let config_of_meta (rts : (string, rt_identity) Hashtbl.t) (m : meta) : Contract.config_descriptor =
   (* prefer authoritative identity from runbms.yml; fall back to filename parse *)
   let kind, version, commit, options =
@@ -330,9 +399,13 @@ let perf_metrics perf =
 let run_id_of_dir dir =
   Filename.basename (if ends_with "/" dir then String.sub dir 0 (String.length dir - 1) else dir)
 
-let load ?runtimes dir =
+let load ?runtimes ?comparison_blocks dir =
   let run_id = run_id_of_dir dir in
   let rts = match runtimes with Some m -> m | None -> read_runtimes dir in
+  let comparisons =
+    let blocks = match comparison_blocks with Some b -> b | None -> comparisons_from_yaml dir in
+    map_comparisons blocks rts
+  in
   let files = Sys.readdir dir |> Array.to_list in
   let ollys =
     List.filter
@@ -400,7 +473,7 @@ let load ?runtimes dir =
   let measurements = List.rev !measurements in
   let configs = Hashtbl.fold (fun _ v acc -> v :: acc) configs [] in
   let benches = Hashtbl.fold (fun _ v acc -> v :: acc) benches [] in
-  (run_id, measurements, configs, benches)
+  (run_id, measurements, configs, benches, comparisons)
 
 (* ------------------------------------------------------------------ *)
 (* Manifest                                                             *)
@@ -418,7 +491,7 @@ let iso_of_run_id run_id =
 let host_of_run_id run_id =
   match String.split_on_char '-' run_id with h :: _ -> h | [] -> run_id
 
-let build_manifest run_id configs benches : Contract.manifest =
+let build_manifest run_id configs benches comparisons : Contract.manifest =
   {
     schema_version = Contract.schema_version;
     run_id;
@@ -430,7 +503,7 @@ let build_manifest run_id configs benches : Contract.manifest =
       };
     tool_versions = [];
     configs;
-    comparisons = [];
+    comparisons;
     benchmarks = benches;
     produced_by = Some adapter_version;
   }
@@ -461,9 +534,9 @@ let partial_for_tool (m : Contract.measurement) (tool : string) : Contract.measu
   let raw_ref = List.filter (fun (k, _) -> k = tool) m.raw_ref in
   if metrics = [] && raw_ref = [] then None else Some { m with metrics; raw_ref }
 
-let run_adapt ?runtimes legacy_dir out_dir =
-      let run_id, ms, cfgs, benches = load ?runtimes legacy_dir in
-      let man = build_manifest run_id cfgs benches in
+let run_adapt ?runtimes ?comparison_blocks legacy_dir out_dir =
+      let run_id, ms, cfgs, benches, comparisons = load ?runtimes ?comparison_blocks legacy_dir in
+      let man = build_manifest run_id cfgs benches comparisons in
       (* self-validate *)
       let bad = ref 0 in
       List.iter
@@ -510,7 +583,7 @@ let run_adapt ?runtimes legacy_dir out_dir =
         (List.length ms) run_id out_dir
 
 let usage () =
-  prerr_endline "usage: adapter <legacy-run-dir> <out-dir> [--runtimes <json>]";
+  prerr_endline "usage: adapter <legacy-run-dir> <out-dir> [--runtimes <json>] [--comparisons <json>]";
   prerr_endline "       adapter --schema-version";
   exit 2
 
@@ -522,12 +595,15 @@ let () =
          it to the installed bench-contract package to detect an outdated adapter *)
       print_endline Contract.schema_version
   | _ ->
-      let legacy = ref None and out = ref None and runtimes = ref None in
+      let legacy = ref None and out = ref None and runtimes = ref None and comparisons = ref None in
       let i = ref 1 in
       while !i < Array.length argv do
         (match argv.(!i) with
          | "--runtimes" when !i + 1 < Array.length argv ->
              runtimes := Some (runtimes_from_json argv.(!i + 1));
+             incr i
+         | "--comparisons" when !i + 1 < Array.length argv ->
+             comparisons := Some (comparisons_from_json argv.(!i + 1));
              incr i
          | s when !legacy = None -> legacy := Some s
          | s when !out = None -> out := Some s
@@ -535,5 +611,6 @@ let () =
         incr i
       done;
       (match (!legacy, !out) with
-       | Some legacy_dir, Some out_dir -> run_adapt ?runtimes:!runtimes legacy_dir out_dir
+       | Some legacy_dir, Some out_dir ->
+           run_adapt ?runtimes:!runtimes ?comparison_blocks:!comparisons legacy_dir out_dir
        | _ -> usage ())
