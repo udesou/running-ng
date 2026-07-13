@@ -1,0 +1,5 @@
+(executable
+ (name adapter)
+ ; depends on the shared benchmarking data contract (opam package bench-contract,
+ ; module Schema). Pin it: `opam pin add bench-contract <path-to-contract-repo>`.
+ (libraries bench-contract yojson yaml unix))

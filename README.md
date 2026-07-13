@@ -26,18 +26,21 @@ The script expects a sibling `benches/` directory by default. Override with `RUN
 
 ### Macrobenchmarks
 
-Real-world OCaml applications (17 tools, 29 benchmark programs across 14
-categories) built from a single dune monorepo ([macro-benches](https://github.com/ocaml-bench/macro-benches))
+Real-world OCaml applications (20 tools, 31 benchmark programs) built from a
+single dune monorepo ([macro-benches](https://github.com/ocaml-bench/macro-benches))
 that vendors all dependencies via opam-monorepo.  Current benchmarks:
 
 - **Text processing:** menhir (3 grammars), sedlex
 - **Text/media:** cpdf (4 PDF operations)
 - **SMT / Proof:** alt-ergo (3), coq/rocq (corelib_stress)
+- **Static analysis:** frama-c (EVA: 2), goblint
 - **GC stress:** ahrefs-devkit (4)
+- **Compilers / JS:** ocamlc-self-compile, jsoo
 - **Databases/Compilers:** irmin, ocamlformat, liquidsoap-lang
 - **Compression/Concurrency:** decompress, eio
 - **Data formats:** yojson
 - **Numerics:** zarith, owl
+- **Media:** liq-video-frames
 - **Bioinformatics:** pplacer
 
 Two macrobenchmark configs are shipped:
@@ -104,6 +107,73 @@ The full set of 16 tags shipped today, grouped by category:
 | Eio / multicore (narrower than `effects`) | `eio_fibers`, `io_uring`, `pthread_affinity` |
 
 The `tags:` block in `macro_base.yml` is the single source of truth — adding or modifying tags there propagates to every experiment config that includes the base. Tag validation (`apply_tag_filter`'s schema + reference checks) runs on every config load, so a typo in `exercised_by:` (e.g. renamed program) errors out before any benchmarks run.
+
+### MMTk (`ocaml-mmtk`)
+
+`type: OCamlMMTk` runs the benchmarks on [ocaml-mmtk](https://github.com/fplaunchpad/ocaml-mmtk) — an OCaml 5.5 fork whose garbage collector is [MMTk](https://www.mmtk.io/) instead of the stock runtime. It is a **drop-in runtime**: the same `run_ocaml_bench_gc_sweep.sh` / `build_ocaml_binaries_gc_sweep.sh` scripts work unchanged (no wrapper).
+
+**Declare it** in a config's `runtimes:` block, by commit (built via `opam-compiler` from [ocaml-mmtk](https://github.com/fplaunchpad/ocaml-mmtk), set with `repo:`) or by pre-built executable:
+
+```yaml
+runtimes:
+  ocaml-mmtk:
+    type: OCamlMMTk
+    repo: "https://github.com/fplaunchpad/ocaml-mmtk.git"
+    commit: "94f37a64b22de3c61b837bd1fde562ab4dcdb59f"   # pick a 5.5+mmtk commit
+  # ocaml-mmtk-exe:           # alternative: a compiler you built yourself
+  #   type: OCamlMMTk
+  #   executable: /path/to/_install/bin/ocaml
+```
+
+**Extra requirement:** **Rust/cargo** at `~/.cargo` — MMTk's static lib is built by cargo *inside* the compiler `make`. Everything else is automatic:
+
+- **ASLR off.** Every MMTk build/run command is wrapped in `setarch <arch> -R` (`Runtime.get_command_prefix`) — MMTk's fixed-address metadata mmap flakes under ASLR. MMTk-only; stock runtimes are untouched.
+- **Build env.** `get_build_env_overrides` sets a build-time `MMTK_HEAP_SIZE_MB` (16384) and `LIBRARY_PATH=<switch>/lib/ocaml` so dune-configurator probes can link `-lmmtk_ocaml`. An explicit export wins.
+- **opam sandbox.** The compiler build temporarily swaps opam's `wrap-build-commands` to a plain `setarch` wrapper (dropping bubblewrap) so cargo can reach the network during `make`, then restores it.
+
+**Plan + heap** are selected at run time via env vars (`MMTK_PLAN` is a plain `EnvVar` modifier in configs):
+
+| Env var | Meaning |
+|---|---|
+| `MMTK_PLAN` | `Immix` (default) \| `StickyImmix` \| `GenImmix` \| `MarkSweep` \| `NoGC`. **Native code requires an Immix-family plan** (Immix / StickyImmix / GenImmix). |
+| `MMTK_HEAP_SIZE_MB` | **Fixed** heap size in MB (a hard bound on the MMTk heap, *not* a soft max like stock OCaml). |
+| `MMTK_THREADS` | GC worker-thread count. |
+| `MMTK_VERBOSE` | Print `[mmtk]` init line + GC stats (count / time / objects copied) at exit. |
+
+```yaml
+modifiers:
+  mmtk_immix:  { type: EnvVar, var: MMTK_PLAN, val: Immix }
+  mmtk_sticky: { type: EnvVar, var: MMTK_PLAN, val: StickyImmix }
+```
+
+**Shipped configs:**
+
+| Config | Purpose |
+|---|---|
+| `experiments/mmtk_macro.yml` | MMTk (Immix + StickyImmix) vs stock 5.5 across the macro suite |
+| `experiments/mmtk_minheap.yml` | Per-(benchmark, plan) smallest-heap search (results in `mmtk_minheap_result.yml`) |
+
+**Run the macro comparison:**
+
+```bash
+cd ~/running-ng
+RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+CONFIG_FILE=src/running/config/experiments/mmtk_macro.yml \
+  bash run_ocaml_bench_gc_sweep.sh
+```
+
+**Minimum heap (`minheap`).** Because `MMTK_HEAP_SIZE_MB` is a fixed budget, the `minheap` command binary-searches the smallest heap each benchmark completes in (stock OCaml grows on demand and is skipped):
+
+```bash
+RUNNING_MACRO_BENCH_DIR=~/macro-benches PYTHONPATH=src \
+  python3 -m running minheap \
+    src/running/config/experiments/mmtk_minheap.yml \
+    src/running/config/experiments/mmtk_minheap_result.yml -a 2
+```
+
+> **Caveat — `minheap` measures the peak *on-heap live* set only.** Off-heap memory (Bigarray / GMP / other custom blocks `malloc`'d by the runtime) does **not** count against `MMTK_HEAP_SIZE_MB`, and MMTk does not yet pace collection on off-heap pressure. So off-heap-heavy benches (`owl_gc`, `zarith_pi`) bottom out at the search floor while their real RSS grows with the heap budget; their minheap is *not* a meaningful footprint. Only the large-live-set ("footprint") benches give a usable boundary.
+
+**Known MMTk-only crashes** (excluded from the configs above, so the search/comparison stays clean): `alt_ergo_{fill,yyll,unsat_smt2}` → SIGSEGV (moving GC vs C-held custom blocks) and `pplacer_testsuite` → SIGABRT (channel finaliser during GC). See [macro-benches](https://github.com/ocaml-bench/macro-benches#readme) for current MMTk status of each benchmark.
 
 ## Prerequisites
 
