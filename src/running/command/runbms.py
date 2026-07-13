@@ -548,7 +548,8 @@ def run(args):
         schema_version = configuration.get("schema_version")
         if schema_version and not is_dry_run():
             from running.contract import native as _native
-            _native_emitter = _native.NativeEmitter(log_dir / "contract", run_id, _raw_runtimes)
+            _native_emitter = _native.NativeEmitter(log_dir / "contract", run_id, _raw_runtimes,
+                                                    comparisons=configuration.get("comparisons"))
             logging.info("native contract emission enabled (schema_version=%s) -> %s",
                          schema_version, log_dir / "contract")
         # Read from configuration, override with command line arguments if

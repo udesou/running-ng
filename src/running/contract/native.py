@@ -11,6 +11,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 from pathlib import Path
@@ -53,16 +54,52 @@ def _iso_now():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _olly_version():
+    # olly has no --version flag, so take the version of the git checkout the
+    # binary was built from (most accurate for the binary actually run, e.g.
+    # "0.5.4-12-g3d37a0b"); fall back to the opam package version.
+    candidates = []
+    od = os.environ.get("OLLY_DIR")
+    if od:
+        candidates.append(od)
+    w = shutil.which("olly")
+    if w:
+        for anc in Path(os.path.realpath(w)).parents:
+            candidates.append(str(anc))
+            if (anc / ".git").exists():
+                break
+    for c in candidates:
+        if (Path(c) / ".git").exists():
+            try:
+                out = subprocess.run(["git", "-C", c, "describe", "--tags", "--always"],
+                                     capture_output=True, text=True, timeout=10)
+                v = out.stdout.strip()
+                if v:
+                    return v
+            except Exception:
+                pass
+    try:
+        out = subprocess.run(["opam", "show", "runtime_events_tools", "--field", "version"],
+                             capture_output=True, text=True, timeout=15)
+        v = out.stdout.strip().strip('"')
+        if v:
+            return v
+    except Exception:
+        pass
+    return None
+
+
 class NativeEmitter:
     """Accumulates contract artifacts across a run; finalize() writes the manifest."""
 
-    def __init__(self, contract_dir, run_id, runtimes):
+    def __init__(self, contract_dir, run_id, runtimes, comparisons=None):
         # `runtimes`: the raw runtimes dict {name -> {type, version, commit,
         # configure_args}} captured BEFORE Configuration.resolve_class() turns the
-        # values into Runtime objects.
+        # values into Runtime objects. `comparisons`: the config's comparisons block.
         self.dir = Path(contract_dir)
         self.run_id = run_id
         self.runtimes = runtimes or {}
+        self.comparisons = comparisons or []
         self.configs = {}         # config_id -> descriptor
         self.benchmarks = {}      # (name, suite) -> ref
         self._inv = {}            # (bench, config_id) -> next invocation index
@@ -124,15 +161,53 @@ class NativeEmitter:
                 m = emit.measurement(self.run_id, name, suite, cid, inv, metrics)
                 emit.append_ndjson(str(self.dir / "measurements" / (tool + ".ndjson")), m)
 
+    def _runtime_selector(self, name):
+        """A normative selector matching every config of runtime `name`
+        (by version/options/commit — never the advisory _runtime_name)."""
+        spec = self.runtimes.get(name, {}) or {}
+        sel = {"runtime.version": spec.get("version") or name}
+        opts = spec.get("configure_args") or []
+        if opts:
+            sel["runtime.options"] = opts
+        commit = spec.get("commit") or spec.get("hash")
+        if commit:
+            sel["runtime.commit"] = commit
+        return sel
+
+    def _map_comparisons(self):
+        """running-ng a/b comparison blocks (inter-runtime) -> contract comparisons.
+        A list on `a` (n>1) splits into one comparison per baseline (§4.5)."""
+        out = []
+        for block in self.comparisons:
+            if not isinstance(block, dict) or block.get("a") is None or block.get("b") is None:
+                continue
+            a = block["a"]; b = block["b"]
+            a_list = a if isinstance(a, list) else [a]
+            b_list = b if isinstance(b, list) else [b]
+            for base in a_list:
+                c = {
+                    "kind": "inter",
+                    "over": "runtime",
+                    "mode": block.get("mode", "pairwise"),
+                    "baseline": self._runtime_selector(base),
+                    "variants": [self._runtime_selector(x) for x in b_list],
+                }
+                if block.get("label"):
+                    c["label"] = block["label"]
+                out.append(c)
+        return out
+
     def finalize(self):
         tv = {}
-        for tool, cmd in (("olly", ["olly", "--version"]), ("perf", ["perf", "--version"])):
-            v = _tool_version(cmd)
-            if v:
-                tv[tool] = v
+        pv = _tool_version(["perf", "--version"])
+        if pv:
+            tv["perf"] = pv
+        ov = _olly_version()
+        if ov:
+            tv["olly"] = ov
         man = emit.manifest(self.run_id, _iso_now(), _machine(),
                             list(self.configs.values()),
-                            tool_versions=tv, comparisons=None,
+                            tool_versions=tv, comparisons=self._map_comparisons(),
                             benchmarks=list(self.benchmarks.values()),
                             produced_by="running-ng (native)")
         emit.write_json(str(self.dir / "manifest.json"), man)
