@@ -55,37 +55,43 @@ def _iso_now():
 
 
 def _olly_version():
-    # olly has no --version flag, so take the version of the git checkout the
-    # binary was built from (most accurate for the binary actually run, e.g.
-    # "0.5.4-12-g3d37a0b"); fall back to the opam package version.
-    candidates = []
-    od = os.environ.get("OLLY_DIR")
-    if od:
-        candidates.append(od)
+    # Version of the olly that running-ng ACTUALLY runs. olly is invoked as `olly`
+    # on PATH, so shutil.which("olly") from inside this process resolves the exact
+    # binary — no OLLY_DIR/env reliance, so a per-runtime/per-switch olly build is
+    # reflected. olly has no --version flag, so derive the version from whatever
+    # owns that binary: the opam switch it lives in, or the git checkout it was
+    # built from.
     w = shutil.which("olly")
-    if w:
-        for anc in Path(os.path.realpath(w)).parents:
-            candidates.append(str(anc))
-            if (anc / ".git").exists():
-                break
-    for c in candidates:
-        if (Path(c) / ".git").exists():
+    if not w:
+        return None
+    real = Path(os.path.realpath(w))
+    parts = real.parts
+    # (a) opam switch that owns this binary: .../.opam/<switch>/bin/olly
+    if ".opam" in parts:
+        i = parts.index(".opam")
+        if i + 1 < len(parts):
+            switch = parts[i + 1]
             try:
-                out = subprocess.run(["git", "-C", c, "describe", "--tags", "--always"],
+                out = subprocess.run(
+                    ["opam", "show", "runtime_events_tools", "--field", "version", "--switch", switch],
+                    capture_output=True, text=True, timeout=15)
+                v = out.stdout.strip().strip('"')
+                if v:
+                    return v
+            except Exception:
+                pass
+    # (b) git checkout the binary was built from (e.g. an OLLY_DIR/_build install)
+    for anc in real.parents:
+        if (anc / ".git").exists():
+            try:
+                out = subprocess.run(["git", "-C", str(anc), "describe", "--tags", "--always"],
                                      capture_output=True, text=True, timeout=10)
                 v = out.stdout.strip()
                 if v:
                     return v
             except Exception:
                 pass
-    try:
-        out = subprocess.run(["opam", "show", "runtime_events_tools", "--field", "version"],
-                             capture_output=True, text=True, timeout=15)
-        v = out.stdout.strip().strip('"')
-        if v:
-            return v
-    except Exception:
-        pass
+            break
     return None
 
 
