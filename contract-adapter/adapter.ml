@@ -291,11 +291,14 @@ let map_comparisons (blocks : Yojson.Safe.t list) rts : Contract.comparison list
     blocks
 
 let config_of_meta (rts : (string, rt_identity) Hashtbl.t) (m : meta) : Contract.config_descriptor =
-  (* prefer authoritative identity from runbms.yml; fall back to filename parse *)
+  (* prefer authoritative identity from runbms.yml; fall back to filename parse.
+     When there is no explicit `version:` (commit-based runtimes), fall back to
+     the runtime NAME — matching both the native emitter and the comparison
+     selectors (runtime_selector), so config_ids join and comparisons resolve. *)
   let kind, version, commit, options =
     match Hashtbl.find_opt rts m.runtime_name with
-    | Some id -> (id.rk, (match id.rv with Some v -> v | None -> m.version), id.rc, id.ro)
-    | None -> (m.kind, m.version, None, m.options)
+    | Some id -> (id.rk, (match id.rv with Some v -> v | None -> m.runtime_name), id.rc, id.ro)
+    | None -> (m.kind, m.runtime_name, None, m.options)
   in
   let runtime = Contract.{ kind; version; commit; options } in
   {
