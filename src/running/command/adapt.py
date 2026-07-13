@@ -123,26 +123,32 @@ def run(args) -> bool:
     # clean JSON so it gets authoritative runtime identity (configure_args etc.)
     # rather than falling back to filename parsing.
     runbms = run_dir / "runbms.yml"
-    rt_tmp = None
+    tmps = []
     if runbms.exists():
         try:
             import yaml, json, tempfile
             cfg = yaml.safe_load(runbms.read_text())
-            runtimes = cfg.get("runtimes") if isinstance(cfg, dict) else None
-            if runtimes:
-                fd = tempfile.NamedTemporaryFile("w", suffix=".runtimes.json", delete=False)
-                json.dump(runtimes, fd)
+            cfg = cfg if isinstance(cfg, dict) else {}
+
+            def _tmp(obj, suffix, flag):
+                fd = tempfile.NamedTemporaryFile("w", suffix=suffix, delete=False)
+                json.dump(obj, fd)
                 fd.close()
-                rt_tmp = fd.name
-                cmd += ["--runtimes", rt_tmp]
+                tmps.append(fd.name)
+                cmd.extend([flag, fd.name])
+
+            if cfg.get("runtimes"):
+                _tmp(cfg["runtimes"], ".runtimes.json", "--runtimes")
+            if cfg.get("comparisons"):
+                _tmp(cfg["comparisons"], ".comparisons.json", "--comparisons")
         except Exception as e:
             logger.warning("could not pre-resolve %s (%s); adapter will use its own parse", runbms, e)
 
     logger.info("adapting %s -> %s (via %s)", run_dir, out, adapter)
     rc = subprocess.run(cmd).returncode
-    if rt_tmp:
+    for t in tmps:
         try:
-            os.remove(rt_tmp)
+            os.remove(t)
         except OSError:
             pass
     if rc != 0:
