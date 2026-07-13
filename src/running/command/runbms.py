@@ -176,6 +176,11 @@ def get_hfacs(heap_range: int, spread_factor: int, N: int, ns: List[int]) -> Lis
     return [spread(spread_factor, N, n)/divisor + start for n in ns]
 
 
+# Set by run() when the config declares schema_version; read here to emit
+# data-contract artifacts natively during the run (see running.contract.native).
+_native_emitter = None
+
+
 def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Optional[int], fd: Optional[BinaryIO], sidecar_paths: Optional[Dict[str, Path]] = None) -> Tuple[bytes, SubprocessrExit]:
     runtime, mods = parse_config_str(configuration, c)
     mod_b = b.attach_modifiers(mods)
@@ -185,6 +190,13 @@ def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Opti
         prologue = get_log_prologue(runtime, mod_b)
         fd.write(prologue.encode("ascii"))
     output, companion_out, exit_status = mod_b.run(runtime, cwd=runbms_dir)
+    # Native contract emission: convert this invocation's {olly, perf} companion
+    # into per-tool contract NDJSON, keyed by identity running-ng already holds.
+    if _native_emitter is not None:
+        try:
+            _native_emitter.record(b, c, companion_out)
+        except Exception as e:
+            logging.warning("native contract emission failed for %s [%s]: %s", b.name, c, e)
     if fd:
         fd.write(output)
         if companion_out:
@@ -523,7 +535,22 @@ def run(args):
         if not is_dry_run():
             with (log_dir / "runbms.yml").open("w") as fd:
                 configuration.save_to_file(fd)
+        # Capture the raw runtime specs (with configure_args) BEFORE resolve_class
+        # replaces them with Runtime objects — the native emitter needs the raw dict.
+        _raw_runtimes = dict(configuration.get("runtimes") or {})
         configuration.resolve_class()
+        # Native contract emission: if the config declares a schema_version, emit
+        # data-contract artifacts (measurements/{olly,perf}.ndjson + manifest.json)
+        # into <log_dir>/contract as the run proceeds. Absent => legacy output that
+        # the contract-adapter converts after the fact.
+        global _native_emitter
+        _native_emitter = None
+        schema_version = configuration.get("schema_version")
+        if schema_version and not is_dry_run():
+            from running.contract import native as _native
+            _native_emitter = _native.NativeEmitter(log_dir / "contract", run_id, _raw_runtimes)
+            logging.info("native contract emission enabled (schema_version=%s) -> %s",
+                         schema_version, log_dir / "contract")
         # Read from configuration, override with command line arguments if
         # needed
         invocations = configuration.get("invocations")
@@ -618,18 +645,24 @@ def run(args):
             hfacs = get_hfacs(heap_range, spread_factor, N, ns)
             run_hfacs(hfacs)
 
-        if slice:
-            run_hfacs(slice)
+        try:
+            if slice:
+                run_hfacs(slice)
+                return True
+
+            if N is None:
+                run_one_hfac(invocations, None, suites, benchmarks,
+                             configs, Path(runbms_dir), log_dir)
+                return True
+
+            if len(ns) == 0:
+                fillin(run_N_ns, round(math.log2(N)))
+            else:
+                run_N_ns(N, ns)
+
             return True
-
-        if N is None:
-            run_one_hfac(invocations, None, suites, benchmarks,
-                         configs, Path(runbms_dir), log_dir)
-            return True
-
-        if len(ns) == 0:
-            fillin(run_N_ns, round(math.log2(N)))
-        else:
-            run_N_ns(N, ns)
-
-        return True
+        finally:
+            if _native_emitter is not None:
+                n_cfg, n_bench = _native_emitter.finalize()
+                logging.info("native contract: wrote %d config(s), %d benchmark(s) -> %s",
+                             n_cfg, n_bench, log_dir / "contract" / "manifest.json")
