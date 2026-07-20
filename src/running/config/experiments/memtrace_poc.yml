@@ -1,0 +1,45 @@
+# =============================================================================
+# memtrace proof-of-concept — single-benchmark config (test_decompress only)
+# =============================================================================
+# Demonstrates the memtrace integration end-to-end: macro-benches'
+# test_decompress is patched to call Memtrace.trace_if_requested () at
+# startup (decompress is currently the only benchmark patched this way —
+# see PLAN-MEMTRACE-V2.md), and running-ng's MemtraceAttach modifier
+# (memtrace_grp1) flips on tracing per invocation.
+#
+# Each invocation produces:
+#   - the usual .log
+#   - a raw memtrace_<...>.<invocation>.trace (binary CTF, for
+#     memtrace_viewer/memtrace_hotspots deep dives)
+#   - a memtrace_<...>.<invocation>.json sidecar (folded-stack summary,
+#     produced by decompress.build.sh's memtrace_flamegraph-<runtime> tool
+#     — see write_memtrace_json_sidecar in runbms.py)
+#
+# NOTE on benchmarks: filtering — macro_base.yml's `benchmarks:` block is a
+# dict merged key-by-key via Configuration.combine() (arrays extend, dicts
+# update — see src/running/config.py combine()). A top-level `benchmarks:`
+# key here only *replaces* the `macro-decompress` entry; every other suite
+# from macro_base.yml stays in the merged dict untouched. To actually
+# restrict the run, `benchmarks:` MUST go under `overrides:`, which uses
+# Configuration.override() (plain key assignment, no merge) instead.
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 3
+  benchmarks:
+    macro-decompress:
+      - test_decompress
+  # Proof-of-concept: always rebuild so a stale pre-memtrace binary from
+  # before this feature existed can never silently skip tracing.
+  suites.macro-decompress.always_build: true
+
+runtimes:
+  ocaml-5.5:
+    type: OCaml
+    version: "5.5.0"
+
+configs:
+  - "ocaml-5.5|memtrace_grp1"

@@ -13,6 +13,8 @@ import tempfile
 import gzip
 import shutil
 import os
+import json
+import subprocess
 from running.command.fillin import fillin
 import math
 import yaml
@@ -181,7 +183,7 @@ def get_hfacs(heap_range: int, spread_factor: int, N: int, ns: List[int]) -> Lis
 _native_emitter = None
 
 
-def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Optional[int], fd: Optional[BinaryIO], sidecar_paths: Optional[Dict[str, Path]] = None) -> Tuple[bytes, SubprocessrExit]:
+def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Optional[int], fd: Optional[BinaryIO], sidecar_paths: Optional[Dict[str, Path]] = None, memtrace_path: Optional[Path] = None) -> Tuple[bytes, SubprocessrExit]:
     runtime, mods = parse_config_str(configuration, c)
     mod_b = b.attach_modifiers(mods)
     if size is not None:
@@ -189,7 +191,7 @@ def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Opti
     if fd:
         prologue = get_log_prologue(runtime, mod_b)
         fd.write(prologue.encode("ascii"))
-    output, companion_out, exit_status = mod_b.run(runtime, cwd=runbms_dir)
+    output, companion_out, exit_status = mod_b.run(runtime, cwd=runbms_dir, memtrace_path=memtrace_path)
     # Native contract emission: convert this invocation's {olly, perf} companion
     # into per-tool contract NDJSON, keyed by identity running-ng already holds.
     if _native_emitter is not None:
@@ -245,6 +247,66 @@ def get_filename(bm: Benchmark, hfac: Optional[float], size: Optional[int], conf
 def get_tool_json_filename(tool: str, bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> str:
     """Per-tool NDJSON sidecar — e.g. ``olly_<bm>....json`` or ``perf_<bm>....json``."""
     return "{}_{}.json".format(tool, get_filename_no_ext(bm, hfac, size, config))
+
+
+def get_memtrace_filename(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str, invocation: int) -> str:
+    """Per-invocation raw trace file — memtrace traces one process lifetime,
+    so (unlike the olly/perf NDJSON sidecars, which append one line per
+    invocation to a single per-config file) each invocation needs its own
+    file."""
+    return "memtrace_{}.{}.trace".format(get_filename_no_ext(bm, hfac, size, config), invocation)
+
+
+def get_memtrace_flamegraph_exe(bm: Benchmark, runtime: Runtime) -> Optional[Path]:
+    """Locate the memtrace_flamegraph tool built alongside this benchmark's
+    binary (see e.g. decompress.build.sh) for this runtime. Only benchmarks
+    patched to call Memtrace.trace_if_requested have this; returns None
+    otherwise (e.g. non-OCamlBuiltBinaryBenchmark benchmarks, or ones that
+    haven't been patched/built with it yet)."""
+    benchmark_dir = getattr(bm, "benchmark_dir", None)
+    if benchmark_dir is None:
+        return None
+    exe = benchmark_dir / "memtrace_flamegraph-{}".format(runtime.name)
+    return exe if exe.exists() else None
+
+
+def parse_memtrace_flamegraph(text: str) -> List[Dict[str, Any]]:
+    """Parse memtrace_flamegraph's folded-stack-trace output (one aggregated
+    call stack + sample count per line) into JSON-able records."""
+    records = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        stack_str, _, samples_str = line.rpartition(" ")
+        try:
+            samples = int(samples_str)
+        except ValueError:
+            continue
+        records.append({"stack": stack_str.split(";"), "samples": samples})
+    return records
+
+
+def write_memtrace_json_sidecar(trace_path: Path, bm: Benchmark, runtime: Runtime) -> None:
+    """Convert a raw memtrace trace into a JSON sidecar (folded-stack
+    summary) next to it, via the runtime's own memtrace_flamegraph tool.
+    The raw trace is kept too — this is a cheap, quick-diff summary, not a
+    replacement for the full trace (which memtrace_viewer needs)."""
+    flamegraph_exe = get_memtrace_flamegraph_exe(bm, runtime)
+    if flamegraph_exe is None:
+        return
+    try:
+        result = subprocess.run(
+            [str(flamegraph_exe), str(trace_path)],
+            capture_output=True, timeout=60, check=True,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        logging.warning("Failed to run memtrace_flamegraph on %s: %s", trace_path, e)
+        return
+    records = parse_memtrace_flamegraph(result.stdout.decode("utf-8", errors="replace"))
+    json_path = trace_path.with_suffix(".json")
+    with json_path.open("w") as f:
+        json.dump(records, f, separators=(",", ":"))
 
 
 def get_filename_completed(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> str:
@@ -378,6 +440,7 @@ def run_one_benchmark(
                 tool: log_dir / get_tool_json_filename(tool, bm, hfac, size, c)
                 for tool in ("olly", "perf")
             }
+            memtrace_path = log_dir / get_memtrace_filename(bm, hfac, size, c, i)
             logging.debug("Running with log filename {}".format(log_filename))
             runtime, _ = parse_config_str(configuration, c)
             try:
@@ -392,8 +455,11 @@ def run_one_benchmark(
                         output, exit_status = run_benchmark_with_config(
                             c, bm, runbms_dir, size, fd,
                             sidecar_paths=sidecar_paths,
+                            memtrace_path=memtrace_path,
                         )
                     ever_ran[j] = True
+                    if memtrace_path.exists():
+                        write_memtrace_json_sidecar(memtrace_path, bm, runtime)
             except Exception as e:
                 logging.warning(
                     "Benchmark %s config %s failed: %s — skipping.",
@@ -435,6 +501,11 @@ def run_one_benchmark(
                 jf = log_dir / get_tool_json_filename(tool, bm, hfac, size, c)
                 if jf.exists():
                     compress_log_file(jf)
+            memtrace_stem = "memtrace_{}".format(get_filename_no_ext(bm, hfac, size, c))
+            for tf in log_dir.glob("{}.*.trace".format(memtrace_stem)):
+                compress_log_file(tf)
+            for jf in log_dir.glob("{}.*.json".format(memtrace_stem)):
+                compress_log_file(jf)
     print()
 
 

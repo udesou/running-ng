@@ -591,6 +591,37 @@ modifiers:
   perf_grp3:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,cache-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses"
+  # memtrace: unlike perf/olly, this requires the traced binary to call
+  # Memtrace.trace_if_requested () at startup — macro-benches only patches
+  # this in for test_decompress today (see macro-benches commit adding
+  # memtrace to macro-bench-decompress). Scoped to that one benchmark via
+  # excludes (Modifier.excludes is exclusion-only — there's no allowlist
+  # mechanism), so it's a hard error to add memtrace_grp1 to any other
+  # benchmark's config-string until that benchmark is patched too.
+  memtrace_grp1:
+    type: MemtraceAttach
+    excludes: &non_decompress_excludes
+      macro-menhir-monorepo: [menhir_ocamly, menhir_sql_parser, menhir_sysver]
+      macro-cpdf-monorepo: [cpdf_merge, cpdf_blacktext, cpdf_scale, cpdf_squeeze]
+      macro-alt-ergo-monorepo: [alt_ergo_fill, alt_ergo_yyll, alt_ergo_unsat_smt2]
+      macro-frama-c-monorepo: [frama_c_eva_t, frama_c_eva_sqlite]
+      macro-goblint-monorepo: [goblint]
+      macro-coq-monorepo: [coqc_corelib_stress]
+      macro-devkit: [devkit_htmlstream, devkit_stre, devkit_network, devkit_gzip]
+      macro-irmin: [irmin_mem_rw]
+      macro-ocamlformat: [ocamlformat_rocq]
+      macro-eio: [eio_fiber_stream]
+      macro-sedlex: [sedlex_tokenize]
+      macro-yojson: [ydump_repeat]
+      macro-zarith: [zarith_pi]
+      macro-owl: [owl_gc]
+      macro-ocamlc-self-compile: [ocamlc_self_compile]
+      macro-liquidsoap-lang: [liq_parse_typecheck]
+      macro-merlin: [merlin_bench]
+      macro-jsoo: [jsoo]
+      macro-liq-video-frames: [liq_video_frames_pool]
+      macro-pplacer: [pplacer_testsuite]
+      macro-lavyek-monorepo: [lavyek_kv_1d, lavyek_kv_2d, lavyek_kv_4d, lavyek_kv_8d]
 
 # =============================================================================
 # Benchmarks — all programs enabled
