@@ -336,7 +336,7 @@ check_cmd ocamlopt
 echo "  Files:"
 check_file "$OLLY_EXE"
 check_file "$BENCHES_DIR"
-check_file "$ROOT_DIR/src/running/config/ocaml_gc_sweep_example.yml"
+check_file "$ROOT_DIR/src/running/config/examples/ocaml_gc_sweep_example.yml"
 
 echo "  Python modules:"
 python3 -c "import yaml" 2>/dev/null && ok "pyyaml" || {
@@ -365,7 +365,7 @@ if [[ $ERRORS -eq 0 ]]; then
     echo "  - The first run will take longer as it builds OCaml/OxCaml runtimes."
     echo "    Subsequent runs reuse cached toolchains in /tmp/running-ng-ocaml-toolchains/."
     echo "  - Edit the config file to enable/disable benchmark suites:"
-    echo "    $ROOT_DIR/src/running/config/ocaml_gc_sweep_example.yml"
+    echo "    $ROOT_DIR/src/running/config/examples/ocaml_gc_sweep_example.yml"
     echo "  - The opam switch '$OPAM_SWITCH' should be active when running benchmarks"
     echo "    that need dune/ocamlfind (with_packages, with_deps, multicore suites)."
     echo "    Running: eval \$($OPAM_BIN env --switch=$OPAM_SWITCH --set-switch)"
