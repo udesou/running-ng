@@ -194,7 +194,8 @@ def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Opti
     # into per-tool contract NDJSON, keyed by identity running-ng already holds.
     if _native_emitter is not None:
         try:
-            _native_emitter.record(b, c, companion_out)
+            _native_emitter.record(b, c, companion_out,
+                                   ok=(exit_status is SubprocessrExit.Normal))
         except Exception as e:
             logging.warning("native contract emission failed for %s [%s]: %s", b.name, c, e)
     if fd:

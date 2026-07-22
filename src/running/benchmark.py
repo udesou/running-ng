@@ -302,7 +302,12 @@ class Benchmark(object):
 
         try:
             _, bench_stderr = bench.communicate(timeout=self.timeout)
-            subprocess_exit = SubprocessrExit.Normal
+            # A crash (e.g. SIGSEGV) returns non-zero but raises no exception, so
+            # this must inspect returncode explicitly — otherwise a crashed run is
+            # reported Normal and its partial olly/perf output pollutes results.
+            subprocess_exit = (SubprocessrExit.Normal
+                               if bench.returncode in (0, None)
+                               else SubprocessrExit.Error)
         except subprocess.TimeoutExpired:
             bench.kill()
             # If the actual OCaml process is a forked child of the wrapper
@@ -412,7 +417,11 @@ class Benchmark(object):
                     timeout=self.timeout,
                     cwd=effective_cwd,
                 )
-                subprocess_exit = SubprocessrExit.Normal
+                # subprocess.run without check=True does not raise on a non-zero
+                # exit, so a crash returns here — inspect returncode explicitly.
+                subprocess_exit = (SubprocessrExit.Normal
+                                   if p.returncode in (0, None)
+                                   else SubprocessrExit.Error)
                 stdout = p.stderr
             except subprocess.CalledProcessError as e:
                 subprocess_exit = SubprocessrExit.Error
