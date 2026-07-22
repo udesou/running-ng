@@ -77,7 +77,6 @@ suites:
   macro-menhir-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 600
-    # always_build: true
     programs:
       menhir_ocamly:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
@@ -102,7 +101,6 @@ suites:
   macro-cpdf-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 300
-    # always_build: true
     programs:
       cpdf_merge:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
@@ -123,7 +121,6 @@ suites:
 
   macro-alt-ergo-monorepo:
     type: OCamlBenchmarkSuite
-    # always_build: true
     timeout: 300
     programs:
       alt_ergo_fill:
@@ -152,7 +149,6 @@ suites:
   macro-frama-c-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 300
-    # always_build: true
     programs:
       frama_c_eva_t:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
@@ -166,7 +162,6 @@ suites:
   macro-goblint-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 300
-    # always_build: true
     programs:
       goblint:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
@@ -176,7 +171,6 @@ suites:
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 900
-    # always_build: true
     programs:
       coqc_corelib_stress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
@@ -185,7 +179,6 @@ suites:
 
   macro-devkit:
     type: OCamlBenchmarkSuite
-    # always_build: true
     timeout: 600
     programs:
       devkit_htmlstream:
@@ -216,7 +209,6 @@ suites:
   macro-irmin:
     type: OCamlBenchmarkSuite
     timeout: 300
-    # always_build: true
     programs:
       irmin_mem_rw:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
@@ -226,7 +218,6 @@ suites:
   macro-ocamlformat:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       ocamlformat_rocq:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
@@ -236,7 +227,6 @@ suites:
   macro-decompress:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       test_decompress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
@@ -247,7 +237,6 @@ suites:
   macro-eio:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       eio_fiber_stream:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
@@ -257,7 +246,6 @@ suites:
   macro-sedlex:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       sedlex_tokenize:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
@@ -267,7 +255,6 @@ suites:
   macro-yojson:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       ydump_repeat:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
@@ -277,7 +264,6 @@ suites:
   macro-zarith:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       zarith_pi:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
@@ -287,7 +273,6 @@ suites:
   macro-owl:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       owl_gc:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
@@ -314,7 +299,6 @@ suites:
   macro-ocamlc-self-compile:
     type: OCamlBenchmarkSuite
     timeout: 300
-    # always_build: true
     programs:
       ocamlc_self_compile:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-self-compile"
@@ -325,7 +309,6 @@ suites:
   macro-liquidsoap-lang:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       liq_parse_typecheck:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
@@ -353,7 +336,6 @@ suites:
   macro-merlin:
     type: OCamlBenchmarkSuite
     timeout: 180
-    # always_build: true
     programs:
       merlin_bench:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/merlin"
@@ -372,7 +354,6 @@ suites:
   macro-jsoo:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       jsoo:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
@@ -396,7 +377,6 @@ suites:
   macro-liq-video-frames:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       liq_video_frames_pool:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
@@ -407,7 +387,6 @@ suites:
   macro-pplacer:
     type: OCamlBenchmarkSuite
     timeout: 120
-    # always_build: true
     programs:
       pplacer_testsuite:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
@@ -460,7 +439,6 @@ suites:
     type: OCamlBenchmarkSuite
     timeout: 120
     required_modifiers: [re_par, md_par, pin_lavyek]
-    # always_build: true
     programs:
       lavyek_kv_1d:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek"
@@ -591,37 +569,6 @@ modifiers:
   perf_grp3:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,cache-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses"
-  # memtrace: unlike perf/olly, this requires the traced binary to call
-  # Memtrace.trace_if_requested () at startup — macro-benches only patches
-  # this in for test_decompress today (see macro-benches commit adding
-  # memtrace to macro-bench-decompress). Scoped to that one benchmark via
-  # excludes (Modifier.excludes is exclusion-only — there's no allowlist
-  # mechanism), so it's a hard error to add memtrace_grp1 to any other
-  # benchmark's config-string until that benchmark is patched too.
-  memtrace_grp1:
-    type: MemtraceAttach
-    excludes: &non_decompress_excludes
-      macro-menhir-monorepo: [menhir_ocamly, menhir_sql_parser, menhir_sysver]
-      macro-cpdf-monorepo: [cpdf_merge, cpdf_blacktext, cpdf_scale, cpdf_squeeze]
-      macro-alt-ergo-monorepo: [alt_ergo_fill, alt_ergo_yyll, alt_ergo_unsat_smt2]
-      macro-frama-c-monorepo: [frama_c_eva_t, frama_c_eva_sqlite]
-      macro-goblint-monorepo: [goblint]
-      macro-coq-monorepo: [coqc_corelib_stress]
-      macro-devkit: [devkit_htmlstream, devkit_stre, devkit_network, devkit_gzip]
-      macro-irmin: [irmin_mem_rw]
-      macro-ocamlformat: [ocamlformat_rocq]
-      macro-eio: [eio_fiber_stream]
-      macro-sedlex: [sedlex_tokenize]
-      macro-yojson: [ydump_repeat]
-      macro-zarith: [zarith_pi]
-      macro-owl: [owl_gc]
-      macro-ocamlc-self-compile: [ocamlc_self_compile]
-      macro-liquidsoap-lang: [liq_parse_typecheck]
-      macro-merlin: [merlin_bench]
-      macro-jsoo: [jsoo]
-      macro-liq-video-frames: [liq_video_frames_pool]
-      macro-pplacer: [pplacer_testsuite]
-      macro-lavyek-monorepo: [lavyek_kv_1d, lavyek_kv_2d, lavyek_kv_4d, lavyek_kv_8d]
 
 # =============================================================================
 # Benchmarks — all programs enabled

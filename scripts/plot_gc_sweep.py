@@ -16,7 +16,7 @@ from running.analysis.json_sidecars import (
 )
 
 
-LOG_GLOB = "*.log"
+LOG_GLOB = "binarytrees*.log"
 
 
 def _edges(vals: np.ndarray, log: bool) -> np.ndarray:
@@ -126,58 +126,22 @@ def _parse_from_json(data: dict, log_name: str, s: int, o: int) -> dict:
     return row
 
 
-def _parse_filename(path: Path) -> tuple:
-    """Return (benchmark, runtime, s, o) extracted from a log filename.
-
-    The log filename format is:
-      <bench>.<hfac>.<size>.<config_encoded>.<suite>.log
-    where config_encoded encodes the config string with '|' replaced by '.'.
-    The runtime is the first component of the config; GC sweep params s/o are
-    optional modifiers (present only in sweep runs).
-    """
-    name = path.name
-
-    # Benchmark name: first dot-separated component
-    bm_m = re.match(r"^([^.]+)\.", name)
-    benchmark = bm_m.group(1) if bm_m else name
-
-    # Runtime: first config component after <bench>.<hfac>.<size>.
-    # Runtime names follow the pattern (ocaml|oxcaml)-<version-or-word>(.<digits>)*
-    rt_m = re.search(r"^\w+\.\d+\.\d+\.((?:ocaml|oxcaml)-[^.]+(?:\.[0-9]+)*)\.", name)
-    runtime = rt_m.group(1) if rt_m else "unknown"
-
-    # GC sweep params: optional, present only in parameter-sweep runs
-    so_m = re.search(r"\.s-(\d+)\.o-(\d+)\.", name)
-    s = int(so_m.group(1)) if so_m else np.nan
-    o = int(so_m.group(2)) if so_m else np.nan
-
-    return benchmark, runtime, s, o
-
-
-def parse_log(path: Path) -> Optional[dict]:
-    # Skip empty files (benchmark not run / timed out)
-    if path.stat().st_size == 0:
-        return None
-
-    benchmark, runtime, s, o = _parse_filename(path)
+def parse_log(path: Path) -> dict:
+    m = re.search(r"\.s-(\d+)\.o-(\d+)\.", path.name)
+    if not m:
+        raise ValueError(f"Cannot parse s/o from filename: {path.name}")
+    s, o = map(int, m.groups())
 
     # Try structured JSON sidecar first (per-tool or legacy combined).
     data = _read_json_sidecar(path)
     if data is not None:
-        row = _parse_from_json(data, path.name, s, o)
-        row["benchmark"] = benchmark
-        row["runtime"] = runtime
-        return row
+        return _parse_from_json(data, path.name, s, o)
 
     # Fallback: regex-parse the text log (backward compat for old runs)
     text = path.read_text()
-    if not text.strip():
-        return None
 
     row = {
         "log_file": path.name,
-        "benchmark": benchmark,
-        "runtime": runtime,
         "s": s,
         "o": o,
     }
@@ -234,14 +198,8 @@ def parse_logs(logs_dir: Path, pattern: str) -> pd.DataFrame:
     if not files:
         raise SystemExit(f"No log files matching '{pattern}' in {logs_dir}")
 
-    rows = [r for r in (parse_log(p) for p in files) if r is not None]
-    if not rows:
-        raise SystemExit(f"No data found in log files matching '{pattern}' in {logs_dir}")
-
-    df = pd.DataFrame(rows)
-    # Sort by benchmark+runtime for comparison runs; by s+o for sweep runs
-    sort_cols = [c for c in ["benchmark", "runtime", "s", "o", "log_file"] if c in df.columns]
-    df = df.sort_values(sort_cols).reset_index(drop=True)
+    rows = [parse_log(p) for p in files]
+    df = pd.DataFrame(rows).sort_values(["s", "o", "log_file"]).reset_index(drop=True)
     return df
 
 
@@ -294,42 +252,6 @@ def heatmap_grid(
     plt.close()
 
 
-def comparison_bar(
-    df: pd.DataFrame,
-    metric: str,
-    outpath: Path,
-    title: str,
-    agg: str,
-) -> None:
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError as e:
-        raise SystemExit("matplotlib is required to generate plots. Install it in your environment.") from e
-
-    grid = df.pivot_table(index="benchmark", columns="runtime", values=metric, aggfunc=agg)
-    grid = grid.dropna(how="all")
-    if grid.empty:
-        return
-
-    n_benchmarks = len(grid)
-    n_runtimes = len(grid.columns)
-    fig, ax = plt.subplots(figsize=(max(8, n_benchmarks * 0.9), 5))
-    x = np.arange(n_benchmarks)
-    width = 0.8 / n_runtimes
-
-    for i, rt in enumerate(grid.columns):
-        ax.bar(x + i * width, grid[rt], width, label=rt)
-
-    ax.set_xticks(x + width * (n_runtimes - 1) / 2)
-    ax.set_xticklabels(grid.index, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel(metric)
-    ax.set_title(title)
-    ax.legend(loc="upper right")
-    plt.tight_layout()
-    plt.savefig(outpath, dpi=200)
-    plt.close()
-
-
 def tradeoff_scatter(df: pd.DataFrame, outpath: Path) -> None:
     try:
         import matplotlib.pyplot as plt
@@ -365,9 +287,9 @@ def tradeoff_scatter(df: pd.DataFrame, outpath: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Parse benchmark logs, write gc_summary.csv, and produce plots."
+        description="Parse benchmark logs, write gc_summary.csv, and produce elapsed/RSS heatmaps."
     )
-    ap.add_argument("logs_dir", help="Directory containing benchmark log files")
+    ap.add_argument("logs_dir", help="Directory containing binarytrees*.log files")
     ap.add_argument("--pattern", default=LOG_GLOB, help=f"Glob pattern inside logs_dir (default: {LOG_GLOB})")
     ap.add_argument("--outdir", default=None, help="Output directory (default: logs_dir)")
     ap.add_argument("--out-csv", default=None, help="CSV output path (default: <outdir>/gc_summary.csv)")
@@ -385,44 +307,33 @@ def main() -> None:
     df = parse_logs(logs_dir, args.pattern)
     write_csv(df, out_csv)
 
-    # Determine run type: GC parameter sweep vs runtime comparison
-    is_sweep = "s" in df.columns and not df["s"].isna().all()
-
     metric_specs = [
-        ("olly_wall_time_s", "Wall time (s)", False),
-        ("olly_gc_time_s", "GC time (s)", False),
-        ("olly_gc_overhead_pct", "GC overhead (%)", False),
-        ("max_rss_mb", "Max RSS (MB)", False),
+        ("olly_wall_time_s", "Wall time (s) over (s,o)", False),
+        ("olly_gc_time_s", "GC time (s) over (s,o)", False),
     ]
+
+    if "max_rss_mb" in df.columns and not df["max_rss_mb"].isna().all():
+        metric_specs.append(("max_rss_mb", "Max RSS (MB) over (s,o)", False))
+
     # Legacy /usr/bin/time metrics (old logs without JSON sidecar)
     if "elapsed_s" in df.columns and not df["elapsed_s"].isna().all():
-        metric_specs.append(("elapsed_s", "Elapsed time (s)", False))
+        metric_specs.append(("elapsed_s", "Elapsed time (s) over (s,o)", False))
     if "maxresident_mb" in df.columns and not df["maxresident_mb"].isna().all():
-        metric_specs.append(("maxresident_mb", "Max RSS (MB)", False))
+        metric_specs.append(("maxresident_mb", "Max RSS (MB) over (s,o)", False))
 
-    for metric, label, logz in metric_specs:
+    for metric, title, logz in metric_specs:
         if metric not in df.columns or df[metric].isna().all():
             continue
         safe = re.sub(r"[^a-zA-Z0-9_]+", "_", metric).strip("_").lower()
-
-        if is_sweep:
-            heatmap_grid(
-                df,
-                metric=metric,
-                outpath=outdir / f"heatmap_{safe}.png",
-                title=f"{label} over (s,o)",
-                logx=True,
-                logz=logz,
-                agg=args.agg,
-            )
-        elif "runtime" in df.columns and "benchmark" in df.columns:
-            comparison_bar(
-                df,
-                metric=metric,
-                outpath=outdir / f"bar_{safe}.png",
-                title=f"{label} by benchmark and runtime",
-                agg=args.agg,
-            )
+        heatmap_grid(
+            df,
+            metric=metric,
+            outpath=outdir / f"heatmap_{safe}.png",
+            title=title,
+            logx=True,
+            logz=logz,
+            agg=args.agg,
+        )
 
     print(f"Wrote CSV: {out_csv}")
     print(f"Wrote plots to: {outdir}")

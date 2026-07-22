@@ -133,11 +133,3 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-
-# clustering experiment — ignore raw benchmark run dirs, keep markdown logs
-experiments/clustering/logs/turing-*/
-experiments/clustering/data/
-
-# memtrace proof-of-concept — ignore raw run output, keep the Makefile/script
-experiments/memtrace-poc/logs/turing-*/
-experiments/memtrace-poc/logs/run_stdout.log
