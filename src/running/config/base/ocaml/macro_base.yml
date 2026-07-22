@@ -494,6 +494,19 @@ modifiers:
     type: OCamlRunParam
     val: "d={0}"
     excludes: *lavyek_only_excludes
+  # MMTk plan / GC-thread count as NAME-VALUE modifiers (plan-Bactrian, threads-1)
+  # so the contract records gc_plan / gc_threads dimensions and each plan gets a
+  # distinct config_id — Bactrian vs LXR vs GenImmix plot as separate series.
+  # (Prefer these over the old flag modifiers mmtk_bactrian/mmtk_lxr, which the
+  # config_id drops.)
+  plan:
+    type: EnvVar
+    var: "MMTK_PLAN"
+    val: "{0}"
+  threads:
+    type: EnvVar
+    var: "MMTK_THREADS"
+    val: "{0}"
   # Parallel-suite counterparts: only applied to lavyek programs.
   re_par:
     type: OCamlRunParam

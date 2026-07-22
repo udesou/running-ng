@@ -137,6 +137,14 @@ DIMENSION_OF_MODIFIER = {
     "md_par": {
         "dimension": "max_domains",
         "unit": "count"
+    },
+    "plan": {
+        "dimension": "gc_plan",
+        "unit": "name"
+    },
+    "threads": {
+        "dimension": "gc_threads",
+        "unit": "count"
     }
 }
 OLLY_OUTPUT_VERSION_SUPPORTED = [

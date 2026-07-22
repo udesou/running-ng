@@ -131,13 +131,20 @@ class NativeEmitter:
         for tok in config_str.split("|")[1:]:
             parts = tok.split("-")
             name = parts[0]
-            if len(parts) >= 2 and name in vocab.DIMENSION_OF_MODIFIER:
+            entry = vocab.DIMENSION_OF_MODIFIER.get(name)
+            if not entry:
+                continue
+            if "value" in entry:            # flag modifier, e.g. mmtk_bactrian
+                v = entry["value"]
+            elif len(parts) >= 2:           # name-value modifier, e.g. s-32768
                 v = parts[1]
                 try:
                     v = int(v)
                 except ValueError:
                     pass
-                dims.setdefault(vocab.DIMENSION_OF_MODIFIER[name]["dimension"], v)
+            else:
+                continue
+            dims.setdefault(entry["dimension"], v)
         d = emit.config_descriptor(kind, version, commit, options, dims,
                                    runtime_name=runtime_name,
                                    modifiers=config_str.split("|")[1:],
@@ -146,9 +153,13 @@ class NativeEmitter:
         self.configs[d["config_id"]] = d
         return d
 
-    def record(self, bm, config_str, companion_out):
-        """One invocation: split the {olly, perf} companion into per-tool NDJSON."""
-        if not companion_out:
+    def record(self, bm, config_str, companion_out, ok=True):
+        """One invocation: split the {olly, perf} companion into per-tool NDJSON.
+
+        `ok` is the runner's verdict (exit status == Normal). A crashed/timed-out
+        invocation is dropped wholesale — its partial olly/perf output would
+        otherwise show up as crash-time garbage in the dashboard."""
+        if not companion_out or not ok:
             return
         try:
             data = json.loads(companion_out)
@@ -161,7 +172,13 @@ class NativeEmitter:
         key = (name, cid)
         inv = self._inv.get(key, 0)
         self._inv[key] = inv + 1
-        for tool, metrics in (("olly", emit.olly_metrics(data.get("olly"))),
+        olly_m = emit.olly_metrics(data.get("olly"))
+        # Drop crashed invocations wholesale (both tools): their olly wall_time is
+        # non-positive and their perf counters are a partial-run count — emitting
+        # either pollutes the dashboard with crash-time garbage.
+        if emit.crashed(olly_m):
+            return
+        for tool, metrics in (("olly", olly_m),
                               ("perf", emit.perf_metrics(data.get("perf")))):
             if data.get(tool) is not None:
                 m = emit.measurement(self.run_id, name, suite, cid, inv, metrics)

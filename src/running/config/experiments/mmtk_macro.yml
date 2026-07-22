@@ -2,7 +2,7 @@
 # MMTk macro-benches — ocaml-mmtk vs the stock OCaml it forks from
 # =============================================================================
 # Canonical MMTk config.  Both runtimes pinned by commit:
-#   - ocaml-mmtk-8544df0 : fplaunchpad/ocaml-mmtk @ 5.5+mmtk tip (the canonical
+#   - ocaml-mmtk-cbc66e3 : fplaunchpad/ocaml-mmtk @ 5.5+mmtk tip (the canonical
 #     upstream repo, set via `repo:`), built by running-ng (type: OCamlMMTk ->
 #     opam compiler create; the MMTk build quirks — cargo network + `setarch -R`
 #     for ASLR — are handled automatically).
@@ -10,7 +10,8 @@
 #
 # MMTk specifics, all carried by the OCamlMMTk runtime (no launch wrapper):
 #   - Default plan is now **GenImmix** (generational, stock-faithful). Native
-#     plans: GenImmix / Immix / StickyImmix / ConcurrentImmix. Selected via the
+#     plans: GenImmix / Immix / StickyImmix / ConcurrentImmix / Bactrian (RQ7:
+#     generational + concurrent) / LXR (reference counting). Selected via the
 #     MMTK_PLAN EnvVar modifiers below.
 #   - Heap is **dynamic by default** (MemBalancer grows with the live set, ~memory
 #     parity with vanilla). The run configs below leave MMTK_HEAP_SIZE_MB UNSET, so
@@ -53,18 +54,6 @@ maxheap: 8192
 attempts: 2
 
 modifiers:
-  mmtk_genimmix:
-    type: EnvVar
-    var: "MMTK_PLAN"
-    val: "GenImmix"
-  mmtk_immix:
-    type: EnvVar
-    var: "MMTK_PLAN"
-    val: "Immix"
-  mmtk_sticky:
-    type: EnvVar
-    var: "MMTK_PLAN"
-    val: "StickyImmix"
   # Fixed-heap pin (dynamic heap is the default when this is omitted). Used by
   # `minheap` / fixed-heap repro only — NOT in the dynamic-heap run configs below.
   mmtk_heap:
@@ -73,16 +62,19 @@ modifiers:
     val: "16384"
 
 runtimes:
-  ocaml-mmtk-8544df0:
+  ocaml-mmtk-cbc66e3:
     type: OCamlMMTk
     repo: "https://github.com/fplaunchpad/ocaml-mmtk.git"
-    commit: "8544df02ff79845f55968b8ed19031d6ee8480fc"
+    commit: "cbc66e3efd8f9200f3e84f791a6b6dfc36efce8c"
   ocaml-5.5.0-rc1:
     type: OCaml
     commit: "4090d6db952ecae1cd0c3493c16d89cacc2bf8c6"
 
-# Dynamic heap (no mmtk_heap) — GenImmix (default) + Immix, vs stock.
+# Dynamic heap (no mmtk_heap). Plans: GenImmix (default), Immix, Bactrian
+# (generational + concurrent, RQ7), LXR (reference counting), vs stock.
 configs:
-  - "ocaml-mmtk-8544df0|time_stats|mmtk_genimmix"
-  - "ocaml-mmtk-8544df0|time_stats|mmtk_immix"
+  - "ocaml-mmtk-cbc66e3|time_stats|plan-GenImmix"
+  - "ocaml-mmtk-cbc66e3|time_stats|plan-Immix"
+  - "ocaml-mmtk-cbc66e3|time_stats|plan-Bactrian"
+  - "ocaml-mmtk-cbc66e3|time_stats|plan-LXR"
   - "ocaml-5.5.0-rc1|time_stats"

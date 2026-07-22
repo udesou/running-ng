@@ -64,6 +64,20 @@ def perf_metrics(perf):
     return out
 
 
+def crashed(olly_metrics_list):
+    """True if an invocation's olly metrics show the process aborted rather than
+    completing. olly derives wall_time/cpu_time from the first/last runtime-events
+    timestamps, so a process that dies before emitting proper events yields a
+    non-positive (in practice hugely negative) wall_time. Its perf counters are
+    then a partial-run count too, so the WHOLE invocation must be dropped — not
+    just the olly side — or the dashboard shows crash-time garbage (e.g. an LXR
+    bench "finishing" in a fraction of stock's instructions)."""
+    for m in olly_metrics_list or []:
+        if m["name"] in ("wall_time", "cpu_time") and m["value"] <= 0:
+            return True
+    return False
+
+
 def dimensions_from_modifiers(modifiers):
     """modifiers: {name: value} that running-ng actually applied (honoring excludes).
 
@@ -74,7 +88,8 @@ def dimensions_from_modifiers(modifiers):
     for name, value in modifiers.items():
         d = vocab.DIMENSION_OF_MODIFIER.get(name)
         if d:
-            dims.setdefault(d["dimension"], value)
+            # flag modifiers (mmtk_bactrian, …) carry a fixed value in the table
+            dims.setdefault(d["dimension"], d.get("value", value))
     return dims
 
 
