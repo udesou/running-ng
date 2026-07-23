@@ -25,6 +25,11 @@ METRIC_CATALOG = {
         "layer": 1,
         "source": "olly"
     },
+    "max_rss_excl_ring": {
+        "unit": "KiB",
+        "layer": 1,
+        "source": "olly"
+    },
     "mean_latency": {
         "unit": "ms",
         "layer": 1,
@@ -92,6 +97,7 @@ OLLY_FIELD_MAP = {
     "gc_time": "gc_time",
     "gc_overhead": "gc_overhead",
     "max_rss_kb": "max_rss",
+    "max_rss_kb_excl_ring": "max_rss_excl_ring",
     "mean_latency": "mean_latency",
     "allocations.promoted_pct": "promoted_pct",
     "allocations.minor_heap": "minor_words",
