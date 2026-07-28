@@ -247,9 +247,16 @@ class OCaml(Runtime):
     # unconstrained `dune` made the toolchain a function of *when* the switch
     # was created: switches provisioned before 2026-07 got dune 3.22.x, while
     # any created later resolved dune >= 3.24, which deleted the `coq`
-    # language extension that macro-benches' vendored rocq still declares
-    # (`(using coq 0.8)`) — so every benchmark build in the new switch failed.
-    # Bump only in lockstep with the rocq coq->rocq migration in macro-benches.
+    # language extension that macro-benches' vendored rocq declared
+    # (`(using coq 0.8)`) — a parse error, so every benchmark build in the new
+    # switch failed, not just the Coq one.
+    #
+    # 3.22.1 is what the switches that have built the whole suite carry, so it
+    # stays the default.  macro-benches setup step 3b now strips those dead
+    # declarations, which lifts the hard >= 3.24 ceiling, but before raising
+    # this pin: (a) build all benchmarks on the candidate dune, not just a few,
+    # and (b) make sure every checkout has rerun `make setup`, since an
+    # already-populated duniverse/ keeps the old dune-project until then.
     # Override per-runtime with `dune_version:` in the runtime's YAML block.
     DUNE_VERSION = "3.22.1"
 
