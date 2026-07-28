@@ -1,0 +1,43 @@
+# =============================================================================
+# Knob-A olly pass — owl 4-rung matrix-dimension ladder on OCaml 5.5.0 (1 inv)
+# =============================================================================
+# gc%/pause + max_rss_kb_excl_ring for the settled owl rungs.  Knob A = matrix
+# dimension (OWL_MATRIX_DIM, passed as the wrapper's 2nd arg "loop dim");
+# loop is pinned to 1 so this is pure Knob A, not the owl_gc repetition bench.
+# Rungs live in base/ocaml/macro_base.yml (suite macro-owl, timeout 900):
+#   owl_gc_small   dim 300  ~4s    95MB
+#   owl_gc_default dim 500  ~11s   230MB
+#   owl_gc_large   dim 1500 ~124s  1.9GB
+#   owl_gc_huge    dim 2400 ~453s  4.77GB   (timeout 900 > huge)
+# off-heap-heavy: top_heap_words is flat; RSS is the shape signal.  re-25 ring
+# (event volume ~30k collections, similar across rungs since the grid is fixed).
+#
+# Usage:
+#   cd ~/running-ng
+#   OLLY_DIR=~/runtime_events_tools \
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/owl_knob_a_5.5.0.yml \
+#   LOG_DIR=/tmp/claude-1001/-home-udesou/0be6b255-53c7-455c-805e-9ca3aee89314/scratchpad/owl_olly \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-owl:
+      - owl_gc_small
+      - owl_gc_default
+      - owl_gc_large
+      - owl_gc_huge
+
+runtimes:
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+    olly_ref: "main"
+
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"

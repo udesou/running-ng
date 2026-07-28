@@ -1,0 +1,20 @@
+# Knob-A olly pass — menhir 3-grammar ladder, OCaml 5.5.0 (1 inv).
+# The ladder is the 3 EXISTING benches (Knob A = grammar/algorithm; monotone by
+# footprint): small=sql_parser (330MB), default=sysver (753MB), large=ocamly
+# canonical (2.76GB). No new rungs. Suite macro-menhir-monorepo (timeout 600).
+includes:
+  - "../base/ocaml/macro_base.yml"
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-menhir-monorepo:
+      - menhir_sql_parser
+      - menhir_sysver
+      - menhir_ocamly
+runtimes:
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+    olly_ref: "main"
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"
