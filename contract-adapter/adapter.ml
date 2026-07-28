@@ -250,13 +250,17 @@ let comparisons_from_yaml dir : Yojson.Safe.t list =
         match List.assoc_opt "comparisons" top with Some (`A l) -> List.map yaml_to_json l | _ -> [])
     | _ -> []
 
+(* `runtime.options` is pinned ALWAYS, even when empty: a stock build has
+   options=[] and must not be matched by its own same-version variants (fp /
+   flambda), whose selectors carry non-empty options. Omitting the empty list
+   under-specifies the baseline so it collapses onto every variant. *)
 let runtime_selector (rts : (string, rt_identity) Hashtbl.t) name : Contract.selector =
   match Hashtbl.find_opt rts name with
   | Some id ->
-      [ ("runtime.version", `String (match id.rv with Some v -> v | None -> name)) ]
-      @ (if id.ro <> [] then [ ("runtime.options", `List (List.map (fun o -> `String o) id.ro)) ] else [])
+      [ ("runtime.version", `String (match id.rv with Some v -> v | None -> name));
+        ("runtime.options", `List (List.map (fun o -> `String o) id.ro)) ]
       @ (match id.rc with Some c -> [ ("runtime.commit", `String c) ] | None -> [])
-  | None -> [ ("runtime.version", `String name) ]
+  | None -> [ ("runtime.version", `String name); ("runtime.options", `List []) ]
 
 let comp_names = function
   | `String s -> [ s ]
