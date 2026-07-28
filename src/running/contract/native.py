@@ -185,13 +185,14 @@ class NativeEmitter:
                 emit.append_ndjson(str(self.dir / "measurements" / (tool + ".ndjson")), m)
 
     def _runtime_selector(self, name):
-        """A normative selector matching every config of runtime `name`
-        (by version/options/commit — never the advisory _runtime_name)."""
+        """A normative selector isolating runtime `name` (by version/options/commit
+        — never the advisory _runtime_name). `runtime.options` is pinned ALWAYS,
+        even when empty: a stock build has options=[] and must NOT be matched by
+        its own same-version variants (fp / flambda), whose selectors carry
+        non-empty options. Omitting the empty list under-specifies the selector."""
         spec = self.runtimes.get(name, {}) or {}
         sel = {"runtime.version": spec.get("version") or name}
-        opts = spec.get("configure_args") or []
-        if opts:
-            sel["runtime.options"] = opts
+        sel["runtime.options"] = spec.get("configure_args") or []
         commit = spec.get("commit") or spec.get("hash")
         if commit:
             sel["runtime.commit"] = commit
