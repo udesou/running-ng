@@ -1,0 +1,26 @@
+# Knob-A olly pass — decompress 3-rung payload-size ladder, OCaml 5.5.0 (1 inv).
+# Knob A = payload size (argv.2); iterations pinned to 1. Rungs in macro_base.yml
+# (suite macro-decompress, timeout 300):
+#   test_decompress_small   80MB  ~5s   0.5GB
+#   test_decompress_default 256MB ~16s  1.4GB
+#   test_decompress_large   1GB   ~63s  5.7GB
+# Usage: cd ~/running-ng; OLLY_DIR=~/runtime_events_tools RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/decompress_knob_a_5.5.0.yml \
+#   LOG_DIR=/tmp/claude-1001/-home-udesou/0be6b255-53c7-455c-805e-9ca3aee89314/scratchpad/dec_olly \
+#   bash run_ocaml_bench_gc_sweep.sh
+includes:
+  - "../base/ocaml/macro_base.yml"
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-decompress:
+      - test_decompress_small
+      - test_decompress_default
+      - test_decompress_large
+runtimes:
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+    olly_ref: "main"
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"

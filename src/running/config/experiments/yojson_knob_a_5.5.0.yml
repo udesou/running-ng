@@ -1,0 +1,26 @@
+# Knob-A olly pass — yojson 3-rung doc-size ladder, OCaml 5.5.0 (1 inv).
+# Knob A = JSON doc size (argv.2 = generated record count); iterations pinned 1.
+# Rungs in macro_base.yml (suite macro-yojson, timeout 300):
+#   ydump_repeat_small   2M recs   ~5.5s  3.25GB
+#   ydump_repeat_default 6M recs   ~16s   10GB
+#   ydump_repeat_large   12M recs  ~33s   20GB
+# Usage: cd ~/running-ng; OLLY_DIR=~/runtime_events_tools RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/yojson_knob_a_5.5.0.yml \
+#   LOG_DIR=/tmp/claude-1001/-home-udesou/0be6b255-53c7-455c-805e-9ca3aee89314/scratchpad/yoj_olly \
+#   bash run_ocaml_bench_gc_sweep.sh
+includes:
+  - "../base/ocaml/macro_base.yml"
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-yojson:
+      - ydump_repeat_small
+      - ydump_repeat_default
+      - ydump_repeat_large
+runtimes:
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+    olly_ref: "main"
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"

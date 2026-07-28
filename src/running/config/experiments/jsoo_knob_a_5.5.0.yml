@@ -1,0 +1,26 @@
+# Knob-A olly pass — jsoo 3-rung bytecode-size ladder, OCaml 5.5.0 (1 inv).
+# Knob A = input bytecode size (rung arg small/default/large -> generated .byte).
+# Rungs in macro_base.yml (suite macro-jsoo, timeout 300):
+#   jsoo_small   5.6MB  ~5s   0.5GB
+#   jsoo_default 14MB   ~16s  1.7GB
+#   jsoo_large   36MB   ~50s  7.8GB
+# Usage: cd ~/running-ng; OLLY_DIR=~/runtime_events_tools RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/jsoo_knob_a_5.5.0.yml \
+#   LOG_DIR=/tmp/claude-1001/-home-udesou/0be6b255-53c7-455c-805e-9ca3aee89314/scratchpad/jsoo_olly \
+#   bash run_ocaml_bench_gc_sweep.sh
+includes:
+  - "../base/ocaml/macro_base.yml"
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-jsoo:
+      - jsoo_small
+      - jsoo_default
+      - jsoo_large
+runtimes:
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+    olly_ref: "main"
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"
