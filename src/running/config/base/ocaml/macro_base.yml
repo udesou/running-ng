@@ -57,6 +57,14 @@ minheap_multiplier: 1.0
 heap_range: 6
 spread_factor: 1
 
+# Emit the data-contract natively during runbms (inline
+# <log_dir>/contract/{manifest.json, measurements/*.ndjson}), so every derived
+# experiment is dashboard-ready without a post-hoc `adapt` step. Inherited by
+# all including configs; do NOT re-declare at top level in an experiment (a
+# top-level scalar in both base and experiment is a combine() TypeError) —
+# override it via `overrides:` if you ever need a different value.
+schema_version: "1.0"
+
 # Note: plugins (e.g. Zulip notifications) are NOT defined here — they are a
 # per-experiment concern, and requiring them here would force every including
 # config to have the plugin's Python deps installed (`pip install running-ng[zulip]`

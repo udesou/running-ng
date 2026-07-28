@@ -1,0 +1,39 @@
+# Smoke: 5.5.0-rc1, a few micro benchmarks, 1 invocation. Temp config for an
+# end-to-end run test (reuses the existing running-ng-ocaml-5.5.0-rc1 switch).
+includes:
+  - "../base/ocaml/micro_base.yml"
+
+schema_version: "1.0"
+invocations: 1
+remote_host: null
+compress_logs: false
+minheap_multiplier: 1.0
+heap_range: 6
+spread_factor: 1
+
+overrides:
+  benchmarks:
+    sandmark-sequential:
+      - almabench
+      - bdd
+      - binarytrees
+      - hamming
+      - fannkuchredux
+      - fft
+
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+  ocaml-5.5.0-rc1:
+    type: OCaml
+    version: "5.5.0-rc1"
+
+configs:
+  - "ocaml-5.4.1|perf_grp1"
+  - "ocaml-5.5.0-rc1|perf_grp1"
+
+comparisons:
+  - label: "5.5.0-rc1 vs 5.4.1"
+    a: ocaml-5.4.1
+    b: ocaml-5.5.0-rc1
