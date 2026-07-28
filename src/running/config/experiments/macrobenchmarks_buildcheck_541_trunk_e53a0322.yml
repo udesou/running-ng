@@ -1,0 +1,45 @@
+# =============================================================================
+# Build-check: build EVERY macro-benchmark on 5.4.1 + latest trunk (e53a0322)
+# =============================================================================
+# Build-only (no run): validates that every enabled benchmark in macro_base.yml
+# compiles cleanly from the vendored monorepo against the two runtimes we
+# currently commit to supporting. Each program is built via its own build.sh
+# (the authentic per-runtime path), not a representative dune target.
+#
+# Runtimes:
+#   - ocaml-5.4.1            : released 5.4.1
+#   - ocaml-trunk-e53a0322   : trunk / 5.6 (e53a0322, the July baseline)
+#
+# Builds all 20 active tools (31 programs), incl. frama-c and goblint.
+# merlin and lavyek stay disabled (upstream race / private repo).
+#
+# Usage:
+#   cd ~/running-ng
+#   export OLLY_DIR=~/runtime_events_tools
+#   export RUNNING_MACRO_BENCH_DIR=~/macro-benches
+#   CONFIG_FILE=src/running/config/experiments/macrobenchmarks_buildcheck_541_trunk_e53a0322.yml \
+#     bash build_ocaml_binaries_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 1
+  benchmarks.macro-lavyek-monorepo: []
+  benchmarks.macro-merlin: []
+
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+    olly_ref: "main"
+
+  ocaml-trunk-e53a0322:
+    type: OCaml
+    commit: "e53a032298229338268c3dc3640214e1fa710c95"
+    olly_ref: "main"
+
+configs:
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-trunk-e53a0322|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"

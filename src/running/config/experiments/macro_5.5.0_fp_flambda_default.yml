@@ -1,0 +1,74 @@
+# =============================================================================
+# OCaml 5.5.0: stock vs fp+flambda — full macrobenchmark suite, DEFAULT GC config
+# =============================================================================
+# The original macro-bench suite (NOT the input-refactor rungs) on two runtimes,
+# at default GC params only (re-25|md-2 — no s/o sweep):
+#
+#   - ocaml-5.5.0            : stock 5.5.0 release (switch already built)
+#   - ocaml-5.5.0-fp-flambda : 5.5.0 + frame pointers + flambda (the combination)
+#
+# lavyek (private repo) and merlin (upstream domains-typer race) are excluded —
+# same as every other working macro config. Everything else (suites, modifiers,
+# invocations=3, plugins) is inherited from macro_base.yml.
+#
+# Usage:
+#   cd ~/running-ng
+#   OLLY_DIR=~/runtime_events_tools \
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/macro_5.5.0_fp_flambda_default.yml \
+#   LOG_DIR=~/gc-sweep-logs/macro-5.5.0-fp-flambda-$(date +%Y%m%d) \
+#     bash run_ocaml_bench_gc_sweep.sh
+#
+# For accurate footprint (max_rss_kb_excl_ring): keep OLLY_DIR on the
+# `max-rss-excl-ring` branch, and run running-ng from its `max-rss-excl-ring`
+# branch so the contract records the ring-excluded RSS.
+#
+# NOTE: the fp-flambda switch (running-ng-ocaml-5.5.0-fp-flambda) does not exist
+# yet — running-ng builds it on first run (~10 min compile). The stock 5.5.0
+# switch is already built. If you want only the combination, drop the stock
+# runtime + config + comparison below.
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
+
+overrides:
+  invocations: 5
+  # Original suite minus the two unavailable tools.
+  benchmarks.macro-lavyek-monorepo: []
+  benchmarks.macro-merlin: []
+
+runtimes:
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+  ocaml-5.5.0-fp:
+    type: OCaml
+    version: "5.5.0"
+    configure_args: ["--enable-frame-pointers"]
+  ocaml-5.5.0-flambda:
+    type: OCaml
+    version: "5.5.0"
+    configure_args: ["--enable-flambda"]
+  ocaml-5.5.0-fp-flambda:
+    type: OCaml
+    version: "5.5.0"
+    configure_args: ["--enable-frame-pointers", "--enable-flambda"]
+
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.5.0-fp|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.5.0-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.5.0-fp-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+
+comparisons:
+  - label: "5.5.0: fp+flambda vs stock"
+    a: ocaml-5.5.0
+    b: [ocaml-5.5.0-fp, ocaml-5.5.0-flambda, ocaml-5.5.0-fp-flambda]
