@@ -1,0 +1,54 @@
+# MMTk thread-count comparison on commit e52418f, over the 27 benches that run
+# cleanly. Excludes pplacer_testsuite (SIGABRT) and sedlex_tokenize /
+# devkit_htmlstream / liq_video_frames_pool (hang under MMTk — intermittent,
+# both default and THREADS=1). Runs GenImmix + Immix under BOTH the default GC
+# thread count AND MMTK_THREADS=1, vs stock 5.5.0-rc1. Dynamic heap, best-of-3.
+#
+# NOTE: runtime named ocaml-mmtk-e52418f (NOT ...-8544df0) so opam-compiler
+# builds a FRESH switch from the new commit instead of reusing the old one.
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 3
+  benchmarks:
+    macro-menhir-monorepo: [menhir_ocamly, menhir_sql_parser, menhir_sysver]
+    macro-cpdf-monorepo: [cpdf_blacktext, cpdf_merge, cpdf_scale, cpdf_squeeze]
+    macro-alt-ergo-monorepo: [alt_ergo_fill, alt_ergo_yyll, alt_ergo_unsat_smt2]
+    macro-frama-c-monorepo: [frama_c_eva_t, frama_c_eva_sqlite]
+    macro-goblint-monorepo: [goblint]
+    macro-coq-monorepo: [coqc_corelib_stress]
+    macro-devkit: [devkit_stre, devkit_network, devkit_gzip]
+    macro-irmin: [irmin_mem_rw]
+    macro-ocamlformat: [ocamlformat_rocq]
+    macro-decompress: [test_decompress]
+    macro-eio: [eio_fiber_stream]
+    macro-yojson: [ydump_repeat]
+    macro-zarith: [zarith_pi]
+    macro-owl: [owl_gc]
+    macro-ocamlc-self-compile: [ocamlc_self_compile]
+    macro-liquidsoap-lang: [liq_parse_typecheck]
+    macro-jsoo: [jsoo]
+
+maxheap: 8192
+attempts: 2
+
+
+runtimes:
+  ocaml-mmtk-e52418f:
+    type: OCamlMMTk
+    repo: "https://github.com/fplaunchpad/ocaml-mmtk.git"
+    commit: "e52418fc80440f71f8234250d90520c4caf24769"
+  ocaml-5.5.0-rc1:
+    type: OCaml
+    commit: "4090d6db952ecae1cd0c3493c16d89cacc2bf8c6"
+
+configs:
+  # default GC thread count (MMTK_THREADS unset)
+  - "ocaml-mmtk-e52418f|time_stats|plan-GenImmix"
+  - "ocaml-mmtk-e52418f|time_stats|plan-Immix"
+  # single GC thread
+  - "ocaml-mmtk-e52418f|time_stats|plan-GenImmix|threads-1"
+  - "ocaml-mmtk-e52418f|time_stats|plan-Immix|threads-1"
+  # stock baseline
+  - "ocaml-5.5.0-rc1|time_stats"

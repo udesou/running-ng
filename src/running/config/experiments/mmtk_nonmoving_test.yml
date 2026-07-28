@@ -1,0 +1,43 @@
+# =============================================================================
+# Hypothesis test: do alt-ergo / pplacer stop crashing under a NON-MOVING MMTk?
+# =============================================================================
+# Same ocaml-mmtk commit (14d1b8f) but the mmtk-core staticlib rebuilt with the
+# `immix_non_moving` feature (Immix never copies/defrags). Built separately at
+# ~/_build-ocaml-mmtk/_install (executable mode), so the overnight minheap
+# switch is untouched.
+#
+#   - crash on the normal (moving) build:
+#       alt_ergo_fill/yyll/unsat_smt2 -> SIGSEGV ; pplacer_testsuite -> SIGABRT
+#   - if they RUN here -> moving (object relocation) is the cause.
+#   - if they STILL crash -> not relocation (scanning/root issue independent of moving).
+#
+# Usage:
+#   cd ~/running-ng
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/mmtk_nonmoving_test.yml \
+#   LOG_DIR=/tmp/mmtk_nm \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-alt-ergo-monorepo: [alt_ergo_fill, alt_ergo_yyll, alt_ergo_unsat_smt2]
+    macro-pplacer: [pplacer_testsuite]
+
+modifiers:
+  mmtk_heap:
+    type: EnvVar
+    var: "MMTK_HEAP_SIZE_MB"
+    val: "16384"
+
+runtimes:
+  mmtk-nm:
+    type: OCamlMMTk
+    executable: "/home/udesou/_build-ocaml-mmtk/_install/bin/ocaml"
+
+configs:
+  - "mmtk-nm|time_stats|mmtk_heap|plan-Immix"
