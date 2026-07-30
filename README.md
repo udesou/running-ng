@@ -15,7 +15,7 @@ It drives two companion benchmark repos:
 | Repo | What | Size |
 |---|---|---|
 | [**benches**](https://github.com/ocaml-bench/benches) | sandmark-derived microbenchmarks (sequential, multicore, effects, numerical) | 13 suites, 200 programs enabled |
-| [**macro-benches**](https://github.com/ocaml-bench/macro-benches) | real-world OCaml applications in one vendored dune monorepo (menhir, coq, alt-ergo, frama-c, cpdf, jsoo, …) | 20 active suites, 56 programs enabled |
+| [**macro-benches**](https://github.com/ocaml-bench/macro-benches) | real-world OCaml applications in one vendored dune monorepo (menhir, coq, alt-ergo, frama-c, cpdf, jsoo, …) | 20 active suites, 31 programs enabled |
 
 Both work standalone. running-ng adds per-runtime opam switch management,
 modifier composition (GC knobs, perf counter groups, runtime-events ring

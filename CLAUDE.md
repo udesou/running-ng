@@ -213,19 +213,27 @@ post-`RUNNING_TAG`) and `runbms_args.yml`.
 
 ## Known-broken / inconsistent files (fix or avoid)
 
-Verified 2026-07-27 by loading every shipped config through
-`Configuration.from_file` + `validate()` + `validate_tags()`.
+Verified 2026-07-30 by loading every shipped config through
+`Configuration.from_file` + `validate()` + `validate_tags()`. Re-run that sweep
+after touching `config.py` or any base config; it is the cheapest way to catch a
+config-layering regression.
 
 | File | Problem |
 |---|---|
-| `examples/ocaml_gc_sweep_example.yml` | **This is the `CONFIG_FILE` default**, and it fails `validate()`: `ocaml-v5.4` and `ocaml-v4.14.3` are declared but never used in `configs:`. Running the launch script with no `CONFIG_FILE` aborts. Fix = comment out the two runtimes. Its header comment also still claims toolchain caching in `/tmp/running-ng-ocaml-toolchains/`, which is OxCaml-only. |
-| `build_ocaml_binaries_gc_sweep.sh` | Default `CONFIG_FILE` points at `src/running/config/ocaml_gc_sweep_example.yml` — the file moved to `config/examples/`. Always pass `CONFIG_FILE` explicitly, or fix the path. |
-| `experiments/mmtk_lxr_bactrian_5iter.yml`, `mmtk_lxr_bactrian_perf_t1.yml`, `mmtk_smoke_cbc66e3.yml` | Redeclare top-level `schema_version` while including `macro_base.yml` → `combine()` `TypeError` at load. Move it under `overrides:`. (Two of the three are untracked.) |
-| `examples/{minheap,ocaml,runbms}_example.yml` | Upstream examples that `include:` `$RUNNING_NG_PACKAGE_DATA/...`; only loadable through `python3 -m running`, which sets that variable. Not usable as `CONFIG_FILE` from the shell scripts. |
-| README/docs references to `experiments/mmtk_minheap.yml` and `mmtk_minheap_result.yml` | Those files exist only on the unmerged `mmtk-minheap` branch. `experiments/mmtk_minheap_findings.md` (the write-up) is on `HEAD`. |
+| `examples/{minheap,ocaml,runbms}_example.yml` | Upstream examples that `include:` `$RUNNING_NG_PACKAGE_DATA/...`; only loadable through `python3 -m running`, which sets that variable. Not usable as `CONFIG_FILE` from the shell scripts. `runbms_example.yml` *also* fails `validate()` (it declares four runtimes and runs a subset) — upstream predates that check. |
 | `src/running/command/genadvice.py` | Not in `__main__.MODULES`; unreachable. Either register it or delete it. |
 | `install_deps_linux.sh` / `install_deps_macos.sh` | Clone `github.com/udesou/benches`; the canonical remote (and what `~/benches` actually points at) is `github.com/ocaml-bench/benches`. |
-| `~/benches` group names | Older docs mention a `benches/macrobenchmarks/` group; the repo now has `simple/`, `with_deps/`, `with_packages/`, `multicore/` only — real-world tools moved to `~/macro-benches`. |
+| `experiments/mmtk_minheap.yml`, `mmtk_minheap_result.yml` | Referenced by older docs, but they exist only on the unmerged `mmtk-minheap` branch. `experiments/mmtk_minheap_findings.md` (the write-up) is here. |
+
+**`validate()` is stricter than the configs it inherited.** "Runtime declared but
+not referenced by any `configs:` entry" is an *error*, which rules out the
+commented-menu style (declare several compilers, run one) that both
+`ocaml_gc_sweep_example.yml` and upstream's `runbms_example.yml` were written in.
+`resolve_class` already drops unreferenced runtimes, so nothing breaks if one is
+left declared — the check is hygiene, not correctness. If that ergonomics cost
+starts to bite, downgrading this one case to a warning (keeping
+referenced-but-undeclared and compared-but-no-data as errors) is the fix; it was
+left alone here deliberately rather than folded into a docs change.
 
 ## Per-session workflow
 
