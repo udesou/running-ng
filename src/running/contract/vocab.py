@@ -148,7 +148,8 @@ DIMENSION_OF_MODIFIER = {
     }
 }
 OLLY_OUTPUT_VERSION_SUPPORTED = [
-    1
+    1,
+    2
 ]
 TOOL_SUPPORTED_VERSIONS = {
     "olly": [

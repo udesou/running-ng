@@ -10,6 +10,7 @@ config_id); the difference is that identity comes from running-ng's in-memory
 knowledge instead of being parsed from filenames.
 """
 import json
+import logging
 import os
 
 from running.contract import vocab
@@ -38,10 +39,35 @@ def _metric(name, value):
     return {"name": name, "value": v, "unit": d["unit"], "source": d["source"], "layer": d["layer"]}
 
 
+_warned_olly_versions = set()
+
+
+def _check_olly_output_version(olly):
+    """Warn once per unsupported olly gc-stats output version.
+
+    Mirrors the adapter's `olly_version_ok`: OLLY_FIELD_MAP is written against
+    the versions in OLLY_OUTPUT_VERSION_SUPPORTED, so an unlisted one may be
+    read wrong. Native emission had no such check, which meant the two producers
+    disagreed about what they accept — the one thing the contract exists to stop.
+    Warn rather than raise: a version we don't recognise usually still carries
+    the fields we read, and losing a whole sweep to it would be worse.
+    """
+    v = olly.get("version")
+    if v is None or v in vocab.OLLY_OUTPUT_VERSION_SUPPORTED:
+        return
+    if v not in _warned_olly_versions:
+        _warned_olly_versions.add(v)
+        logging.warning(
+            "olly output version %s not in supported set %s — metrics may be "
+            "misparsed (regenerate vocab.py from the contract's registry.ml)",
+            v, vocab.OLLY_OUTPUT_VERSION_SUPPORTED)
+
+
 def olly_metrics(olly):
     out = []
     if not isinstance(olly, dict):
         return out
+    _check_olly_output_version(olly)
     for path, name in vocab.OLLY_FIELD_MAP.items():
         v = _dotted(olly, path)
         if v is not None:
