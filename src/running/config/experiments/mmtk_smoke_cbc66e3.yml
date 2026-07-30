@@ -1,14 +1,13 @@
 # SMOKE: 1 iteration, ALL active macrobenchmarks (macro_base full set; merlin +
 # lavyek stay disabled), new version cbc66e3. Purpose: confirm every bench
 # BUILDS and RUNS under LXR + Bactrian + stock 5.5.0-rc1 before the real 5-iter
-# run. schema_version on (native contract emission).
+# run. Native contract emission comes from macro_base's schema_version.
 includes:
   - "../base/ocaml/macro_base.yml"
 
-schema_version: "1.0"
-
 # Full set inherited from macro_base (no benchmarks override). invocations via
-# overrides (macro_base defines it as a top-level scalar).
+# overrides (macro_base defines it as a top-level scalar, as it does
+# schema_version — redeclaring either at top level is a combine() TypeError).
 overrides:
   invocations: 1
 

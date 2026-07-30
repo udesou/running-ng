@@ -1,12 +1,11 @@
 # Rerun: MMTK_THREADS=1 + perf/olly attach (perf_grp1) for dashboard-feedable
-# stats. LXR + Bactrian vs stock 5.5.0-rc1, cbc66e3, dynamic heap, 5 iters,
-# schema_version on (emits contract/measurements/{olly,perf}.ndjson).
+# stats. LXR + Bactrian vs stock 5.5.0-rc1, cbc66e3, dynamic heap, 5 iters.
+# Native contract emission (contract/measurements/{olly,perf}.ndjson) comes from
+# macro_base's schema_version — redeclaring it here is a combine() TypeError.
 # Under MMTk: olly gives wall/cpu/max_rss (GC counters empty); perf gives
 # instructions/cycles/task_clock. Same 27-bench set as mmtk_lxr_bactrian_5iter.
 includes:
   - "../base/ocaml/macro_base.yml"
-
-schema_version: "1.0"
 
 plugins:
   zulip:

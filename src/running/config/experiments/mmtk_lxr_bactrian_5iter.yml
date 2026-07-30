@@ -1,14 +1,13 @@
 # Real run: 5 iterations, ALL active macrobenchmarks (macro_base full set; merlin
 # + lavyek stay disabled), new version cbc66e3. MMTk LXR + Bactrian vs stock
 # OCaml 5.5.0-rc1 (4090d6db, the commit the fork is based upon) at default
-# parameters. Dynamic heap, schema_version on (native contract emission).
+# parameters. Dynamic heap; native contract emission comes from macro_base's
+# schema_version (redeclaring it here would be a combine() TypeError).
 #
 # Launch ONLY after mmtk_smoke_cbc66e3.yml confirms build+run; exclude via a
 # benchmarks: override any bench the smoke shows hangs/crashes under LXR/Bactrian.
 includes:
   - "../base/ocaml/macro_base.yml"
-
-schema_version: "1.0"
 
 plugins:
   zulip:
