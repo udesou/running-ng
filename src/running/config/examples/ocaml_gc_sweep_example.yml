@@ -21,20 +21,27 @@ plugins:
 # Runtimes
 # =============================================================================
 # Each runtime resolves an OCaml compiler by version tag, commit hash, or
-# pre-built executable path.  The first build is cached under
-# /tmp/running-ng-ocaml-toolchains/ and reused for subsequent runs.
+# pre-built executable path.  Stock OCaml and MMTk runtimes are built into an
+# opam switch named `running-ng-<runtime-name>`, which is the cache — delete the
+# switch to force a rebuild.  (Only OxCaml also keeps a source checkout under
+# /tmp/running-ng-ocaml-toolchains/.)
 #
 # Use `repo` to point to a fork (e.g. OxCaml).  Default repo is
 # https://github.com/ocaml/ocaml.git.
 
 runtimes:
+  # NOTE: every runtime declared here must be referenced by a `configs:` entry
+  # below — `Configuration.validate()` rejects dead declarations, so a runtime
+  # you are not currently running has to stay commented out rather than merely
+  # unused.  (That check is why this file previously failed to load at all.)
+  #
   # --- stock OCaml ---
-  ocaml-v5.4:
-    type: OCaml
-    version: "5.4.0"
-  ocaml-v4.14.3:
-    type: OCaml
-    version: "4.14.3"
+  # ocaml-v5.4:
+  #   type: OCaml
+  #   version: "5.4.0"
+  # ocaml-v4.14.3:
+  #   type: OCaml
+  #   version: "4.14.3"
   ocaml-release:
     type: OCaml
     commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
