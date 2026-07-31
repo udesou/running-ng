@@ -140,6 +140,15 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
         args: "--timelimit 15 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/unsat.smt2"
+        # The workload IS "solve for 15 seconds": --timelimit arms SIGVTALRM, the
+        # goal never closes, alt-ergo prints `unknown / (error "timeout")` and the
+        # process dies of the signal — 128+14 = 142, every run, by design.
+        # Without this the runner calls it a crash and the native contract
+        # emitter drops the invocation, so the benchmark silently never reaches
+        # the dashboard (while the legacy adapter, reading the sidecars, keeps
+        # it). Matches `expected_exit: 142` in macro-benches'
+        # benchmarks/manifest.yml — keep the two in sync.
+        expected_exit: 142
 
   # Frama-C EVA (value/abstract-interpretation).  Static-linked kernel+EVA
   # (vendored 32.1); the build script's wrapper sets DUNE_DIR_LOCATIONS and
