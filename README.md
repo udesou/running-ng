@@ -435,6 +435,29 @@ The `.json` sidecar is the preferred input for analysis scripts. Old `.log` file
 | `CONFIG_FILE` | `src/running/config/examples/ocaml_gc_sweep_example.yml` | YAML config. Shipped configs: `examples/ocaml_gc_sweep_example.yml`, `experiments/macrobenchmarks_monorepo.yml`, `experiments/fp_flambda_macrobenchmarks.yml`, `experiments/gc_sweep_all_versions.yml`. Reusable bases live under `base/ocaml/`. |
 | `RUNNING_MACRO_BENCH_DIR` | n/a | Root of the `macro-benches` monorepo (required for any config that includes `base/ocaml/macro_base.yml`: `experiments/macrobenchmarks_monorepo.yml`, `experiments/fp_flambda_*.yml`, `experiments/regression_*.yml`, `examples/smoke_macro.yml`) |
 | `OLLY_BIN` | `~/runtime_events_tools/_build/install/default/bin` | Directory containing `olly` binary |
+| `OPAMROOT` | `~/.opam` | Standard opam variable. Two concurrent runs sharing one opam root are refused (see below); point overlapping runs at separate roots. |
+| `RUNNING_REUSE_SWITCHES` | unset | Set to `1` to reuse a `running-ng-*` opam switch left over from an earlier run. By default such a switch is **removed and rebuilt** so that the compiler and the pinned dune (`OCaml.DUNE_VERSION`, currently 3.22.1 — raise only after building the whole suite on the candidate version) are exactly what this run provisioned, rather than whatever a previous run happened to install. Rebuilding recompiles the compiler from source (~10-20 min per runtime), so set this for long sweeps where you trust the existing switches. Switches provisioned earlier in the *same* run are always reused. |
+
+### Concurrent runs and the opam root
+
+Because a run rebuilds stale switches, two runs sharing an opam root would
+corrupt each other — the second would delete a switch the first is building or
+benchmarking against. Runs therefore take a lock on `$OPAMROOT/running-ng.lock`
+and **refuse to start** (exit 1) if another run holds it:
+
+```console
+[ERROR] Another running-ng run is using the opam root /home/udesou/.opam
+  holder: pid=12345 mode=exclusive cmd=... runbms ...
+Refusing to start: this run would remove and rebuild opam switches that the
+other run is using, which would corrupt both.
+```
+
+The lock is **exclusive** for a normal run and **shared** when
+`RUNNING_REUSE_SWITCHES=1` (which mutates nothing), so any number of
+reuse-mode runs may overlap while a rebuilding run still gets exclusivity.
+Dry runs (`-d`) never take the lock. The lock is released by the kernel when
+the process exits, so a crashed or killed run does not wedge it. To run two
+benchmark campaigns at once, give each its own `OPAMROOT`.
 
 ## Development Setup
 
