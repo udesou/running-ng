@@ -27,6 +27,7 @@ hard-won gotchas, and the current list of known-broken files.
 
 ## Hard rules (do not violate)
 
+- **Do not comment on PRs, or add to PRs, unless explicitly asked to.**
 - **No "Claude"/Anthropic/`Co-Authored-By: Claude` in commit messages.**
 - **Remote is `origin = github.com/udesou/running-ng`** (a personal fork).
   Default working branch is **`adding-ocaml-support`** (all the OCaml support;
@@ -43,19 +44,20 @@ hard-won gotchas, and the current list of known-broken files.
 
 ## Branch state (read before editing docs)
 
-`adding-ocaml-support` is the trunk of this fork; two topic branches sit on top
-of it and neither is merged (as of 2026-07-30):
+`adding-ocaml-support` is the trunk of this fork. As of 2026-07-31 it carries
+the data contract (PR #5), reproducible switch provisioning (PR #4) and memtrace
+support (PR #3) — all three merged, so the contract, `adapt`, `MemtraceAttach`
+and the opam-root lock documented here are all present on it.
 
-- **`max-rss-excl-ring`** (this branch) — the data contract: `contract-adapter/`,
-  `src/running/contract/{emit,native,vocab}.py`, `src/running/command/adapt.py`,
-  `schema_version:` in `macro_base.yml`, and the MMTk plan/threads configs.
+Still unmerged:
+
 - **`knob-a-rungs`** — the Knob-A input-size ladders (the small/default/large
-  rungs in `macro_base.yml` plus one olly-pass config per ladder). Independent
-  of the contract work; the two touch `macro_base.yml` in different places.
-
-`README.md` here documents the contract, so if `adding-ocaml-support` is
-published before these land, either merge them first or drop the "Data contract
-→ dashboard" paragraph and the `adapt` row from the commands table.
+  rungs in `macro_base.yml` plus one olly-pass config per ladder), which take
+  macro from 31 to 56 enabled programs. Independent of the contract work; the
+  two touch `macro_base.yml` in different places. **The program counts in this
+  file and in `README.md` describe `adding-ocaml-support`, not that branch.**
+- **`mmtk-minheap`** — `experiments/mmtk_minheap.yml` + its result file (see the
+  known-broken table).
 
 ## Where things live (read first)
 
@@ -63,6 +65,11 @@ published before these land, either merge them first or drop the "Data contract
   `fillin`, `runbms`, `buildbms`, `minheap`, `log_preprocessor`, `adapt`.
   (`genadvice.py` exists but is **not** registered — dead code, not reachable
   as a subcommand.)
+- `src/running/__main__.py` — besides dispatch, owns two run-scoped concerns:
+  it reports `OpamRootBusyError` as a plain message + `exit(1)` rather than a
+  traceback, and its `finally` calls `OCaml.restore_active_switch()` +
+  `OCaml.release_opam_lock()` so an interrupted run still puts the user's opam
+  switch back.
 - `src/running/`
   - `runtime.py` — `OCaml` / `OxCaml` / `OCamlMMTk` / `NativeExecutable` + the
     JVM/JS lineage; opam-compiler switch management, satellite switches.
@@ -71,7 +78,7 @@ published before these land, either merge them first or drop the "Data contract
   - `suite.py` — `OCamlBenchmarkSuite`, `OCamlMulticoreBenchmarkSuite`,
     `OCamlOxcamlBenchmarkSuite`, `OCamlMacroBenchmarkSuite`.
   - `modifier.py` — `OCamlRunParam`, `EnvVar`, `Wrapper`, `ProgramArg`,
-    `PerfAndOllyAttach`, `ModifierSet`, `Companion`.
+    `PerfAndOllyAttach`, `MemtraceAttach`, `ModifierSet`, `Companion`.
   - `config.py` — includes/overrides merge, `validate()`, `validate_tags()`,
     `apply_tag_filter()`.
   - `contract/` — native contract emission (`native.py` orchestrates,
@@ -83,6 +90,9 @@ published before these land, either merge them first or drop the "Data contract
   `*.md` findings write-ups).
 - `contract-adapter/` — OCaml legacy→contract adapter + `gen_contract_py.py`
   (regenerates `src/running/contract/vocab.py` from the contract).
+- `experiments/memtrace-poc/` — a standalone `Makefile` + `summarize_json.py`
+  for poking at memtrace output; separate from the shipped
+  `config/experiments/memtrace_poc.yml`.
 - `run_ocaml_bench_gc_sweep.sh`, `build_ocaml_binaries_gc_sweep.sh`,
   `install_deps{,_linux,_macos}.sh`, `scripts/plot_gc_sweep.py`, `notebooks/`.
 - `docs/` — upstream's mdBook (`docs/src/`, JVM-oriented) plus this fork's
@@ -91,12 +101,14 @@ published before these land, either merge them first or drop the "Data contract
 
 ## Build / run
 
-- Env vars: see the README table. The two that bite:
-  `RUNNING_BENCH_DIR` is resolved **eagerly** by both launch scripts
-  (`$(cd .../benches && pwd)` under `set -e`), so a missing `benches/` aborts
-  even a macro-only run; and `RUNNING_MACRO_BENCH_DIR` is read only by YAML
-  `${…}` expansion, so an unset value silently yields paths starting with the
-  literal variable name.
+- Env vars: see the README table. The ones that bite:
+  `run_ocaml_bench_gc_sweep.sh` treats `RUNNING_BENCH_DIR` and
+  `RUNNING_MACRO_BENCH_DIR` as **synonyms** and falls back to `../benches`
+  without requiring it to exist, but `build_ocaml_binaries_gc_sweep.sh` still
+  resolves `$(cd .../benches && pwd)` **eagerly** under `set -e`, so a missing
+  `benches/` aborts a macro-only *build*. And `RUNNING_MACRO_BENCH_DIR` is read
+  by YAML `${…}` expansion, so if it reaches the config unset you get paths
+  starting with the literal variable name rather than an error.
 - Commands (`python3 -m running`, or the launch scripts):
   - `runbms LOG_DIR CONFIG` — build (skips if the output binary exists) then run.
     Extra args after the script name are forwarded (`-i`, `--resume`, `-d`, …).
@@ -110,6 +122,33 @@ published before these land, either merge them first or drop the "Data contract
   the cache, so delete the switch (not a temp dir) to force a compiler rebuild.
   Only **OxCaml** uses `/tmp/running-ng-ocaml-toolchains/` (for source
   checkouts).
+  `version:`/`commit:` both resolve to a **git ref** — `version: "5.5.0"` →
+  `opam compiler create ocaml/ocaml:5.5.0`, i.e. built from the release tag, not
+  the `ocaml-base-compiler` opam package. That distinction matters: it is what
+  keeps a runtime switch immune to whatever a shadowing opam repo happens to
+  publish under the same version number.
+
+### Switch provisioning (`OCaml._ensure_switch` and friends)
+
+- **A switch left over from an earlier run is deleted and rebuilt**, because
+  nothing in a switch records which compiler source or dune version built it.
+  `RUNNING_REUSE_SWITCHES=1` restores the old reuse-if-present behaviour (worth
+  it for long sweeps — a rebuild recompiles the compiler, ~10–20 min per
+  runtime). Switches provisioned earlier in the *same* run are always reused
+  (`_switches_created_this_run`).
+- **`OCaml.DUNE_VERSION` (3.22.1) is pinned** so switches provisioned months
+  apart get the same build tool. Before raising it: build the *whole* suite on
+  the candidate, and note that an already-populated `macro-benches/duniverse/`
+  keeps its old `dune-project` until `make setup` is re-run. Per-runtime
+  override: `dune_version:`.
+- **The opam root is locked** (`$OPAMROOT/running-ng.lock`, `flock`): exclusive
+  for a normal run, shared under `RUNNING_REUSE_SWITCHES=1`, skipped for dry
+  runs. A second run that would delete switches the first is using is refused
+  with `OpamRootBusyError` rather than allowed to corrupt both. The kernel drops
+  the lock on process exit, so a crash never wedges it. Two campaigns at once →
+  give each its own `OPAMROOT`.
+- The overlay repo is **opt-in** (`relocatable: true`) and scoped to one switch.
+  It used to be added to every switch with `--set-default`; see the gotcha below.
 - `configure_args:` is honoured (passed as `--configure-command "./configure …"`).
   `make_targets:` is **not implemented** — don't put it in a config.
 
@@ -145,6 +184,11 @@ Post-conditions and caching:
 set it to `false`). Also written into the run dir: `runbms.yml` (merged config,
 post-`RUNNING_TAG`) and `runbms_args.yml`.
 
+memtrace adds `memtrace_<same base>.<invocation>.trace` (raw) and
+`memtrace_<same base>.<invocation>.json` (folded-stack summary). These are
+**per invocation**, not per cell, because a trace covers one process lifetime —
+so unlike the olly/perf sidecars they are not appended to.
+
 ## Gotchas (hard-won — don't rediscover)
 
 - **Config merge.** Including a base then redefining one of its **top-level
@@ -171,6 +215,39 @@ post-`RUNNING_TAG`) and `runbms_args.yml`.
   system uptime, because per-domain wall time falls back to `now - boot_time`).
   The `_par` modifiers **require explicit values** — the bare token `re_par`
   renders the literal `e={0}` into `OCAMLRUNPARAM`.
+- **`-d` (dry run) still provisions compilers.** `_ensure_switch` is called from
+  `OCaml.__init__`, which `Configuration.resolve_class()` runs before any
+  dry-run check — so `-d` on a config with an unbuilt runtime compiles a
+  compiler from source before printing anything. It *is* honoured for contract
+  emission (`schema_version and not is_dry_run()`) and for the opam lock. Use a
+  config whose switches already exist if you only want to expand the grid.
+- **memtrace is opt-in per benchmark, and silently so.** `MemtraceAttach` only
+  exports `MEMTRACE`/`MEMTRACE_RATE`; tracing happens only if the binary itself
+  calls `Memtrace.trace_if_requested ()` (macro-benches patches this into
+  `test_decompress` alone). `Modifier.excludes` is exclusion-only — there is no
+  allowlist — so `memtrace_grp1` carries an `excludes:` map naming every *other*
+  program, which means adding a benchmark to a **new** suite silently escapes the
+  list. The real safety net is `runbms`'s warning when tracing was requested and
+  no trace file appeared; trust that, not the excludes map. Sampling: memtrace's
+  own default is `1e-6`, so `val:` is a multiplier on a very sparse baseline
+  (`0.001` ≈ 950× more samples, 6.7 MB for a ~1.7 s run).
+- **Never add an opam repo with `--set-default`.** It writes the repo into the
+  opam *root's* default set at priority 1, not the switch's — so it reconfigures
+  the user's whole opam installation and then shadows `opam.ocaml.org` for every
+  switch they create later. `_ensure_switch` did this with dra27's relocatable
+  fork, which silently substituted a 5.5 dev snapshot (`5.5.0+dev0-2025-04-28`,
+  no `Ptyp_functor`) for released 5.5.0 and broke both a third party's unrelated
+  merlin install (ocaml/merlin#2108) and this repo's own tools switch — ppxlib's
+  `ast_505.ml` stopped type-checking, so a cold macro-benches setup failed at its
+  test build. Now opt-in via `relocatable: true`, switch-scoped. To audit a
+  machine: `opam repo list --all`, then
+  `opam repo remove relocatable -a --set-default`.
+- **The `opam-compiler` plugin lives in `$(opam var root)/plugins/bin/`,
+  symlinked into the switch that installed it** — so rebuilding the tools switch
+  leaves it dangling and the next run dies in `runtime.py` with
+  `CalledProcessError` whose real cause (`unknown command 'compiler'`) is only on
+  the plugin's stderr. Both launch scripts now re-install it when the resolved
+  binary is missing.
 - **`PerfAndOllyAttach` PID discovery.** The benchmark runs behind a
   `python3 -c` wrapper that blocks on a pipe so perf can attach pre-`exec`;
   olly then needs the *right* `.events` file. Wrapper scripts that run OCaml

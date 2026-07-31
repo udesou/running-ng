@@ -47,6 +47,7 @@ class Benchmark(object):
         else:
             self.companion = []
         self.perf_and_olly_attach: Optional[PerfAndOllyAttach] = None
+        self.memtrace_attach: Optional[MemtraceAttach] = None
         self.timeout = timeout
         # ignore the current working directory provided by commands like runbms or minheap
         # certain benchmarks expect to be invoked from certain directories
@@ -87,6 +88,8 @@ class Benchmark(object):
                     b.env_args["OCAMLRUNPARAM"] = m.val
             elif type(m) == PerfAndOllyAttach:
                 b.perf_and_olly_attach = m
+            elif type(m) == MemtraceAttach:
+                b.memtrace_attach = m
             elif type(m) == ModifierSet:
                 logging.warning("ModifierSet should have been flattened")
         return b
@@ -385,7 +388,7 @@ class Benchmark(object):
         companion_out = json.dumps(structured, indent=2).encode("utf-8")
         return bench_stderr if bench_stderr else b"", companion_out, subprocess_exit
 
-    def run(self, runtime: Runtime, cwd: Optional[Path] = None) -> Tuple[bytes, bytes, SubprocessrExit]:
+    def run(self, runtime: Runtime, cwd: Optional[Path] = None, memtrace_path: Optional[Path] = None) -> Tuple[bytes, bytes, SubprocessrExit]:
         if suite.is_dry_run():
             print(
                 self.to_string(runtime),
@@ -398,6 +401,11 @@ class Benchmark(object):
             env_args = os.environ.copy()
             env_args.update(self.env_args)
             effective_cwd = self.override_cwd if self.override_cwd else cwd
+
+            if self.memtrace_attach is not None and memtrace_path is not None:
+                env_args["MEMTRACE"] = str(memtrace_path)
+                if self.memtrace_attach.rate:
+                    env_args["MEMTRACE_RATE"] = str(self.memtrace_attach.rate)
 
             if self.perf_and_olly_attach is not None:
                 return self._run_with_perf_and_olly(cmd, env_args, effective_cwd, self.perf_and_olly_attach)

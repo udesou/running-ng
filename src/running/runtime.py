@@ -1,13 +1,19 @@
 from running.modifier import JVMArg, Modifier, JSArg, EnvVar
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 from pathlib import Path
 import logging
 from running.util import register
+import fcntl
 import hashlib
 import os
 import re
 import subprocess
+import sys
 import tempfile
+
+
+class OpamRootBusyError(RuntimeError):
+    """Another running-ng run holds the opam root this run needs to mutate."""
 
 
 class Runtime(object):
@@ -237,6 +243,46 @@ class OCaml(Runtime):
     RELOCATABLE_REPO = "git+https://github.com/dra27/opam-repository.git#relocatable"
     _opam_bin: Optional[str] = None
 
+    # Pinned so switch provisioning is reproducible over time.  Installing an
+    # unconstrained `dune` made the toolchain a function of *when* the switch
+    # was created: switches provisioned before 2026-07 got dune 3.22.x, while
+    # any created later resolved dune >= 3.24, which deleted the `coq`
+    # language extension that macro-benches' vendored rocq declared
+    # (`(using coq 0.8)`) — a parse error, so every benchmark build in the new
+    # switch failed, not just the Coq one.
+    #
+    # 3.22.1 is what the switches that have built the whole suite carry, so it
+    # stays the default.  macro-benches setup step 3b now strips those dead
+    # declarations, which lifts the hard >= 3.24 ceiling, but before raising
+    # this pin: (a) build all benchmarks on the candidate dune, not just a few,
+    # and (b) make sure every checkout has rerun `make setup`, since an
+    # already-populated duniverse/ keeps the old dune-project until then.
+    # Override per-runtime with `dune_version:` in the runtime's YAML block.
+    DUNE_VERSION = "3.22.1"
+
+    # Switches provisioned during *this* process.  A switch left over from an
+    # earlier run may have been built with a different compiler source or a
+    # different (then-current) dune, and nothing records which — so by default
+    # a stale switch is wiped and rebuilt rather than silently reused.  Set
+    # RUNNING_REUSE_SWITCHES=1 to keep the old reuse-if-present behaviour,
+    # which matters for long sweeps: recreating a switch recompiles the
+    # compiler from source (~10-20 min each).
+    _switches_created_this_run: Set[str] = set()
+
+    # The switch that was active before this run provisioned anything, so it
+    # can be re-selected afterwards (see restore_active_switch).
+    _original_switch: Optional[str] = None
+    _original_switch_captured: bool = False
+
+    # Open handle on the opam root's running-ng lock, held for the lifetime of
+    # the run (see _acquire_opam_lock).
+    _opam_lock_fh: Optional[Any] = None
+    LOCK_BASENAME = "running-ng.lock"
+
+    @staticmethod
+    def _reuse_stale_switches() -> bool:
+        return os.environ.get("RUNNING_REUSE_SWITCHES", "") not in ("", "0")
+
     @staticmethod
     def _safe_key(raw: str) -> str:
         sanitized = re.sub(r"[^a-zA-Z0-9._-]+", "_", raw).strip("._-")
@@ -297,6 +343,178 @@ class OCaml(Runtime):
         return switch_name in result.stdout.split()
 
     @staticmethod
+    def _acquire_opam_lock() -> None:
+        """Serialise runs that share an opam root, or fail loudly.
+
+        Two concurrent runs sharing an opam root can corrupt each other: the
+        second one's delete-and-recreate would wipe a switch the first is
+        actively building or benchmarking against.  There is no way to make
+        that safe after the fact, so we refuse to start instead.
+
+        The lock is taken **exclusively** by a run that may delete switches
+        (the default) and **shared** by one running with
+        RUNNING_REUSE_SWITCHES=1, which mutates nothing.  So any number of
+        reuse-mode runs may overlap, but a destructive run will neither start
+        alongside them nor let one start alongside it.
+
+        Held for the lifetime of the process and released by
+        :meth:`release_opam_lock`.  ``flock`` is released by the kernel when
+        the process dies, so a crashed or killed run never wedges the lock.
+        """
+        if OCaml._opam_lock_fh is not None:
+            return
+        shared = OCaml._reuse_stale_switches()
+        opam_root = OCaml._get_opam_root()
+        # `opam var root` reports the configured path whether or not it exists
+        # yet, so on a machine with no opam root the open() below would fail.
+        opam_root.mkdir(parents=True, exist_ok=True)
+        lock_path = opam_root / OCaml.LOCK_BASENAME
+        fh = lock_path.open("a+")
+        mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+        try:
+            fcntl.flock(fh.fileno(), mode | fcntl.LOCK_NB)
+        except OSError:
+            fh.seek(0)
+            holder = fh.read().strip() or "an unknown process"
+            fh.close()
+            raise OpamRootBusyError(
+                "Another running-ng run is using the opam root {}.\n"
+                "  holder: {}\n"
+                "Refusing to start: this run would remove and rebuild opam "
+                "switches that the other run is using, which would corrupt "
+                "both.\n"
+                "Wait for it to finish, or give this run its own opam root "
+                "via OPAMROOT=/path/to/other/root.".format(
+                    OCaml._get_opam_root(), holder)
+            )
+        OCaml._opam_lock_fh = fh
+        fh.seek(0)
+        fh.truncate()
+        fh.write("pid={} mode={} cmd={}\n".format(
+            os.getpid(), "shared" if shared else "exclusive",
+            " ".join(sys.argv)))
+        fh.flush()
+        logging.debug("Acquired %s running-ng lock on %s",
+                      "shared" if shared else "exclusive", lock_path)
+
+    @staticmethod
+    def release_opam_lock() -> None:
+        """Release the opam-root lock, if this run holds one.  Idempotent."""
+        fh = OCaml._opam_lock_fh
+        if fh is None:
+            return
+        OCaml._opam_lock_fh = None
+        try:
+            fh.seek(0)
+            fh.truncate()
+            fh.flush()
+        except OSError:
+            pass
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            fh.close()
+
+    @staticmethod
+    def _save_active_switch() -> None:
+        """Record the switch that was active before we touched anything.
+
+        Called lazily, immediately before the first mutation, so that runs
+        which never provision a switch (or non-OCaml runtimes) don't shell out
+        to opam at all.  Restored by :meth:`restore_active_switch`.
+        """
+        if OCaml._original_switch_captured:
+            return
+        OCaml._original_switch_captured = True
+        opam = OCaml._find_opam()
+        result = subprocess.run(
+            [opam, "switch", "show"], capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            OCaml._original_switch = result.stdout.strip() or None
+            logging.debug("Active opam switch before this run: %s",
+                          OCaml._original_switch)
+
+    @staticmethod
+    def restore_active_switch() -> None:
+        """Re-select whatever switch was active before this run.
+
+        ``opam switch remove`` on the active switch leaves the root with no
+        switch selected, and ``opam compiler create`` selects the switch it
+        builds — either way the user's shell would be left pointing somewhere
+        they didn't ask for.  Idempotent and never fatal: a run that already
+        succeeded must not fail in cleanup.
+        """
+        original = OCaml._original_switch
+        if original is None:
+            return
+        OCaml._original_switch = None
+        if not OCaml._switch_exists(original):
+            logging.warning(
+                "Not restoring original opam switch '%s': it no longer exists.",
+                original)
+            return
+        opam = OCaml._find_opam()
+        result = subprocess.run(
+            [opam, "switch", "set", original], capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            logging.info("Restored original opam switch '%s'", original)
+        else:
+            logging.warning("Failed to restore original opam switch '%s': %s",
+                            original, result.stderr.strip())
+
+    @staticmethod
+    def _remove_switch(switch_name: str) -> None:
+        opam = OCaml._find_opam()
+        OCaml._run_checked(
+            [opam, "switch", "remove", switch_name, "--yes"])
+
+    @staticmethod
+    def _claim_switch(switch_name: str) -> bool:
+        """Decide whether ``switch_name`` still needs to be created.
+
+        A switch provisioned earlier in *this* process is reused.  One left
+        over from an earlier run is wiped first: nothing records which
+        compiler source or dune version built it, so reusing it silently
+        makes the toolchain a function of run history.  Returns True when the
+        caller must go on to create the switch.
+        """
+        if switch_name in OCaml._switches_created_this_run:
+            logging.info(
+                "Reusing opam switch '%s' (provisioned earlier in this run)",
+                switch_name)
+            return False
+        from running.suite import is_dry_run
+        if not is_dry_run():
+            # Before touching anything: claim the opam root, or refuse to run.
+            # Taken here rather than at startup so that runs with no opam
+            # runtimes (JVM, JS) never need opam to exist at all.
+            OCaml._acquire_opam_lock()
+        if not OCaml._switch_exists(switch_name):
+            return True
+        if OCaml._reuse_stale_switches():
+            logging.warning(
+                "Reusing pre-existing opam switch '%s' because "
+                "RUNNING_REUSE_SWITCHES is set; its compiler and dune "
+                "version are whatever an earlier run happened to install.",
+                switch_name)
+            OCaml._switches_created_this_run.add(switch_name)
+            return False
+        if is_dry_run():
+            logging.warning(
+                "Dry run: would remove and rebuild pre-existing opam switch "
+                "'%s'; reusing it as-is instead.", switch_name)
+            return False
+        logging.info(
+            "Removing pre-existing opam switch '%s' so this run provisions it "
+            "from scratch (set RUNNING_REUSE_SWITCHES=1 to reuse instead)",
+            switch_name)
+        OCaml._save_active_switch()
+        OCaml._remove_switch(switch_name)
+        return True
+
+    @staticmethod
     def _parse_opam_env(switch: str) -> Dict[str, str]:
         """Parse ``opam env`` output for *switch* into an environment dict."""
         opam = OCaml._find_opam()
@@ -341,19 +559,22 @@ class OCaml(Runtime):
     def _ensure_switch(kwargs: Dict[str, Any], switch_name: str):
         """Create an opam switch via ``opam compiler create`` if needed.
 
+        A switch left over from an earlier run is removed and rebuilt first —
+        see :meth:`_claim_switch`.
+
         After building the compiler from source, the dra27 relocatable
         overlay repo is added to the switch so that ``dune`` and
         ``ocamlfind`` are installed as relocatable binaries.  This allows
         the switch to be copied for satellite switches without hardcoded
         paths breaking.
         """
-        if OCaml._switch_exists(switch_name):
-            logging.info("Reusing existing opam switch '%s'", switch_name)
+        if not OCaml._claim_switch(switch_name):
             return
 
         opam = OCaml._find_opam()
         source = OCaml._opam_compiler_source(kwargs)
         configure_args = kwargs.get("configure_args", [])
+        OCaml._save_active_switch()
 
         cmd: List[str] = [
             opam, "compiler", "create", source,
@@ -374,22 +595,27 @@ class OCaml(Runtime):
             "--switch={}".format(switch_name), "--set-default",
         ])
 
-        # Install relocatable dune and ocamlfind.
+        # Install relocatable dune and ocamlfind.  dune is version-pinned (see
+        # DUNE_VERSION) so that two switches provisioned months apart get the
+        # same build tool.
         # This may fail on bleeding-edge trunk if dune is incompatible with
         # the compiler version.  In that case, the tools switch provides dune
         # via PATH (set up by run_ocaml_bench_gc_sweep.sh).
+        dune_pkg = "dune.{}".format(
+            kwargs.get("dune_version", OCaml.DUNE_VERSION))
         try:
             OCaml._run_checked([
-                opam, "install", "dune", "ocamlfind",
+                opam, "install", dune_pkg, "ocamlfind",
                 "--switch={}".format(switch_name), "--yes",
             ])
         except subprocess.CalledProcessError:
             logging.warning(
-                "Failed to install dune/ocamlfind in switch '%s'. "
+                "Failed to install %s/ocamlfind in switch '%s'. "
                 "Benchmark build scripts will use dune from the tools switch "
                 "(ensure it is on PATH).",
-                switch_name,
+                dune_pkg, switch_name,
             )
+        OCaml._switches_created_this_run.add(switch_name)
 
     @staticmethod
     def _get_opam_root() -> Path:
@@ -743,13 +969,13 @@ class OCamlMMTk(OCaml):
         macro monorepo and micro builds use dune from the tools switch on PATH
         and the mmtk compiler (first on PATH) from this switch.
         """
-        if OCaml._switch_exists(switch_name):
-            logging.info("Reusing existing opam switch '%s'", switch_name)
+        if not OCaml._claim_switch(switch_name):
             return
 
         opam = OCaml._find_opam()
         source = OCaml._opam_compiler_source(kwargs)
         configure_args = kwargs.get("configure_args", [])
+        OCaml._save_active_switch()
         machine = os.uname().machine
 
         cmd: List[str] = [
@@ -773,6 +999,7 @@ class OCamlMMTk(OCaml):
                 switch_name, source, machine,
             )
             OCaml._run_checked(cmd, env=env)
+            OCaml._switches_created_this_run.add(switch_name)
         finally:
             OCamlMMTk._set_opam_wrappers(opam, None, saved=saved)
 

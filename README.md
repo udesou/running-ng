@@ -95,9 +95,11 @@ From there, swap `CONFIG_FILE` for a real experiment, e.g.
 default GC) or `experiments/fp_flambda_macrobenchmarks.yml` (frame-pointer ×
 flambda 2×2).
 
-> `run_ocaml_bench_gc_sweep.sh` resolves `RUNNING_BENCH_DIR` eagerly and exits
-> if the directory is missing — set it (even for macro-only runs) or keep a
-> `benches/` checkout beside the repo.
+> `run_ocaml_bench_gc_sweep.sh` treats `RUNNING_BENCH_DIR` and
+> `RUNNING_MACRO_BENCH_DIR` as synonyms and falls back to `../benches` without
+> requiring it to exist, so setting either one is enough for a macro-only run.
+> `build_ocaml_binaries_gc_sweep.sh` still resolves `../benches` eagerly under
+> `set -e` and aborts if it is missing.
 
 ### Layers
 
@@ -122,10 +124,15 @@ runbms_args.yml            the CLI arguments used
 <bm>.<hfac>.<size>.<config>.<suite>.log       per-cell log
 olly_<same base>.json                          per-cell olly NDJSON sidecar
 perf_<same base>.json                          per-cell perf NDJSON sidecar
+memtrace_<same base>.<invocation>.trace        raw allocation trace, per invocation
+memtrace_<same base>.<invocation>.json         folded-stack summary of that trace
 contract/                  data-contract artifacts (only if the config sets
   manifest.json            schema_version — see Analysing results)
   measurements/{olly,perf}.ndjson
 ```
+
+The `memtrace_*` files appear only for benchmarks running with a
+`MemtraceAttach` modifier — see [Allocation tracing](#allocation-tracing-memtraceattach).
 
 In the filename, `<config>` is the config string with `|` replaced by `.`, and
 `<hfac>`/`<size>` are `0` for OCaml runs (they are heap-fraction fields
@@ -342,6 +349,7 @@ MMTk configs.
 | `Wrapper` | prepends a command (`/usr/bin/time`, `olly gc-stats`, `taskset`) |
 | `ProgramArg` | appends arguments to the benchmark |
 | `PerfAndOllyAttach` | attaches `perf stat --json` **and** `olly gc-stats --json` to the running process |
+| `MemtraceAttach` | enables [memtrace](https://github.com/janestreet/memtrace) allocation tracing (opt-in per benchmark — see below) |
 | `ModifierSet` | a named bundle of other modifiers |
 
 Shipped in the OCaml bases:
@@ -353,6 +361,7 @@ Shipped in the OCaml bases:
 | `re_par`, `md_par`, `pin_lavyek` | ditto + `Wrapper` | the parallel-suite counterparts (macro only) |
 | `plan`, `threads` | `EnvVar` | `MMTK_PLAN` / `MMTK_THREADS` |
 | `perf_grp1/2/3` | `PerfAndOllyAttach` | the three counter groups below |
+| `memtrace_grp1` | `MemtraceAttach` | allocation tracing; macro only, and scoped to `test_decompress` (see below) |
 | `time_stats`, `olly_gc` | `Wrapper` | `/usr/bin/time …`, `olly gc-stats` as a command prefix. `micro_base` only. |
 | `gc_verbose`, `gc_verbose_oxcaml` | `OCamlRunParam` | GC stats at exit. **OxCaml reshuffled the verbosity bits** — stock OCaml wants `v=0x400`, OxCaml wants `v=0x1000`; the wrong one silently prints nothing. `gc_verbose_oxcaml` is `micro_base` only. |
 
@@ -396,6 +405,57 @@ pipe; `perf` attaches to the still-blocked PID; the pipe is released so the
 wrapper `exec`s the benchmark; running-ng then finds the process's
 runtime-events file and attaches `olly`. See [CLAUDE.md](CLAUDE.md) for the
 details that matter when it misbehaves.
+
+### Allocation tracing (`MemtraceAttach`)
+
+`memtrace_grp1` records **where a benchmark allocates**, sampled, as a
+[memtrace](https://github.com/janestreet/memtrace) trace you can open in
+`memtrace_viewer`. It answers a different question from `perf`/`olly`: not "how
+much did the GC cost" but "which call stacks produced the garbage".
+
+**It is opt-in per benchmark, and that is the thing to know.** Unlike
+`perf`/`olly`, memtrace has no attach-to-a-running-process path — tracing starts
+only if the benchmark's own binary is linked against `memtrace` and calls
+`Memtrace.trace_if_requested ()` at startup. The modifier therefore only exports
+`MEMTRACE` (and `MEMTRACE_RATE`); the binary does the rest. In `macro-benches`
+only **`test_decompress`** is patched this way today, so `memtrace_grp1` carries
+an `excludes:` map listing every other program.
+
+That map is belt-and-braces, not a guard: `excludes` skips the modifier
+silently, so enabling `memtrace_grp1` on an unpatched benchmark is not an
+error — it just exports `MEMTRACE` to a binary that ignores it. The real safety
+net is a warning from `runbms` when tracing was requested and no trace appeared:
+
+```
+test_decompress [...]: memtrace was requested but the benchmark produced no
+trace at memtrace_….1.trace. Its binary is probably not linked against
+memtrace / does not call Memtrace.trace_if_requested () at startup.
+```
+
+Per invocation you get a raw `memtrace_<base>.<invocation>.trace` (a trace
+covers one process lifetime, so unlike the olly/perf NDJSON sidecars these are
+per-invocation files, not one appended file per cell) plus a
+`memtrace_<base>.<invocation>.json` folded-stack summary — `{"stack": [...],
+"samples": N}` per aggregated call stack — for quick diffs without opening the
+viewer. The summary is produced by the `memtrace_flamegraph-<runtime>` tool that
+`decompress.build.sh` builds from the *same* vendored memtrace copy that wrote
+the trace, so reader and writer never disagree on the format.
+
+**Sampling rate.** `val:` sets `MEMTRACE_RATE`, the proportion of allocated
+words sampled. memtrace's own default is `1e-6`, i.e. very sparse: on
+`test_decompress` the default yields ~600 samples per invocation, while
+`val: "0.001"` yields ~590,000 (~950× more, and a 6.7 MB raw trace for a ~1.7 s
+run). Budget disk accordingly — traces are per invocation, not per config.
+
+Try it with the shipped proof-of-concept, which runs `test_decompress` alone and
+forces a rebuild so a stale pre-memtrace binary can't silently skip tracing:
+
+```bash
+RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+CONFIG_FILE=src/running/config/experiments/memtrace_poc.yml \
+LOG_DIR=/tmp/memtrace_poc \
+  bash run_ocaml_bench_gc_sweep.sh
+```
 
 ## Selecting benchmarks by runtime-feature tag
 
@@ -664,8 +724,8 @@ summary and sweep plots straight from a log directory.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RUNNING_BENCH_DIR` | `../benches` beside this repo | root of the microbenchmark repo. Resolved eagerly by the launch scripts — must exist. |
-| `RUNNING_MACRO_BENCH_DIR` | unset | root of the `macro-benches` monorepo. Required by any config including `base/ocaml/macro_base.yml`. |
+| `RUNNING_BENCH_DIR` | `../benches` beside this repo | root of the microbenchmark repo. Synonym of `RUNNING_MACRO_BENCH_DIR` in `run_ocaml_bench_gc_sweep.sh`; resolved eagerly (must exist) only by `build_ocaml_binaries_gc_sweep.sh`. |
+| `RUNNING_MACRO_BENCH_DIR` | falls back to `RUNNING_BENCH_DIR` | root of the `macro-benches` monorepo. Required by any config including `base/ocaml/macro_base.yml`. |
 | `CONFIG_FILE` | `src/running/config/examples/ocaml_gc_sweep_example.yml` | the experiment to run |
 | `LOG_DIR` | `<repo>/gc-sweep-logs` | where run directories are created |
 | `RUNNING_TAG` | unset | comma-separated runtime-feature tags to filter benchmarks by |
@@ -673,6 +733,46 @@ summary and sweep plots straight from a log directory.
 | `OLLY_BIN` | `$OLLY_DIR/_build/install/default/bin` | directory containing the `olly` binary |
 | `TOOLS_SWITCH` | first opam switch with `dune`, else `running-ng-tools` | switch providing `dune`/`ocamlfind`/`olly` |
 | `RUNNING_CONTRACT_ADAPTER` | `contract-adapter/bin/adapter` | adapter binary used by `running adapt` |
+| `OPAMROOT` | `~/.opam` | standard opam variable. Two concurrent runs sharing one opam root are refused (see below); point overlapping runs at separate roots. |
+| `RUNNING_REUSE_SWITCHES` | unset | `1` reuses a `running-ng-*` switch left over from an earlier run instead of rebuilding it (see below) |
+
+### Switch provisioning, and why a stale switch is rebuilt
+
+Each non-`executable` runtime gets an opam switch `running-ng-<runtime-name>`.
+By default a switch left over from an *earlier* run is **removed and rebuilt**,
+so the compiler and the pinned dune (`OCaml.DUNE_VERSION`, currently 3.22.1) are
+exactly what this run provisioned rather than whatever a previous run happened
+to install — nothing in a switch records which compiler source or dune version
+built it. Switches provisioned earlier in the *same* run are always reused.
+
+Rebuilding recompiles the compiler from source (~10–20 min per runtime), so for
+long sweeps over switches you trust, set `RUNNING_REUSE_SWITCHES=1`.
+
+The run also restores whatever opam switch was active before it started, even if
+it fails or is interrupted — provisioning selects the switch it builds, and
+removing a stale switch deselects it, so without this your shell would be left
+pointing somewhere you didn't ask for.
+
+### Concurrent runs and the opam root
+
+Because a run rebuilds stale switches, two runs sharing an opam root would
+corrupt each other — the second would delete a switch the first is building or
+benchmarking against. Runs therefore take a lock on `$OPAMROOT/running-ng.lock`
+and **refuse to start** (exit 1) if another run holds it:
+
+```console
+[ERROR] Another running-ng run is using the opam root /home/udesou/.opam
+  holder: pid=12345 mode=exclusive cmd=... runbms ...
+Refusing to start: this run would remove and rebuild opam switches that the
+other run is using, which would corrupt both.
+```
+
+The lock is **exclusive** for a normal run and **shared** when
+`RUNNING_REUSE_SWITCHES=1` (which mutates nothing), so any number of
+reuse-mode runs may overlap while a rebuilding run still gets exclusivity.
+Dry runs (`-d`) never take the lock. The lock is released by the kernel when
+the process exits, so a crashed or killed run does not wedge it. To run two
+benchmark campaigns at once, give each its own `OPAMROOT`.
 
 ## Development
 

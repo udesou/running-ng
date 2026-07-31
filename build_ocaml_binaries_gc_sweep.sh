@@ -16,7 +16,7 @@ OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pw
 OLLY_BIN="${OLLY_BIN:-$OLLY_DIR/_build/install/default/bin}"
 
 # --- Ensure a tools switch with dune/ocamlfind exists ----------------------
-_OPAM=$([[ -x /usr/local/bin/opam ]] && echo /usr/local/bin/opam || command -v opam)
+_OPAM=$(command -v opam 2>/dev/null || ([[ -x /usr/local/bin/opam ]] && echo /usr/local/bin/opam))
 
 TOOLS_SWITCH="${TOOLS_SWITCH:-}"
 if [[ -z "$TOOLS_SWITCH" ]]; then
