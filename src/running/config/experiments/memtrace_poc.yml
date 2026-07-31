@@ -37,9 +37,12 @@ overrides:
   suites.macro-decompress.always_build: true
 
 runtimes:
-  ocaml-5.5:
+  # Named for the exact version so the switch is `running-ng-ocaml-5.5.0`,
+  # matching the other 5.5.0 configs. Naming it `ocaml-5.5` would provision a
+  # second, redundant switch and rebuild the compiler from source.
+  ocaml-5.5.0:
     type: OCaml
     version: "5.5.0"
 
 configs:
-  - "ocaml-5.5|memtrace_grp1"
+  - "ocaml-5.5.0|memtrace_grp1"

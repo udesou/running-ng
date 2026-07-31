@@ -442,7 +442,7 @@ def run_one_benchmark(
             }
             memtrace_path = log_dir / get_memtrace_filename(bm, hfac, size, c, i)
             logging.debug("Running with log filename {}".format(log_filename))
-            runtime, _ = parse_config_str(configuration, c)
+            runtime, mods = parse_config_str(configuration, c)
             try:
                 if is_dry_run():
                     output, exit_status = run_benchmark_with_config(
@@ -460,6 +460,19 @@ def run_one_benchmark(
                     ever_ran[j] = True
                     if memtrace_path.exists():
                         write_memtrace_json_sidecar(memtrace_path, bm, runtime)
+                    elif bm.attach_modifiers(mods).memtrace_attach is not None:
+                        # Tracing was asked for and MEMTRACE was exported, but
+                        # the process wrote nothing — so its binary never called
+                        # Memtrace.trace_if_requested (). Without this the run
+                        # looks successful and silently yields no trace, which
+                        # is the easy mistake to make when enabling memtrace on
+                        # a benchmark macro-benches hasn't patched yet.
+                        logging.warning(
+                            "%s [%s]: memtrace was requested but the benchmark "
+                            "produced no trace at %s. Its binary is probably "
+                            "not linked against memtrace / does not call "
+                            "Memtrace.trace_if_requested () at startup.",
+                            bm.name, c, memtrace_path.name)
             except Exception as e:
                 logging.warning(
                     "Benchmark %s config %s failed: %s — skipping.",

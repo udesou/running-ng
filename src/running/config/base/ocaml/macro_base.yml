@@ -574,8 +574,15 @@ modifiers:
   # this in for test_decompress today (see macro-benches commit adding
   # memtrace to macro-bench-decompress). Scoped to that one benchmark via
   # excludes (Modifier.excludes is exclusion-only — there's no allowlist
-  # mechanism), so it's a hard error to add memtrace_grp1 to any other
-  # benchmark's config-string until that benchmark is patched too.
+  # mechanism).
+  #
+  # Note this list is belt-and-braces, not a guard: excludes makes
+  # attach_modifiers skip the modifier silently, so adding memtrace_grp1 to an
+  # unpatched benchmark is NOT an error — it just exports MEMTRACE to a binary
+  # that ignores it and produces no trace. runbms warns when that happens
+  # ("memtrace was requested but the benchmark produced no trace"), which is
+  # the real safety net; a benchmark added to a *new* suite won't be in this
+  # list at all. Keep the list in sync when patching more benchmarks.
   memtrace_grp1:
     type: MemtraceAttach
     excludes: &non_decompress_excludes
