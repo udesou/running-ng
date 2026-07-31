@@ -1,0 +1,74 @@
+# =============================================================================
+# End-to-end pipeline check — OCaml 5.5.0 vs trunk, full macro suite
+# =============================================================================
+# Not a measurement run: 1 invocation per cell, so the numbers are indicative
+# only.  The point is to exercise every stage of the pipeline from a clean
+# slate after a batch of merges (data contract, switch provisioning, memtrace):
+#
+#   1. opam switch provisioning for both runtimes, from nothing
+#      (5.5.0 from the release tag, trunk from a pinned commit)
+#   2. every enabled macro benchmark builds against both compilers
+#   3. the run itself, under perf + olly
+#   4. the legacy artifacts (.log + olly_/perf_ sidecars)
+#   5. native data-contract emission (schema_version is inherited from
+#      macro_base, so contract/ is written inline during the run)
+#   6. `running adapt` over the same run dir, to diff the adapter's contract
+#      against the natively-emitted one — the two paths must agree
+#   7. the ingestor in ~/ocaml-bench-dashboard, over both contract dirs
+#
+# memtrace is covered separately by experiments/memtrace_poc.yml — it is scoped
+# to test_decompress (the only benchmark patched to call
+# Memtrace.trace_if_requested), so folding it in here would add nothing.
+#
+# Benchmarks, suites, modifiers and run settings are inherited from
+# macro_base.yml.  lavyek stays disabled (as in the base), so the config
+# strings carry only the sequential re/md pair; the parallel triple
+# (|re_par-22|md_par-8|pin_lavyek) is not needed and is omitted deliberately.
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/e2e_5.5.0_vs_trunk.yml \
+#   LOG_DIR=~/running-ng/gc-sweep-logs-e2e \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+# 1 invocation: this is a plumbing check, not a measurement.  Base scalars must
+# be changed through `overrides:` — redeclaring one at top level is a
+# combine() TypeError.
+overrides:
+  invocations: 1
+
+# =============================================================================
+# Runtimes
+# =============================================================================
+runtimes:
+  # Resolves to `opam compiler create ocaml/ocaml:5.5.0`, i.e. the release tag
+  # — genuinely released 5.5.0, not a 5.5 development snapshot.  Named for the
+  # exact version so the switch is `running-ng-ocaml-5.5.0`, shared with
+  # memtrace_poc.yml rather than provisioning a second, redundant switch.
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+
+  # ocaml/ocaml trunk HEAD as of 2026-07-31.
+  ocaml-trunk-15a9de75:
+    type: OCaml
+    commit: "15a9de755d2ccae5ee25c3c12022a1740db9d84d"
+
+# =============================================================================
+# Configs — no sweep, default GC settings
+# =============================================================================
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"
+  - "ocaml-trunk-15a9de75|perf_grp1|re-25|md-2"
+
+# =============================================================================
+# Comparisons — also checks that the contract manifest mirrors this block
+# =============================================================================
+comparisons:
+  - label: "5.5.0 -> trunk"
+    a: ocaml-5.5.0
+    b: [ocaml-trunk-15a9de75]

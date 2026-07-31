@@ -587,15 +587,37 @@ class OCaml(Runtime):
         logging.info("Creating opam switch '%s' from source '%s'", switch_name, source)
         OCaml._run_checked(cmd)
 
-        # Add the relocatable overlay repo so dune/ocamlfind are installed
-        # as relocatable binaries (no hardcoded paths in the binaries).
-        logging.info("Adding relocatable overlay repo to switch '%s'", switch_name)
-        OCaml._run_checked([
-            opam, "repo", "add", "relocatable", OCaml.RELOCATABLE_REPO,
-            "--switch={}".format(switch_name), "--set-default",
-        ])
+        # The dra27 relocatable overlay repo is opt-in per runtime
+        # (`relocatable: true`), and scoped to this switch alone.
+        #
+        # It used to be added to every switch with `--set-default`, which wrote
+        # it into the opam *root's* default repository set at priority 1.  Two
+        # consequences, both bad: running one benchmark permanently
+        # reconfigured the user's opam installation, and from then on the fork
+        # shadowed opam.ocaml.org for every switch they created afterwards —
+        # including switches that have nothing to do with benchmarking.  Where
+        # a version number exists in both repos (e.g. 5.5.0) the fork won,
+        # silently substituting a development snapshot for the official
+        # release.  That broke a third party's unrelated merlin install
+        # (ocaml/merlin#2108) and this repo's own tools switch, which acquired
+        # `ocaml-base-compiler.5.5.0` = a 2025-04-28 snapshot of 5.5 lacking
+        # `Ptyp_functor`, so ppxlib's `ast_505.ml` no longer type-checked
+        # against it.
+        #
+        # Relocatable support is upstreamed, so nothing here needs the overlay:
+        # its only purpose is relocatable dune/ocamlfind for *satellite*
+        # switches (`_ensure_satellite_switch` copies a switch directory, which
+        # requires binaries with no hardcoded paths), and no shipped config
+        # uses those.  Enable it explicitly if you revive that path.
+        if kwargs.get("relocatable"):
+            logging.info("Adding relocatable overlay repo to switch '%s' "
+                         "(relocatable: true)", switch_name)
+            OCaml._run_checked([
+                opam, "repo", "add", "relocatable", OCaml.RELOCATABLE_REPO,
+                "--switch={}".format(switch_name),
+            ])
 
-        # Install relocatable dune and ocamlfind.  dune is version-pinned (see
+        # Install dune and ocamlfind.  dune is version-pinned (see
         # DUNE_VERSION) so that two switches provisioned months apart get the
         # same build tool.
         # This may fail on bleeding-edge trunk if dune is incompatible with
@@ -635,9 +657,12 @@ class OCaml(Runtime):
         2. Replaces its contents with a copy of the base switch's directory,
            skipping heavyweight build artifacts (sources/, build/).
 
-        The base switch is set up with dra27's relocatable overlay, so the
-        compiler tools (dune, ocamlfind) have no hardcoded paths and work
-        correctly after being copied to a new location.
+        This requires the base switch's runtime to have been declared with
+        ``relocatable: true``, so that its dune/ocamlfind carry no hardcoded
+        paths and keep working after the directory is copied.  Without it the
+        copy inherits binaries pointing at the base switch's path.  (The
+        overlay used to be added to every switch unconditionally; see
+        :meth:`_ensure_switch` for why that had to stop.)
         ``opam env --switch=<satellite>`` regenerates the correct PATH.
         """
         if OCaml._switch_exists(satellite_name):
