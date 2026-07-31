@@ -97,6 +97,17 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
         build_script: "menhir.build.sh"
         args: "-v --table ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/sysver.mly"
+      # Knob-A ladder (automaton scale, monotone by footprint AND wall on current
+      # hardware): small=menhir_sysver (sysver --table, 7.7s/0.72GB), default=
+      # menhir_ocamly (ocaml --canonical --list-errors, 12.7s/2.76GB), large=
+      # menhir_sysver_canonical (sysver --canonical, 33s/4.0GB). All single-run —
+      # menhir has no callable main to loop in-process (its main.ml is init-time
+      # side effects), so a bigger input is the only way to lengthen a run.
+      # menhir_sql_parser (LALR, 1.2s) stays as a fast standalone, not a ladder rung.
+      menhir_sysver_canonical:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
+        build_script: "menhir.build.sh"
+        args: "--canonical ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/sysver.mly"
 
   macro-cpdf-monorepo:
     type: OCamlBenchmarkSuite
@@ -848,6 +859,7 @@ benchmarks:
     - menhir_ocamly
     - menhir_sql_parser
     - menhir_sysver
+    - menhir_sysver_canonical
 
   macro-cpdf-monorepo:
     - cpdf_merge
