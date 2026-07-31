@@ -4,11 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- User-configurable paths ------------------------------------------------
-# RUNNING_BENCH_DIR: root of the OCaml benchmark tree (used inside the YAML
-#   config via ${RUNNING_BENCH_DIR}).  Defaults to ../benches relative to this
-#   script; override with an environment variable if your benchmarks live
-#   elsewhere.
-export RUNNING_BENCH_DIR="${RUNNING_BENCH_DIR:-$(cd "$ROOT_DIR/../benches" && pwd)}"
+# RUNNING_BENCH_DIR / RUNNING_MACRO_BENCH_DIR: root of the OCaml benchmark
+# tree.  The two names are synonyms — YAML configs use ${RUNNING_MACRO_BENCH_DIR};
+# the script also accepts the shorter RUNNING_BENCH_DIR.  Defaults to
+# ../benches relative to this script if neither is set.
+export RUNNING_BENCH_DIR="${RUNNING_BENCH_DIR:-${RUNNING_MACRO_BENCH_DIR:-$(cd "$ROOT_DIR/../benches" 2>/dev/null && pwd || echo "$ROOT_DIR/../benches")}}"
+export RUNNING_MACRO_BENCH_DIR="${RUNNING_MACRO_BENCH_DIR:-$RUNNING_BENCH_DIR}"
 
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/gc-sweep-logs}"
 CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/src/running/config/examples/ocaml_gc_sweep_example.yml}"
@@ -46,7 +47,7 @@ fi
 # on PATH for the whole run.
 
 # Prefer opam 2.3+ (the opam root may require it).
-_OPAM=$([[ -x /usr/local/bin/opam ]] && echo /usr/local/bin/opam || command -v opam)
+_OPAM=$(command -v opam 2>/dev/null || ([[ -x /usr/local/bin/opam ]] && echo /usr/local/bin/opam))
 
 TOOLS_SWITCH="${TOOLS_SWITCH:-}"
 if [[ -z "$TOOLS_SWITCH" ]]; then

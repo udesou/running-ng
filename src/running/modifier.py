@@ -181,3 +181,29 @@ class PerfAndOllyAttach(Modifier):
 
     def __str__(self) -> str:
         return "{} PerfAndOllyAttach events={}".format(super().__str__(), self.perf_events)
+
+
+@register(Modifier)
+class MemtraceAttach(Modifier):
+    """Enable memtrace allocation tracing for the benchmark process.
+
+    Unlike PerfAndOllyAttach, memtrace has no attach-to-running-process
+    path: tracing only starts if the benchmark's own binary calls
+    `Memtrace.trace_if_requested ()` at startup (linked against the
+    memtrace library), so this modifier only needs to set env vars —
+    the benchmark reads MEMTRACE (output path) on its own.
+
+    Optional `val`: MEMTRACE_RATE sampling-rate override (proportion of
+    allocated words sampled).  memtrace's own default is **1e-6**
+    (`default_sampling_rate` in memtrace's src/memtrace.ml), so a rate is a
+    multiplier on a very sparse baseline: on test_decompress, the default
+    yields ~600 samples per invocation while `val: "0.001"` yields ~590,000
+    (a ~950x increase, and a 6.7 MB raw trace for a ~1.7 s run).  Budget disk
+    accordingly — traces are per-invocation, not per-config.
+    """
+    def __init__(self, value_opts=None, **kwargs):
+        super().__init__(value_opts, **kwargs)
+        self.rate = self._kwargs.get("val")
+
+    def __str__(self) -> str:
+        return "{} MemtraceAttach rate={}".format(super().__str__(), self.rate)
