@@ -49,6 +49,16 @@ TOOLS_BIN="$("$_OPAM" var prefix --switch="$TOOLS_SWITCH" 2>/dev/null)/bin"
 echo "Tools switch: $TOOLS_SWITCH ($TOOLS_BIN)"
 export PATH="$TOOLS_BIN:$PATH"
 
+# --- Ensure the opam-compiler plugin is available --------------------------
+# See the same block in run_ocaml_bench_gc_sweep.sh: `opam compiler create`
+# provisions every non-`executable:` runtime, nothing installed the plugin, and
+# a rebuilt tools switch leaves the plugin symlink dangling.
+_OPAM_PLUGIN_BIN="$("$_OPAM" var root 2>/dev/null)/plugins/bin/opam-compiler"
+if [[ ! -x "$_OPAM_PLUGIN_BIN" && ! -x "$TOOLS_BIN/opam-compiler" ]]; then
+  echo "opam-compiler plugin not found — installing into '$TOOLS_SWITCH'..."
+  "$_OPAM" install --switch "$TOOLS_SWITCH" --yes opam-compiler
+fi
+
 # --- Build olly if it hasn't been built yet --------------------------------
 if [[ ! -x "$OLLY_BIN/olly" ]]; then
   echo "olly not found at $OLLY_BIN/olly — building from $OLLY_DIR ..."

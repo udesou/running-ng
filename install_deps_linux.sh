@@ -203,6 +203,9 @@ step "Installing OCaml packages in switch $OPAM_SWITCH"
 BUILD_TOOLS=(
     dune                    # build system used by most benchmarks
     ocamlfind               # multicore benchmarks use ocamlfind -package
+    opam-compiler           # `opam compiler create` provisions every runtime
+                            # switch (runtime.py); without it a run dies with
+                            # `unknown command 'compiler'`
 )
 
 # Packages needed to build olly (runtime_events_tools).
