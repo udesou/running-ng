@@ -81,6 +81,23 @@ TOOLS_BIN="$("$_OPAM" var prefix --switch="$TOOLS_SWITCH" 2>/dev/null)/bin"
 echo "Tools switch: $TOOLS_SWITCH ($TOOLS_BIN)"
 export PATH="$TOOLS_BIN:$PATH"
 
+# --- Ensure the opam-compiler plugin is available --------------------------
+# Every runtime that isn't in `executable:` mode is provisioned by
+# `opam compiler create`, so this is a hard dependency of almost any run — but
+# nothing installed it: not install_deps*.sh, not this script, not
+# macro-benches' setup. It worked only where someone had installed it by hand.
+#
+# opam exposes plugins as $(opam var root)/plugins/bin/<name>, symlinked into
+# the switch that installed it. So rebuilding the tools switch leaves a
+# *dangling* symlink behind, and the next run fails deep inside runtime.py with
+# `unknown command 'compiler'`. `-x` follows symlinks, so it is false for a
+# dangling one and we reinstall.
+_OPAM_PLUGIN_BIN="$("$_OPAM" var root 2>/dev/null)/plugins/bin/opam-compiler"
+if [[ ! -x "$_OPAM_PLUGIN_BIN" && ! -x "$TOOLS_BIN/opam-compiler" ]]; then
+  echo "opam-compiler plugin not found — installing into '$TOOLS_SWITCH'..."
+  "$_OPAM" install --switch "$TOOLS_SWITCH" --yes opam-compiler
+fi
+
 # --- Build olly if it hasn't been built yet --------------------------------
 if [[ ! -x "$OLLY_BIN/olly" ]]; then
   echo "olly not found at $OLLY_BIN/olly — building from $OLLY_DIR ..."
