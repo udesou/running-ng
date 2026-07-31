@@ -584,6 +584,7 @@ suites:
         # binary: "<tool>-{runtime}"        # optional: defaults to <name>-<runtime>
         # build_env: { FOO: bar }           # optional: extra build-time env
         # always_build: true                # optional: rebuild even if the binary exists
+        # expected_exit: 142                # optional: exit code a *successful* run returns
 
 benchmarks:
   macro-<tool>:
@@ -593,6 +594,16 @@ benchmarks:
 `path` pointing at a directory (or the presence of `build_script`/`binary`/
 `always_build`) puts running-ng in build mode. Defaults follow convention, so
 `build_script` and `binary` are usually unnecessary.
+
+**`expected_exit`** defaults to 0 and you only need it if a successful run of the
+benchmark exits non-zero. That is rare but real: `alt_ergo_unsat_smt2` runs with
+`--timelimit 15`, so the workload *is* "solve for 15 seconds" — alt-ergo arms
+SIGVTALRM, the goal never closes, and the process dies of its own signal with
+128+14 = 142 on every run. Without the declaration the runner treats that as a
+crash and the invocation is **dropped from the contract**, so the benchmark
+silently never reaches the dashboard. The comparison is exact equality, matching
+macro-benches' `expected_exit` in `benchmarks/manifest.yml` — keep the two in
+sync. Genuine crashes (a SIGSEGV's 139, say) are still dropped.
 
 ### 3. Tag it (macro only)
 

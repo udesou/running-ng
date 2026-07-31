@@ -240,6 +240,15 @@ so unlike the olly/perf sidecars they are not appended to.
   compiler from source before printing anything. It *is* honoured for contract
   emission (`schema_version and not is_dry_run()`) and for the opam lock. Use a
   config whose switches already exist if you only want to expand the grid.
+- **A benchmark whose success is a non-zero exit needs `expected_exit:`.** The
+  runner classifies any `returncode != expected_exit` (default 0) as
+  `SubprocessrExit.Error`, and `contract/native.py` drops crashed invocations
+  wholesale — so without the declaration the cell's olly/perf data is silently
+  absent from `contract/`, while the legacy adapter (which reads the sidecars)
+  keeps it. That divergence is invisible unless you diff the two paths. Only
+  `alt_ergo_unsat_smt2` needs it today (142 = 128+14, its own SIGVTALRM from
+  `--timelimit 15`); the field name and exact-equality semantics match
+  macro-benches' `benchmarks/manifest.yml`, so keep the two in sync.
 - **memtrace is opt-in per benchmark, and silently so.** `MemtraceAttach` only
   exports `MEMTRACE`/`MEMTRACE_RATE`; tracing happens only if the binary itself
   calls `Memtrace.trace_if_requested ()` (macro-benches patches this into

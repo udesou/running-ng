@@ -401,6 +401,10 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
                 "build_args": split_quoted(v.get("build_args", "")),
                 "build_env": {str(env_k): str(env_v) for env_k, env_v in build_env_raw.items()},
                 "always_build": always_build_raw,
+                # Exit code a successful run returns; 0 unless the workload's
+                # by-design outcome is a non-zero exit (see
+                # Benchmark._exit_is_expected).
+                "expected_exit": int(v.get("expected_exit", 0)),
             }
             if "build_script" in v:
                 benchmark_root = Path(os.path.expandvars(v["path"])).resolve()
@@ -450,7 +454,8 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
                 always_build=p["always_build"],
                 suite_name=self.name,
                 name=name,
-                timeout=timeout
+                timeout=timeout,
+                expected_exit=p["expected_exit"],
             )
         return OCamlBenchmark(
             ocaml_args=p["ocaml_args"],
@@ -458,7 +463,8 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
             program_args=p["args"],
             suite_name=self.name,
             name=name,
-            timeout=timeout
+            timeout=timeout,
+            expected_exit=p["expected_exit"],
         )
 
     def get_minheap(self, bm: Benchmark) -> int:

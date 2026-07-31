@@ -32,9 +32,13 @@ class SubprocessrExit(Enum):
 
 
 class Benchmark(object):
-    def __init__(self, suite_name: str, name: str, wrapper: Optional[str] = None, timeout: Optional[int] = None, override_cwd: Optional[Path] = None, companion: Optional[str] = None, **kwargs):
+    def __init__(self, suite_name: str, name: str, wrapper: Optional[str] = None, timeout: Optional[int] = None, override_cwd: Optional[Path] = None, companion: Optional[str] = None, expected_exit: int = 0, **kwargs):
         self.name = name
         self.suite_name = suite_name
+        # The exit code a *successful* run of this benchmark returns. Almost
+        # always 0, but for some workloads a non-zero exit is the by-design
+        # outcome rather than a failure — see `_exit_is_expected`.
+        self.expected_exit: int = int(expected_exit)
         self.env_args: Dict[str, str]
         self.env_args = {}
         self.wrapper: List[str]
@@ -67,6 +71,31 @@ class Benchmark(object):
     def prepare(self, _runtime: Runtime):
         # Optional pre-run preparation hook. Most benchmarks do nothing.
         return
+
+    def _exit_is_expected(self, returncode: Optional[int]) -> bool:
+        """Did this invocation finish the way a *successful* run should?
+
+        `None` means the process was still running when we stopped looking,
+        which the callers treat as normal.  Otherwise compare against
+        `expected_exit` (0 unless the benchmark declares otherwise).
+
+        Some workloads exit non-zero by design, and treating that as a crash
+        loses their data: `alt_ergo_unsat_smt2` runs with `--timelimit 15`, so
+        the workload *is* "solve for 15 seconds" — alt-ergo arms SIGVTALRM, the
+        goal never closes, and the process dies of its own signal with 128+14 =
+        142 on every single run.  Its olly/perf output is complete and correct,
+        but the native contract emitter drops invocations the runner calls
+        crashed, so the benchmark silently never reached the dashboard while the
+        legacy adapter (which reads the sidecars) kept it — the two contract
+        paths disagreed by exactly those cells.
+
+        `macro-benches` already declares this in `benchmarks/manifest.yml` as
+        `expected_exit: 142`; the field is spelled the same here so the two
+        lists stay mechanically diffable.
+        """
+        if returncode is None:
+            return True
+        return returncode == self.expected_exit
 
     def attach_modifiers(self, modifiers: List[Modifier]) -> Any:
         b = deepcopy(self)
@@ -308,8 +337,10 @@ class Benchmark(object):
             # A crash (e.g. SIGSEGV) returns non-zero but raises no exception, so
             # this must inspect returncode explicitly — otherwise a crashed run is
             # reported Normal and its partial olly/perf output pollutes results.
+            # `_exit_is_expected` is what keeps a benchmark whose non-zero exit is
+            # the workload (expected_exit:) from being mistaken for such a crash.
             subprocess_exit = (SubprocessrExit.Normal
-                               if bench.returncode in (0, None)
+                               if self._exit_is_expected(bench.returncode)
                                else SubprocessrExit.Error)
         except subprocess.TimeoutExpired:
             bench.kill()
@@ -427,8 +458,9 @@ class Benchmark(object):
                 )
                 # subprocess.run without check=True does not raise on a non-zero
                 # exit, so a crash returns here — inspect returncode explicitly.
+                # See `_exit_is_expected` for why this is not just `== 0`.
                 subprocess_exit = (SubprocessrExit.Normal
-                                   if p.returncode in (0, None)
+                                   if self._exit_is_expected(p.returncode)
                                    else SubprocessrExit.Error)
                 stdout = p.stderr
             except subprocess.CalledProcessError as e:
