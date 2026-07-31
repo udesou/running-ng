@@ -251,14 +251,28 @@ class OCaml(Runtime):
     # (`(using coq 0.8)`) — a parse error, so every benchmark build in the new
     # switch failed, not just the Coq one.
     #
-    # 3.22.1 is what the switches that have built the whole suite carry, so it
-    # stays the default.  macro-benches setup step 3b now strips those dead
-    # declarations, which lifts the hard >= 3.24 ceiling, but before raising
-    # this pin: (a) build all benchmarks on the candidate dune, not just a few,
-    # and (b) make sure every checkout has rerun `make setup`, since an
+    # macro-benches setup patches 19/20 strip those dead `coq` declarations, so
+    # the >= 3.24 ceiling is gone and the workspace parses under both.
+    #
+    # 3.24.0 rather than 3.22.1 because 3.22.1 **cannot bootstrap against 5.6
+    # trunk**.  The install failed, and the old code merely warned and let the
+    # build fall through to whatever dune the tools switch had — which defeated
+    # the pin in the one place it matters most.  A single 5.5.0-vs-trunk
+    # comparison built its two sides with *different* dune versions (3.22.1 from
+    # the 5.5.0 switch, 3.24.0 from the tools switch), making the build tool a
+    # confound in the measurement.  Worse, the tools switch installs `dune`
+    # unconstrained, so the fallback silently swapped a pinned build tool for an
+    # unpinned one, and a machine with no tools switch had no dune at all.
+    #
+    # Validated on this pin: 3.24.0 installs cleanly into both a 5.5.0 and a
+    # 5.6.0+dev trunk switch, and builds all 31 macro benchmarks on both.
+    #
+    # Before raising it again: (a) build all benchmarks on the candidate dune,
+    # not just a few; (b) confirm it bootstraps on trunk, not only on the current
+    # release; and (c) make sure every checkout has rerun `make setup`, since an
     # already-populated duniverse/ keeps the old dune-project until then.
     # Override per-runtime with `dune_version:` in the runtime's YAML block.
-    DUNE_VERSION = "3.22.1"
+    DUNE_VERSION = "3.24.0"
 
     # Switches provisioned during *this* process.  A switch left over from an
     # earlier run may have been built with a different compiler source or a
@@ -471,6 +485,60 @@ class OCaml(Runtime):
             [opam, "switch", "remove", switch_name, "--yes"])
 
     @staticmethod
+    def _switch_prefix(switch_name: str) -> Optional[Path]:
+        """Filesystem prefix of ``switch_name``, or None if opam won't say.
+
+        Asked of opam rather than assumed to be ``$OPAMROOT/<name>``, so local
+        (path-based) switches resolve correctly too.
+        """
+        opam = OCaml._find_opam()
+        result = subprocess.run(
+            [opam, "var", "prefix", "--switch={}".format(switch_name)],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return None
+        prefix = result.stdout.strip()
+        return Path(prefix) if prefix else None
+
+    @staticmethod
+    def _assert_switch_usable(switch_name: str) -> None:
+        """Refuse to reuse a switch that isn't a working compiler.
+
+        A switch is *registered* by opam before its compiler finishes building,
+        so an interrupted provisioning (Ctrl-C, a timeout, a killed CI job)
+        leaves the name present with no compiler behind it.  A normal run heals
+        that on its own, because it removes and rebuilds a stale switch anyway.
+        Reuse mode does not: it would hand the empty shell to the build scripts,
+        which fail much later and far from the cause — a missing ``ocamlc``
+        surfaces as a benchmark build error, not as "your switch is broken".
+
+        Rebuilding it here is deliberately *not* the answer.  Reuse mode holds
+        only a **shared** opam lock, precisely because it is supposed to mutate
+        nothing; deleting a switch under that lock could pull it out from under
+        a concurrent reuse-mode run.  So refuse, and say exactly what to do.
+        """
+        prefix = OCaml._switch_prefix(switch_name)
+        ocamlc = prefix / "bin" / "ocamlc" if prefix else None
+        if ocamlc is not None and ocamlc.is_file() and os.access(ocamlc, os.X_OK):
+            return
+        raise RuntimeError(
+            "opam switch '{}' is registered but has no usable compiler{}.\n"
+            "RUNNING_REUSE_SWITCHES is set, so this run will not rebuild it — "
+            "reuse mode takes only a shared opam lock and must not delete a "
+            "switch another run may be using.\n"
+            "This usually means an earlier provisioning was interrupted, "
+            "leaving the switch half-built.\n"
+            "Fix it either way:\n"
+            "  - rerun without RUNNING_REUSE_SWITCHES, which rebuilds it from "
+            "scratch; or\n"
+            "  - opam switch remove {} --yes".format(
+                switch_name,
+                " at {}".format(ocamlc) if ocamlc else "",
+                switch_name)
+        )
+
+    @staticmethod
     def _claim_switch(switch_name: str) -> bool:
         """Decide whether ``switch_name`` still needs to be created.
 
@@ -494,6 +562,7 @@ class OCaml(Runtime):
         if not OCaml._switch_exists(switch_name):
             return True
         if OCaml._reuse_stale_switches():
+            OCaml._assert_switch_usable(switch_name)
             logging.warning(
                 "Reusing pre-existing opam switch '%s' because "
                 "RUNNING_REUSE_SWITCHES is set; its compiler and dune "
@@ -617,12 +686,22 @@ class OCaml(Runtime):
                 "--switch={}".format(switch_name),
             ])
 
-        # Install dune and ocamlfind.  dune is version-pinned (see
-        # DUNE_VERSION) so that two switches provisioned months apart get the
-        # same build tool.
-        # This may fail on bleeding-edge trunk if dune is incompatible with
-        # the compiler version.  In that case, the tools switch provides dune
-        # via PATH (set up by run_ocaml_bench_gc_sweep.sh).
+        # Install dune and ocamlfind.  dune is version-pinned (see DUNE_VERSION)
+        # so that two switches provisioned months apart — and, just as
+        # importantly, two switches compared within one run — get the same build
+        # tool.
+        #
+        # A failure here is fatal.  It used to warn and fall through to whatever
+        # dune the tools switch happened to have on PATH, which quietly undid the
+        # pin: the tools switch installs `dune` unconstrained, so the fallback
+        # substituted an unpinned build tool for a pinned one, and it kicked in
+        # exactly where reproducibility matters most (a trunk switch, whose dune
+        # is the one most likely to fail to bootstrap).  A 5.5.0-vs-trunk run
+        # built its two sides with different dune versions and said nothing but a
+        # WARNING.  A machine with no tools switch got no dune at all.
+        #
+        # If a compiler genuinely needs a different dune, say so explicitly with
+        # `dune_version:` on that runtime rather than relying on a fallback.
         dune_pkg = "dune.{}".format(
             kwargs.get("dune_version", OCaml.DUNE_VERSION))
         try:
@@ -630,13 +709,18 @@ class OCaml(Runtime):
                 opam, "install", dune_pkg, "ocamlfind",
                 "--switch={}".format(switch_name), "--yes",
             ])
-        except subprocess.CalledProcessError:
-            logging.warning(
-                "Failed to install %s/ocamlfind in switch '%s'. "
-                "Benchmark build scripts will use dune from the tools switch "
-                "(ensure it is on PATH).",
-                dune_pkg, switch_name,
-            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                "Failed to install {}/ocamlfind in switch '{}'.\n"
+                "Refusing to continue: benchmark binaries would be built with "
+                "whatever dune happens to be on PATH (typically the tools "
+                "switch's, which is installed unconstrained), so this run's "
+                "results would not be reproducible and runtimes compared "
+                "against each other could be built by different dune "
+                "versions.\n"
+                "If this compiler needs a different dune, set `dune_version:` "
+                "on the runtime in your config.".format(dune_pkg, switch_name)
+            ) from e
         OCaml._switches_created_this_run.add(switch_name)
 
     @staticmethod

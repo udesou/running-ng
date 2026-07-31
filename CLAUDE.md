@@ -136,11 +136,30 @@ Still unmerged:
   it for long sweeps — a rebuild recompiles the compiler, ~10–20 min per
   runtime). Switches provisioned earlier in the *same* run are always reused
   (`_switches_created_this_run`).
-- **`OCaml.DUNE_VERSION` (3.22.1) is pinned** so switches provisioned months
-  apart get the same build tool. Before raising it: build the *whole* suite on
-  the candidate, and note that an already-populated `macro-benches/duniverse/`
-  keeps its old `dune-project` until `make setup` is re-run. Per-runtime
-  override: `dune_version:`.
+- **Reuse mode refuses a half-built switch** (`_assert_switch_usable`). opam
+  registers a switch name *before* its compiler finishes building, so an
+  interrupted provisioning leaves the name present with no `bin/ocamlc` behind
+  it. A normal run heals that by rebuilding; reuse mode can't — it holds only a
+  **shared** lock and must not delete a switch a concurrent run may be using —
+  so it raises with the two ways out (rerun without `RUNNING_REUSE_SWITCHES`, or
+  `opam switch remove`). Without the check the empty shell reached the build
+  scripts and surfaced as a benchmark build failure, nowhere near the cause.
+  The check is compiler-only on purpose: `OCamlMMTk` shares this code path and
+  deliberately installs no dune.
+- **`OCaml.DUNE_VERSION` (3.24.0) is pinned** so switches provisioned months
+  apart — and two switches compared within one run — get the same build tool,
+  and a **failure to install it is fatal**. It used to be 3.22.1 with a warn-and
+  -fall-back-to-`PATH` path, which quietly defeated the pin: 3.22.1 can't
+  bootstrap against 5.6 trunk, so a trunk switch got no dune and silently used
+  the tools switch's (installed *unconstrained*) — a 5.5.0-vs-trunk run built its
+  two sides with different dune versions. If a compiler needs a different dune,
+  say so with `dune_version:` on that runtime. **`OxCaml` inherits this path**
+  (`OCamlMMTk` does not — it deliberately installs no dune and uses the tools
+  switch), so an OxCaml runtime that can't take the pinned dune now needs an
+  explicit `dune_version:`. Before raising the pin: build the *whole* suite on
+  the candidate, confirm it bootstraps on **trunk** and not just the release, and
+  note that an already-populated `macro-benches/duniverse/` keeps its old
+  `dune-project` until `make setup` is re-run.
 - **The opam root is locked** (`$OPAMROOT/running-ng.lock`, `flock`): exclusive
   for a normal run, shared under `RUNNING_REUSE_SWITCHES=1`, skipped for dry
   runs. A second run that would delete switches the first is using is refused

@@ -740,13 +740,30 @@ summary and sweep plots straight from a log directory.
 
 Each non-`executable` runtime gets an opam switch `running-ng-<runtime-name>`.
 By default a switch left over from an *earlier* run is **removed and rebuilt**,
-so the compiler and the pinned dune (`OCaml.DUNE_VERSION`, currently 3.22.1) are
+so the compiler and the pinned dune (`OCaml.DUNE_VERSION`, currently 3.24.0) are
 exactly what this run provisioned rather than whatever a previous run happened
 to install — nothing in a switch records which compiler source or dune version
 built it. Switches provisioned earlier in the *same* run are always reused.
 
 Rebuilding recompiles the compiler from source (~10–20 min per runtime), so for
 long sweeps over switches you trust, set `RUNNING_REUSE_SWITCHES=1`.
+
+Reuse mode still checks that a switch is a *working* compiler before trusting it.
+opam registers a switch name before the compiler finishes building, so an
+interrupted provisioning leaves the name present but empty; reuse mode refuses
+such a switch rather than handing it to the build scripts (which would fail much
+later, looking like a benchmark bug). It won't rebuild it for you either — reuse
+mode takes only a shared lock and must not delete a switch another run may be
+using — so it tells you to rerun without `RUNNING_REUSE_SWITCHES` or to
+`opam switch remove` it.
+
+**The dune pin is enforced, not best-effort.** If the pinned dune can't be
+installed into a switch the run **fails** rather than falling back to whatever
+dune is on `PATH`. Falling back would silently swap the pinned build tool for the
+tools switch's, which is installed unconstrained — and it bit hardest on trunk,
+where dune is likeliest to fail to bootstrap, so a release-vs-trunk comparison
+could build its two sides with different dune versions. If a particular compiler
+needs a different dune, declare it: `dune_version: "3.x.y"` on that runtime.
 
 The run also restores whatever opam switch was active before it started, even if
 it fails or is interrupted — provisioning selects the switch it builds, and
