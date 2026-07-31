@@ -524,14 +524,37 @@ suites:
         args: ""
 
   # liquidsoap-lang: parse + typecheck liquidsoap scripts (DSL compiler).
+  # Two knobs (args "$ITERATIONS $UNITS"):
+  #   liq_parse_typecheck   = Knob B: 50000 iterations of one fixed ~90-line script.
+  #   liq_parse_typecheck_* = Knob A: 1 iteration, script SIZE via generated unit
+  #     count (argv.2). Each unit is a self-contained recursion+higher-order+list
+  #     block, so the parser builds a bigger AST and the typechecker a bigger type
+  #     environment; RSS/live grow with the count and wall is super-quadratic (the
+  #     env grows and each unit unifies against it). Measured 5.5.0 / Ryzen 9950X:
+  #       small   4000 units   4.7s   261MB   37M words
+  #       default 6500 units   14s    410MB   61M words
+  #       large   12000 units  65s    757MB   113M words
+  #   (huge deferred.) In-process generation — no vendored/generated files.
   macro-liquidsoap-lang:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 300
     programs:
       liq_parse_typecheck:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
         build_script: "liquidsoap-lang.build.sh"
         args: "50000"
+      liq_parse_typecheck_small:      # 1 iter, 4000 units: ~5s, 261MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
+        build_script: "liquidsoap-lang.build.sh"
+        args: "1 4000"
+      liq_parse_typecheck_default:    # 1 iter, 6500 units: ~14s, 410MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
+        build_script: "liquidsoap-lang.build.sh"
+        args: "1 6500"
+      liq_parse_typecheck_large:      # 1 iter, 12000 units: ~65s, 757MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
+        build_script: "liquidsoap-lang.build.sh"
+        args: "1 12000"
 
   # merlin: in-process driver replicating merlin's cram bench (the 7
   # canonical IDE queries against a 51 319-line file). Spawns a typer
@@ -939,6 +962,9 @@ benchmarks:
 
   macro-liquidsoap-lang:
     - liq_parse_typecheck
+    - liq_parse_typecheck_small
+    - liq_parse_typecheck_default
+    - liq_parse_typecheck_large
 
   # macro-merlin: DISABLED pending upstream fix to a race in
   # merlin-domains' typer-domain handoff. The vendored typer hits an
