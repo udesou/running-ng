@@ -167,6 +167,27 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
         args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/yyll.why"
+      # Knob-A congruence-chain ladder (working set = single-solve problem size).
+      # alt-ergo.build.sh generates alt_ergo_chain_<rung>.why: one goal asserting
+      # a(0)=0 and a(i)=a(i-1)+1 for i in 1..N, proving a(N)=N, so alt-ergo builds
+      # an N-term congruence/arithmetic structure in ONE solve (unlike fill_x100,
+      # which is 100 independent copies = Knob B, constant peak working set). This
+      # is fill.why's array-cell reasoning parameterised. Super-linear (~N^2.2 in
+      # wall and live heap). Measured 5.5.0 / Ryzen 9 9950X: N=4000 ~4s/0.6GB/
+      # top_heap 76M w, 7000 ~13s/1.9GB/244M w, 10500 ~32s/5.0GB/638M w (minor GC
+      # 3.7k->25k, major 16->24, promo 0.09->0.14). Input file selects the rung.
+      alt_ergo_chain_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
+        build_script: "alt-ergo.build.sh"
+        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/alt_ergo_chain_small.why"
+      alt_ergo_chain_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
+        build_script: "alt-ergo.build.sh"
+        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/alt_ergo_chain_default.why"
+      alt_ergo_chain_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
+        build_script: "alt-ergo.build.sh"
+        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/alt_ergo_chain_large.why"
       alt_ergo_unsat_smt2:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
