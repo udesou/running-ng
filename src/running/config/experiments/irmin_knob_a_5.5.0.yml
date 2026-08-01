@@ -1,0 +1,16 @@
+# Knob-A olly pass — irmin 3-rung store-size ladder, 5.5.0 (1 inv).
+# Knob A = store size (n_keys); write phase is O(n_keys^2) hash-tree churn.
+#   small 6000 keys ~5s / default 10000 ~15s / large 18000 ~52s
+includes:
+  - "../base/ocaml/macro_base.yml"
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-irmin:
+      - irmin_mem_rw_small
+      - irmin_mem_rw_default
+      - irmin_mem_rw_large
+runtimes:
+  ocaml-5.5.0: { type: OCaml, version: "5.5.0", olly_ref: "main" }
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"
