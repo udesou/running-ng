@@ -667,12 +667,37 @@ suites:
   # arg = number of iterations; arg=30000 ≈ 4–20s wall.
   macro-liq-video-frames:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 300
     programs:
+      # args = "n_frames [width height]".
+      #   liq_video_frames_pool   = the frozen #14533 repro: 30000 720p frames.
+      #   liq_video_frames_pool_* = Knob A: frame RESOLUTION (width/height) at a
+      #     fixed 15000 frames. A bigger frame scales the per-frame off-heap
+      #     Bigarray, so caml_alloc_custom_mem tells the pacer about more off-heap
+      #     bytes and forces proportionally MORE major cycles (the #14533 pacer
+      #     regime) — major-cycle count and wall grow ~with pixels^2. RSS grows
+      #     only modestly (shared pool buffer; off-heap not counted in RSS/top_heap
+      #     — lean on the collection counts). Measured 5.5.0 / Ryzen 9950X:
+      #       small   1080p  5.6s   108MB   1104 majorGC
+      #       default 4K     22s    118MB   4413 majorGC
+      #       large   8K     101s   154MB   16837 majorGC
+      #   (huge deferred.)
       liq_video_frames_pool:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
         args: "30000"
+      liq_video_frames_pool_small:      # 15000 frames, 1080p: ~5.6s, 1104 majorGC
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
+        build_script: "liq-video-frames.build.sh"
+        args: "15000 1920 1080"
+      liq_video_frames_pool_default:    # 15000 frames, 4K: ~22s, 4413 majorGC
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
+        build_script: "liq-video-frames.build.sh"
+        args: "15000 3840 2160"
+      liq_video_frames_pool_large:      # 15000 frames, 8K: ~101s, 16837 majorGC
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
+        build_script: "liq-video-frames.build.sh"
+        args: "15000 7680 4320"
 
   # pplacer: phylogenetic placement (bioinformatics).
   macro-pplacer:
@@ -1012,6 +1037,9 @@ benchmarks:
 
   macro-liq-video-frames:
     - liq_video_frames_pool
+    - liq_video_frames_pool_small
+    - liq_video_frames_pool_default
+    - liq_video_frames_pool_large
 
   macro-pplacer:
     - pplacer_testsuite
