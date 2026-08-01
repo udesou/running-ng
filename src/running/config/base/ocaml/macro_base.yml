@@ -129,6 +129,26 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
         build_script: "cpdf.build.sh"
         args: "-squeeze ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
+      # Knob-A squeeze ladder (working set = document size). cpdf.build.sh emits a
+      # wrapper for these cpdf_squeeze_* outputs that merges argv.1 copies of the
+      # input PDF (the whole parsed object graph stays resident → top_heap grows
+      # ~linearly with N) and recompresses every stream. Recompression is the CPU
+      # that lifts wall into the standard bands (merge alone is memory-bound and
+      # tops out ~17s). Measured 5.5.0 / Ryzen 9 9950X: 8 copies ~7s/0.88GB/top_heap
+      # 110M w, 24 ~18s/1.78GB/225M w, 64 ~55s/3.16GB/405M w (major GC 38→45→56,
+      # promo ~0.42-0.46). The single arg is the copy count.
+      cpdf_squeeze_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
+        build_script: "cpdf.build.sh"
+        args: "8"
+      cpdf_squeeze_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
+        build_script: "cpdf.build.sh"
+        args: "24"
+      cpdf_squeeze_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
+        build_script: "cpdf.build.sh"
+        args: "64"
 
   macro-alt-ergo-monorepo:
     type: OCamlBenchmarkSuite
