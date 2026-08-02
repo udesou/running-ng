@@ -249,6 +249,29 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
         build_script: "goblint.build.sh"
         args: ""
+      # Knob-A ladder (working set = analysed-program size). The frozen `goblint`
+      # runs the fixed #13733 reproducer (~0.2s — too short). goblint.build.sh
+      # generates a synthetic Btor2C-style bit-vector state machine with N state
+      # vars (goblint_gen_<rung>.c) and emits a wrapper that analyses it with the
+      # same svcomp.json/apron config. A bigger N grows the interval+octagon
+      # constraint system, scaling goblint's signature #13733 behaviour: massive
+      # minor-GC allocation churn with a small live set (octagon is O(N^2), so
+      # wall+allocation are super-linear). No args — the C file is baked per rung.
+      # Measured 5.5.0 / Ryzen 9 9950X (all `SV-COMP result: true`): N=100 ~4.3s/
+      # 3.8G alloc-words/77MB, 165 ~16s/14G/120MB, 240 ~47s/40G/186MB (minor GC
+      # 15k->151k, major 41->97, top_heap 5.9->19.5M). Read by allocated_words.
+      goblint_gen_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
+        build_script: "goblint.build.sh"
+        args: ""
+      goblint_gen_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
+        build_script: "goblint.build.sh"
+        args: ""
+      goblint_gen_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
+        build_script: "goblint.build.sh"
+        args: ""
 
   # Knob A = numeral size (unary-nat kernel reduction). coqc_corelib_stress is
   # the legacy mixed workload (fib/ack/tree). The coqc_tree_* rungs are a clean

@@ -1,0 +1,21 @@
+# Knob-A olly pass — goblint 3-rung analysed-program-size ladder, 5.5.0 (1 inv).
+# Knob A = size of the analysed C program: goblint.build.sh generates a synthetic
+# Btor2C-style bit-vector state machine with N state vars and analyses it with the
+# frozen svcomp.json/apron (interval+octagon) config. Bigger N grows the constraint
+# system, scaling goblint's #13733 signature: huge minor-GC allocation churn with a
+# small live set (octagon O(N^2) -> wall+allocation super-linear). Read by
+# allocated_words (the GC-throughput signal), not RSS.
+#   small N=100 ~4.3s/3.8G-words / default 165 ~16s/14G / large 240 ~47s/40G
+includes:
+  - "../base/ocaml/macro_base.yml"
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-goblint-monorepo:
+      - goblint_gen_small
+      - goblint_gen_default
+      - goblint_gen_large
+runtimes:
+  ocaml-5.5.0: { type: OCaml, version: "5.5.0", olly_ref: "main" }
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"
