@@ -755,6 +755,28 @@ suites:
         # hardware; comfortably above noise floor on faster CI machines).
         # See ~/macro-benches/README.md §"Iteration counts" for the pattern.
         args: "5"
+      # Knob-A likelihood ladder (working set = alignment length, n_sites).
+      # pplacer.build.sh builds like_bench.exe (pplacer's Felsenstein likelihood
+      # hot path) and emits a wrapper that replicates the reference alignment's
+      # columns argv.1 times and runs a fixed 40-point ML pendant-branch scan per
+      # edge. Knob A grows the generalized likelihood vectors (Glv, GSL-backed
+      # OFF-HEAP Bigarrays): top_heap stays ~2-8 MB while RSS spans 0.2-2.2 GB, so
+      # read this ladder by RSS/allocated_words (off-heap caveat), like owl. The
+      # per-edge scan lifts wall to owl-like bands. Measured 5.5.0 / Ryzen 9
+      # 9950X: mult 8 ~4.7s/0.22GB, 25 ~15s/0.65GB, 85 ~50s/2.2GB (allocated_words
+      # 2.1->22.4G, minor GC 8k->86k, major 147->646). argv.1 = replication factor.
+      pplacer_like_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
+        build_script: "pplacer.build.sh"
+        args: "8"
+      pplacer_like_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
+        build_script: "pplacer.build.sh"
+        args: "25"
+      pplacer_like_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
+        build_script: "pplacer.build.sh"
+        args: "85"
 
   # lavyek: multicore key-value store on Eio + kcas + io_uring (single
   # OCaml process, multi-domain).  DaCapo-style fixed-work driver; the

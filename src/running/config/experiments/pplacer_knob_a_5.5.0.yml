@@ -1,0 +1,20 @@
+# Knob-A olly pass — pplacer 3-rung likelihood ladder, 5.5.0 (1 inv).
+# Knob A = alignment length (n_sites): like_bench.exe runs pplacer's Felsenstein
+# likelihood hot path (Glv generalized likelihood vectors, GSL-backed off-heap)
+# over a reference alignment whose columns are replicated argv.1 times, with a
+# fixed 40-point ML pendant-branch scan per edge. Off-heap working set: top_heap
+# ~2-8 MB while RSS spans 0.2-2.2 GB (read by RSS/allocated_words, like owl).
+#   small mult 8 ~4.7s/0.22GB / default 25 ~15s/0.65GB / large 85 ~50s/2.2GB
+includes:
+  - "../base/ocaml/macro_base.yml"
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-pplacer:
+      - pplacer_like_small
+      - pplacer_like_default
+      - pplacer_like_large
+runtimes:
+  ocaml-5.5.0: { type: OCaml, version: "5.5.0", olly_ref: "main" }
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"
