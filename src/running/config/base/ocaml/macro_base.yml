@@ -654,6 +654,26 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
         build_script: "ocamlc-compile-uucp.build.sh"
         args: ""
+      # Input-size ladder (compiling N replicas of the uucp Unicode library). uucp
+      # is data/constant-heavy with a COLLECTED heap, so scaling it keeps RSS ~flat
+      # (~90-120MB) while major-GC cycles + promotion scale linearly — a cheap
+      # major-GC-throughput ladder, the counterpart to ocamlc_self_compile's
+      # memory-bound (monotonic-heap) compilation. ocamlc-compile-uucp.build.sh
+      # bakes the replica count per rung by output name (N=3/8/25). Measured 5.5.0
+      # / Ryzen 9 9950X: 6s/87MB/377 major, 17s/96MB/771 major, 58s/120MB/1582 major
+      # (promotion 144M->1.36G words). No args.
+      ocamlc_compile_uucp_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
+        build_script: "ocamlc-compile-uucp.build.sh"
+        args: ""
+      ocamlc_compile_uucp_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
+        build_script: "ocamlc-compile-uucp.build.sh"
+        args: ""
+      ocamlc_compile_uucp_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
+        build_script: "ocamlc-compile-uucp.build.sh"
+        args: ""
 
   # liquidsoap-lang: parse + typecheck liquidsoap scripts (DSL compiler).
   # Two knobs (args "$ITERATIONS $UNITS"):
