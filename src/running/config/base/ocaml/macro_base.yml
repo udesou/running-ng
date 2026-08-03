@@ -312,6 +312,27 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
         args: ""
+      # Knob-A ladder (working set = per-document content size). devkit_htmlstream
+      # is a synthetic 8-part HtmlStream GC-stress suite; the arg is a scale factor
+      # (argv.1) that multiplies the per-document content counts (elements
+      # generated + structures retained) while keeping the outer document
+      # repetition fixed. Bigger factor => bigger HTML parsed and bigger live set:
+      # both allocation churn AND working set grow ~linearly (only the bounded
+      # linear loops are scaled). arg=1 is the frozen devkit_htmlstream. Measured
+      # 5.5.0 / Ryzen 9 9950X: 1 ~7s/365MB/1.6G-words, 3 ~20s/1.09GB/4.8G, 8 ~51s/
+      # 2.57GB/12.3G (top_heap peak 633MB->4.57GB, minor GC 3.8k->28k, major 255->342).
+      devkit_htmlstream_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: "1"
+      devkit_htmlstream_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: "3"
+      devkit_htmlstream_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: "8"
       devkit_stre:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
