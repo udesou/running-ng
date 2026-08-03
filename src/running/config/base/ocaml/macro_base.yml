@@ -460,6 +460,28 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
         build_script: "eio.build.sh"
         args: ""
+      # Knob-A ladder (working set = concurrency degree). eio_fiber_stream is a
+      # throughput bench (few fibers, one shared stream, tiny constant live set);
+      # eio_conc_bench scales the other axis — the number of independent
+      # producer/consumer fiber pairs (argv.1), each on its own bounded stream —
+      # so the live set (parked fibers' effect continuations + data buffered
+      # across all the streams) grows ~linearly. eio.build.sh selects this driver
+      # by the eio_conc_* output name; per-fiber work is fixed at 20000 items.
+      # Measured 5.5.0 / Ryzen 9 9950X: 3000 pairs ~5.5s/0.69GB, 9000 ~16s/2.1GB,
+      # 21000 ~39s/5.1GB (top_heap 84->619M words, promotion ~0.85 — a live-set
+      # ladder). Arg = n_pairs.
+      eio_conc_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
+        build_script: "eio.build.sh"
+        args: "3000"
+      eio_conc_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
+        build_script: "eio.build.sh"
+        args: "9000"
+      eio_conc_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
+        build_script: "eio.build.sh"
+        args: "21000"
 
   # Knob A = input SIZE (argv.1 = generated # lines). The driver generates the
   # pseudo-code in-process and RETAINS the whole token list, so the live set +
