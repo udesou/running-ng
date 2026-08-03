@@ -1,5 +1,5 @@
-# Knob-A olly pass — alt-ergo 3-rung congruence-chain ladder, 5.5.0 (1 inv).
-# Knob A = single-solve problem size (N): one goal asserting a(0)=0 and
+# olly pass — alt-ergo 3-rung congruence-chain ladder, 5.5.0 (1 inv).
+# Size axis = single-solve problem size (N): one goal asserting a(0)=0 and
 # a(i)=a(i-1)+1 for i in 1..N, proving a(N)=N. alt-ergo builds an N-term
 # congruence/arithmetic structure in one solve; wall and live heap scale ~N^2.2.
 #   small N=4000 ~4s/0.6GB / default 7000 ~13s/1.9GB / large 10500 ~32s/5.0GB

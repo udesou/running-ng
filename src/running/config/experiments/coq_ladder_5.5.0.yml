@@ -1,5 +1,5 @@
-# Knob-A olly pass — coq 3-rung numeral ladder, OCaml 5.5.0 (1 inv).
-# Knob A = make_tree depth (unary-nat kernel reduction). Rungs in macro_base.yml
+# olly pass — coq 3-rung numeral ladder, OCaml 5.5.0 (1 inv).
+# Size axis = make_tree depth (unary-nat kernel reduction). Rungs in macro_base.yml
 # (suite macro-coq-monorepo, timeout 900):
 #   coqc_tree_small   D=17  ~5s   0.6GB
 #   coqc_tree_default D=18  ~19s  1.03GB

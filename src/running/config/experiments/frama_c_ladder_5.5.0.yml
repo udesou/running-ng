@@ -1,8 +1,8 @@
 # =============================================================================
-# Knob-A olly pass — frama-c 3-rung precision ladder on OCaml 5.5.0 (single inv)
+# olly pass — frama-c 3-rung precision ladder on OCaml 5.5.0 (single inv)
 # =============================================================================
 # gc%/pause + max_rss_kb_excl_ring capture for the settled frama-c rungs
-# (Knob A = -eva-precision on the sqlite workload, passed as the 2nd wrapper
+# (Size axis = -eva-precision on the sqlite workload, passed as the 2nd wrapper
 # arg "sqlite N").  NOT a regression comparison — single runtime, invocations:1.
 #
 # Rungs already live in base/ocaml/macro_base.yml (suite macro-frama-c-monorepo,

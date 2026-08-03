@@ -1,5 +1,5 @@
-# Knob-A olly pass — jsoo 3-rung bytecode-size ladder, OCaml 5.5.0 (1 inv).
-# Knob A = input bytecode size (rung arg small/default/large -> generated .byte).
+# olly pass — jsoo 3-rung bytecode-size ladder, OCaml 5.5.0 (1 inv).
+# Size axis = input bytecode size (rung arg small/default/large -> generated .byte).
 # Rungs in macro_base.yml (suite macro-jsoo, timeout 300):
 #   jsoo_small   5.6MB  ~5s   0.5GB
 #   jsoo_default 14MB   ~16s  1.7GB

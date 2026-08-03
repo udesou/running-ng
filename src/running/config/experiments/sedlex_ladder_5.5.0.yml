@@ -1,7 +1,7 @@
 # =============================================================================
-# Knob-A olly pass — sedlex 3-rung input-size ladder, OCaml 5.5.0 (1 inv)
+# olly pass — sedlex 3-rung input-size ladder, OCaml 5.5.0 (1 inv)
 # =============================================================================
-# gc%/pause + max_rss_kb_excl_ring for the settled sedlex rungs. Knob A = input
+# gc%/pause + max_rss_kb_excl_ring for the settled sedlex rungs. Size axis = input
 # SIZE (argv.1 = generated # lines); the driver retains the whole token list so
 # RSS/live-heap grow ~linearly. Rungs live in base/ocaml/macro_base.yml
 # (suite macro-sedlex, timeout 300):

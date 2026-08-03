@@ -1,9 +1,9 @@
 # =============================================================================
-# Knob-A olly pass — owl 4-rung matrix-dimension ladder on OCaml 5.5.0 (1 inv)
+# olly pass — owl 4-rung matrix-dimension ladder on OCaml 5.5.0 (1 inv)
 # =============================================================================
-# gc%/pause + max_rss_kb_excl_ring for the settled owl rungs.  Knob A = matrix
+# gc%/pause + max_rss_kb_excl_ring for the settled owl rungs.  Size axis = matrix
 # dimension (OWL_MATRIX_DIM, passed as the wrapper's 2nd arg "loop dim");
-# loop is pinned to 1 so this is pure Knob A, not the owl_gc repetition bench.
+# loop is pinned to 1 so this is pure size ladder, not the owl_gc repetition bench.
 # Rungs live in base/ocaml/macro_base.yml (suite macro-owl, timeout 900):
 #   owl_gc_small   dim 300  ~4s    95MB
 #   owl_gc_default dim 500  ~11s   230MB

@@ -1,5 +1,5 @@
-# Knob-A olly pass — goblint 3-rung analysed-program-size ladder, 5.5.0 (1 inv).
-# Knob A = size of the analysed C program: goblint.build.sh generates a synthetic
+# olly pass — goblint 3-rung analysed-program-size ladder, 5.5.0 (1 inv).
+# Size axis = size of the analysed C program: goblint.build.sh generates a synthetic
 # Btor2C-style bit-vector state machine with N state vars and analyses it with the
 # frozen svcomp.json/apron (interval+octagon) config. Bigger N grows the constraint
 # system, scaling goblint's #13733 signature: huge minor-GC allocation churn with a

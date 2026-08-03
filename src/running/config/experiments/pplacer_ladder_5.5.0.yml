@@ -1,5 +1,5 @@
-# Knob-A olly pass — pplacer 3-rung likelihood ladder, 5.5.0 (1 inv).
-# Knob A = alignment length (n_sites): like_bench.exe runs pplacer's Felsenstein
+# olly pass — pplacer 3-rung likelihood ladder, 5.5.0 (1 inv).
+# Size axis = alignment length (n_sites): like_bench.exe runs pplacer's Felsenstein
 # likelihood hot path (Glv generalized likelihood vectors, GSL-backed off-heap)
 # over a reference alignment whose columns are replicated argv.1 times, with a
 # fixed 40-point ML pendant-branch scan per edge. Off-heap working set: top_heap

@@ -1,8 +1,8 @@
 # =============================================================================
-# Knob-A pilot — zarith 4-rung ladder on OCaml 5.5.0 (single invocation)
+# input-size pilot — zarith 4-rung ladder on OCaml 5.5.0 (single invocation)
 # =============================================================================
 # Characterisation + harness de-risk for the macro-bench input refactor.
-# Runs the four settled zarith rungs (digit-count = Knob A) once each under
+# Runs the four settled zarith rungs (digit-count = size ladder) once each under
 # 5.5.0, capturing gc%/pauses via olly (perf_grp1) + re-25 ring.
 # NOT a regression comparison — single runtime, invocations:1.
 #

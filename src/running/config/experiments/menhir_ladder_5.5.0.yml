@@ -1,4 +1,4 @@
-# Knob-A olly pass — menhir 3-rung automaton-scale ladder, OCaml 5.5.0 (1 inv).
+# olly pass — menhir 3-rung automaton-scale ladder, OCaml 5.5.0 (1 inv).
 # Monotone by footprint AND wall (single grammar family; menhir has no callable
 # main to loop, so a bigger input is the only way to lengthen a run):
 #   small=menhir_sysver           sysver --table                7.7s / 0.72GB

@@ -1,5 +1,5 @@
-# Knob-A olly pass — eio 3-rung concurrency ladder, 5.5.0 (1 inv).
-# Knob A = concurrency degree: eio_conc_bench runs n_pairs (argv.1) independent
+# olly pass — eio 3-rung concurrency ladder, 5.5.0 (1 inv).
+# Size axis = concurrency degree: eio_conc_bench runs n_pairs (argv.1) independent
 # producer/consumer fiber pairs, each on its own bounded stream, so the live set
 # (parked fibers' effect continuations + data buffered across all streams) grows
 # ~linearly. Per-fiber work fixed at 20000 items. Live-set ladder (promotion ~0.85).

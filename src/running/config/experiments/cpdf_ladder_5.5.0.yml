@@ -1,5 +1,5 @@
-# Knob-A olly pass — cpdf 3-rung squeeze ladder, 5.5.0 (1 inv).
-# Knob A = document working set: merge N copies of PDFReference16.pdf (whole
+# olly pass — cpdf 3-rung squeeze ladder, 5.5.0 (1 inv).
+# Size axis = document working set: merge N copies of PDFReference16.pdf (whole
 # parsed object graph resident; top_heap grows ~linearly with N) and recompress
 # every stream (-squeeze), which supplies the CPU to reach the standard bands.
 #   small 8 copies ~7s/0.88GB / default 24 ~18s/1.78GB / large 64 ~55s/3.16GB

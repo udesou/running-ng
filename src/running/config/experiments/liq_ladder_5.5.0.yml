@@ -1,5 +1,5 @@
-# Knob-A olly pass — liq_parse_typecheck 3-rung script-size ladder, 5.5.0 (1 inv).
-# Knob A = script size (argv.2 = generated unit count); iterations pinned 1.
+# olly pass — liq_parse_typecheck 3-rung script-size ladder, 5.5.0 (1 inv).
+# Size axis = script size (argv.2 = generated unit count); iterations pinned 1.
 #   small 4000u ~5s 261MB / default 6500u ~14s 410MB / large 12000u ~65s 757MB
 includes:
   - "../base/ocaml/macro_base.yml"

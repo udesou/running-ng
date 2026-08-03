@@ -1,5 +1,5 @@
-# Knob-A olly pass — liq_video_frames resolution ladder, 5.5.0 (1 inv).
-# Knob A = frame resolution (15000 frames; POOL=1 pacer regime).
+# olly pass — liq_video_frames resolution ladder, 5.5.0 (1 inv).
+# Size axis = frame resolution (15000 frames; POOL=1 pacer regime).
 #   small 1080p ~5.6s / default 4K ~22s / large 8K ~101s
 includes:
   - "../base/ocaml/macro_base.yml"
