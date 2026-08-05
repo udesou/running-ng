@@ -97,6 +97,17 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
         build_script: "menhir.build.sh"
         args: "-v --table ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/sysver.mly"
+      # Input-size ladder (automaton scale, monotone by footprint AND wall on current
+      # hardware): small=menhir_sysver (sysver --table, 7.7s/0.72GB), default=
+      # menhir_ocamly (ocaml --canonical --list-errors, 12.7s/2.76GB), large=
+      # menhir_sysver_canonical (sysver --canonical, 33s/4.0GB). All single-run —
+      # menhir has no callable main to loop in-process (its main.ml is init-time
+      # side effects), so a bigger input is the only way to lengthen a run.
+      # menhir_sql_parser (LALR, 1.2s) stays as a fast standalone, not a ladder rung.
+      menhir_sysver_canonical:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
+        build_script: "menhir.build.sh"
+        args: "--canonical --table ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/sysver.mly"
 
   macro-cpdf-monorepo:
     type: OCamlBenchmarkSuite
@@ -118,6 +129,26 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
         build_script: "cpdf.build.sh"
         args: "-squeeze ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
+      # Input-size squeeze ladder (working set = document size). cpdf.build.sh emits a
+      # wrapper for these cpdf_squeeze_* outputs that merges argv.1 copies of the
+      # input PDF (the whole parsed object graph stays resident → top_heap grows
+      # ~linearly with N) and recompresses every stream. Recompression is the CPU
+      # that lifts wall into the standard bands (merge alone is memory-bound and
+      # tops out ~17s). Measured 5.5.0 / Ryzen 9 9950X: 8 copies ~7s/0.88GB/top_heap
+      # 110M w, 24 ~18s/1.78GB/225M w, 64 ~55s/3.16GB/405M w (major GC 38→45→56,
+      # promo ~0.42-0.46). The single arg is the copy count.
+      cpdf_squeeze_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
+        build_script: "cpdf.build.sh"
+        args: "8"
+      cpdf_squeeze_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
+        build_script: "cpdf.build.sh"
+        args: "24"
+      cpdf_squeeze_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
+        build_script: "cpdf.build.sh"
+        args: "64"
 
   macro-alt-ergo-monorepo:
     type: OCamlBenchmarkSuite
@@ -136,6 +167,27 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
         args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/yyll.why"
+      # Input-size congruence-chain ladder (working set = single-solve problem size).
+      # alt-ergo.build.sh generates alt_ergo_chain_<rung>.why: one goal asserting
+      # a(0)=0 and a(i)=a(i-1)+1 for i in 1..N, proving a(N)=N, so alt-ergo builds
+      # an N-term congruence/arithmetic structure in ONE solve (unlike fill_x100,
+      # which is 100 independent copies = repetition, constant peak working set). This
+      # is fill.why's array-cell reasoning parameterised. Super-linear (~N^2.2 in
+      # wall and live heap). Measured 5.5.0 / Ryzen 9 9950X: N=4000 ~4s/0.6GB/
+      # top_heap 76M w, 7000 ~13s/1.9GB/244M w, 10500 ~32s/5.0GB/638M w (minor GC
+      # 3.7k->25k, major 16->24, promo 0.09->0.14). Input file selects the rung.
+      alt_ergo_chain_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
+        build_script: "alt-ergo.build.sh"
+        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/alt_ergo_chain_small.why"
+      alt_ergo_chain_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
+        build_script: "alt-ergo.build.sh"
+        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/alt_ergo_chain_default.why"
+      alt_ergo_chain_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
+        build_script: "alt-ergo.build.sh"
+        args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/alt_ergo_chain_large.why"
       alt_ergo_unsat_smt2:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
@@ -155,9 +207,17 @@ suites:
   # -no-autoload-plugins.  The wrapper selects the workload by its single
   # arg: "t" (zlib t.c) or "sqlite" (258k-line SQLite amalgamation — the
   # ocaml#11733 weak/ephemeron hash-consing reproducer, ~460MB RSS).
+  # Input-size ladder (2026-07-24): the axis is EVA precision (-eva-precision N),
+  # passed as the wrapper's 2nd arg ("sqlite N").  NOT -eva-slevel — measured
+  # flat 0..2000 at every config (EVA merges states without loop-unrolling).
+  # Precision changes shape (P0->P2: RSS 457->641MB, live 53->77M words, minor
+  # GC 11k->31k) but saturates ~730MB; there is no >5min "huge" rung reachable
+  # via any EVA knob (would need a bigger C amalgamation) -- deferred honestly.
+  # frama_c_eva_sqlite (bare "sqlite" == precision 0) is kept as the legacy /
+  # tag anchor and equals the _small rung.
   macro-frama-c-monorepo:
     type: OCamlBenchmarkSuite
-    timeout: 300
+    timeout: 600
     programs:
       frama_c_eva_t:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
@@ -167,6 +227,19 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
         build_script: "frama-c.build.sh"
         args: "sqlite"
+      # ladder rungs (precision N); see block comment above
+      frama_c_eva_sqlite_small:      # P0: ~7s, 457MB, 11k minor GC (== legacy sqlite)
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
+        build_script: "frama-c.build.sh"
+        args: "sqlite 0"
+      frama_c_eva_sqlite_default:    # P2: ~18s, 641MB, 31k minor GC, live 77M
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
+        build_script: "frama-c.build.sh"
+        args: "sqlite 2"
+      frama_c_eva_sqlite_large:      # P3: ~124s, 695MB, 182k minor GC, 48G alloc (max ephemeron churn)
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
+        build_script: "frama-c.build.sh"
+        args: "sqlite 3"
 
   macro-goblint-monorepo:
     type: OCamlBenchmarkSuite
@@ -176,7 +249,40 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
         build_script: "goblint.build.sh"
         args: ""
+      # Input-size ladder (working set = analysed-program size). The frozen `goblint`
+      # runs the fixed #13733 reproducer (~0.2s — too short). goblint.build.sh
+      # generates a synthetic Btor2C-style bit-vector state machine with N state
+      # vars (goblint_gen_<rung>.c) and emits a wrapper that analyses it with the
+      # same svcomp.json/apron config. A bigger N grows the interval+octagon
+      # constraint system, scaling goblint's signature #13733 behaviour: massive
+      # minor-GC allocation churn with a small live set (octagon is O(N^2), so
+      # wall+allocation are super-linear). No args — the C file is baked per rung.
+      # Measured 5.5.0 / Ryzen 9 9950X (all `SV-COMP result: true`): N=100 ~4.3s/
+      # 3.8G alloc-words/77MB, 165 ~16s/14G/120MB, 240 ~47s/40G/186MB (minor GC
+      # 15k->151k, major 41->97, top_heap 5.9->19.5M). Read by allocated_words.
+      goblint_gen_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
+        build_script: "goblint.build.sh"
+        args: ""
+      goblint_gen_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
+        build_script: "goblint.build.sh"
+        args: ""
+      goblint_gen_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
+        build_script: "goblint.build.sh"
+        args: ""
 
+  # Size axis = numeral size (unary-nat kernel reduction). coqc_corelib_stress is
+  # the legacy mixed workload (fib/ack/tree). The coqc_tree_* rungs are a clean
+  # single-knob ladder: `Compute tree_size (make_tree D)` reduces a 2^D-deep
+  # unary nat, so coqc's kernel does exponential allocation-heavy reduction and
+  # RSS/live grow with D (each +1 depth ~doubles+ the work). Vendored .v files.
+  # Measured 5.5.0 / Ryzen 9950X (wall / RSS / live):
+  #   small   D=17  5.3s   0.60GB  62M words
+  #   default D=18  18.6s  1.03GB  104M words
+  #   large   D=19  68s    1.98GB  204M words
+  # (huge D>=20 deferred — exponential, D=21 already >200s.)
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 900
@@ -185,6 +291,18 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
         build_script: "coq.build.sh"
         args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_corelib_stress.v"
+      coqc_tree_small:      # make_tree 17: ~5s, 0.6GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
+        build_script: "coq.build.sh"
+        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_tree_small.v"
+      coqc_tree_default:    # make_tree 18: ~19s, 1.03GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
+        build_script: "coq.build.sh"
+        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_tree_default.v"
+      coqc_tree_large:      # make_tree 19: ~68s, 1.98GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
+        build_script: "coq.build.sh"
+        args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_tree_large.v"
 
   macro-devkit:
     type: OCamlBenchmarkSuite
@@ -194,6 +312,27 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
         args: ""
+      # Input-size ladder (working set = per-document content size). devkit_htmlstream
+      # is a synthetic 8-part HtmlStream GC-stress suite; the arg is a scale factor
+      # (argv.1) that multiplies the per-document content counts (elements
+      # generated + structures retained) while keeping the outer document
+      # repetition fixed. Bigger factor => bigger HTML parsed and bigger live set:
+      # both allocation churn AND working set grow ~linearly (only the bounded
+      # linear loops are scaled). arg=1 is the frozen devkit_htmlstream. Measured
+      # 5.5.0 / Ryzen 9 9950X: 1 ~7s/365MB/1.6G-words, 3 ~20s/1.09GB/4.8G, 8 ~51s/
+      # 2.57GB/12.3G (top_heap peak 633MB->4.57GB, minor GC 3.8k->28k, major 255->342).
+      devkit_htmlstream_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: "1"
+      devkit_htmlstream_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: "3"
+      devkit_htmlstream_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
+        build_script: "ahrefs-devkit.build.sh"
+        args: "8"
       devkit_stre:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
@@ -219,28 +358,98 @@ suites:
     type: OCamlBenchmarkSuite
     timeout: 300
     programs:
+      # args = "n_keys n_ops read_pct total_ops".
+      #   irmin_mem_rw   = repetition: 3000-key store, 20000 mixed ops (80% read).
+      #   irmin_mem_rw_* = size ladder: store SIZE (n_keys), few extra ops. Every
+      #     set_exn commits a new revision and re-hashes the flat "root" node
+      #     (all keys in one directory), so the write phase is O(n_keys^2) in
+      #     the persistent-hash-tree / Hashtbl churn — allocation volume, major
+      #     cycles and the live store all grow with n_keys (RSS stays modest
+      #     <100MB; this is a churn/throughput ladder, not a footprint one).
+      #     Measured 5.5.0 / Ryzen 9950X:
+      #       small   6000 keys   5.4s   30MB   9k minorGC / 295 majorGC
+      #       default 10000 keys  15s    44MB   24k / 674
+      #       large   18000 keys  52s    71MB   74k / 1522
+      #   (huge deferred — quadratic.)
       irmin_mem_rw:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
         build_script: "irmin.build.sh"
         args: "3000 10000 80 20000"
+      irmin_mem_rw_small:      # 6000-key store: ~5s, 30MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
+        build_script: "irmin.build.sh"
+        args: "6000 0 50 1000"
+      irmin_mem_rw_default:    # 10000-key store: ~15s, 44MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
+        build_script: "irmin.build.sh"
+        args: "10000 0 50 1000"
+      irmin_mem_rw_large:      # 18000-key store: ~52s, 71MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
+        build_script: "irmin.build.sh"
+        args: "18000 0 50 1000"
 
+  # Size axis = source SIZE (# lines). The rung inputs wl_{12,30,150,450}x.ml are
+  # generated by ocamlformat.build.sh (N-times concatenation of workload.ml,
+  # ~3.3k lines of Rocq source) and gitignored. ocamlformat holds the whole AST
+  # + output doc in memory, so RSS/live-heap grow ~linearly with N (a genuine
+  # footprint+throughput ladder — NOT shape-invariant like the compiler benches).
+  # Measured 5.5.0 / Ryzen 9950X (wall / RSS / live-heap):
+  #   small   12x   4.7s   0.6GB   75M words
+  #   default 30x   13s    1.7GB   213M words
+  #   large   150x  90s    8.8GB   1.1G words
+  # (huge band ~450x / ~26 GB RSS deferred — tracked separately.) Legacy
+  # ocamlformat_rocq (workload_5x, ~1.8s) kept as the anchor.
   macro-ocamlformat:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 600
     programs:
       ocamlformat_rocq:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
         build_script: "ocamlformat.build.sh"
         args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/workload_5x.ml -o /dev/null"
+      ocamlformat_rocq_small:      # 12x ~40k lines: ~5s, 0.6GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
+        build_script: "ocamlformat.build.sh"
+        args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/wl_12x.ml -o /dev/null"
+      ocamlformat_rocq_default:    # 30x ~100k lines: ~13s, 1.7GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
+        build_script: "ocamlformat.build.sh"
+        args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/wl_30x.ml -o /dev/null"
+      ocamlformat_rocq_large:      # 150x ~500k lines: ~90s, 8.8GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
+        build_script: "ocamlformat.build.sh"
+        args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/wl_150x.ml -o /dev/null"
 
+  # Two knobs (args "$ITERATIONS $DATA_SIZE"):
+  #   test_decompress   = repetition: 64 iterations of a fixed 512 KB payload (legacy anchor).
+  #   test_decompress_* = size ladder: 1 iteration, payload SIZE (argv.2, bytes) grows the
+  #                       input string + compress/uncompress buffers, so RSS/live-heap
+  #                       grow ~linearly. Compute + Bigstring-alloc bench (low gc%,
+  #                       ~0 promotion; major-GC count pinned by the fixed-size Bigstring
+  #                       io buffers, not by payload). Measured 5.5.0 / Ryzen 9950X:
+  #                         small   80 MB  ~5s   0.5GB    large  1 GB  ~63s  5.7GB
+  #                         default 256 MB ~16s  1.4GB
+  #   (huge band deferred.) Data is random (incompressible) as in the original bench.
   macro-decompress:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 300
     programs:
       test_decompress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
         build_script: "decompress.build.sh"
         args: "64 524288"
+      test_decompress_small:      # 1 iter, 80MB payload: ~5s, 0.5GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
+        build_script: "decompress.build.sh"
+        args: "1 83886080"
+      test_decompress_default:    # 1 iter, 256MB payload: ~16s, 1.4GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
+        build_script: "decompress.build.sh"
+        args: "1 268435456"
+      test_decompress_large:      # 1 iter, 1GB payload: ~63s, 5.7GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
+        build_script: "decompress.build.sh"
+        args: "1 1073741824"
 
   # Eio: OCaml 5 effect-based concurrency (requires OCaml >= 5.2)
   macro-eio:
@@ -251,37 +460,141 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
         build_script: "eio.build.sh"
         args: ""
+      # Input-size ladder (working set = concurrency degree). eio_fiber_stream is a
+      # throughput bench (few fibers, one shared stream, tiny constant live set);
+      # eio_conc_bench scales the other axis — the number of independent
+      # producer/consumer fiber pairs (argv.1), each on its own bounded stream —
+      # so the live set (parked fibers' effect continuations + data buffered
+      # across all the streams) grows ~linearly. eio.build.sh selects this driver
+      # by the eio_conc_* output name; per-fiber work is fixed at 20000 items.
+      # Measured 5.5.0 / Ryzen 9 9950X: 3000 pairs ~5.5s/0.69GB, 9000 ~16s/2.1GB,
+      # 21000 ~39s/5.1GB (top_heap 84->619M words, promotion ~0.85 — a live-set
+      # ladder). Arg = n_pairs.
+      eio_conc_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
+        build_script: "eio.build.sh"
+        args: "3000"
+      eio_conc_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
+        build_script: "eio.build.sh"
+        args: "9000"
+      eio_conc_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
+        build_script: "eio.build.sh"
+        args: "21000"
 
+  # Size axis = input SIZE (argv.1 = generated # lines). The driver generates the
+  # pseudo-code in-process and RETAINS the whole token list, so the live set +
+  # RSS grow ~linearly with the input (a footprint ladder). Tokenising is cheap,
+  # so wall is ~linear and reaching the time bands needs big inputs / much RAM.
+  # Measured 5.5.0 / Ryzen 9950X (wall / RSS / live-heap; promo steady ~0.17):
+  #   small   2M   4.6s   2.8GB   379M words
+  #   default 6M   14s    8.5GB   1.14G words
+  #   large   20M  46s    28GB    3.83G words   (RAM-capped just under the 1-3min band)
+  # (huge band deferred.) Legacy sedlex_tokenize (700k, ~1.5s) kept as anchor.
   macro-sedlex:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 300
     programs:
       sedlex_tokenize:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
         build_script: "sedlex.build.sh"
         args: "700000"
+      sedlex_tokenize_small:      # 2M lines: ~4.6s, 2.8GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
+        build_script: "sedlex.build.sh"
+        args: "2000000"
+      sedlex_tokenize_default:    # 6M lines: ~14s, 8.5GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
+        build_script: "sedlex.build.sh"
+        args: "6000000"
+      sedlex_tokenize_large:      # 20M lines: ~46s, 28GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
+        build_script: "sedlex.build.sh"
+        args: "20000000"
 
+  # Two knobs (args "$ITERATIONS $DOC"). $DOC is a file path (read, legacy) OR
+  # an integer RECORD COUNT (generated in-process — see ydump_repeat.ml):
+  #   ydump_repeat   = repetition: 1000 iterations of sample.json (687KB) — repetition.
+  #   ydump_repeat_* = size ladder: 1 iteration, doc SIZE via generated record count.
+  #                    Parse builds a memory-heavy Yojson tree (~28% promoted to the
+  #                    major heap), so RSS/live grow ~linearly (a promotion-heavy
+  #                    footprint ladder). Measured 5.5.0 / Ryzen 9950X:
+  #                      small   2M recs  257MB  ~5.5s  3.25GB
+  #                      default 6M recs  771MB  ~16s   10GB
+  #                      large   12M recs 1.54GB ~33s   20GB   (RAM-capped, under 1-3min band)
+  #   (huge band deferred.) No generated files — the count arg produces the JSON in-process.
   macro-yojson:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 300
     programs:
       ydump_repeat:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
         build_script: "yojson.build.sh"
         args: "1000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson/sample.json"
+      ydump_repeat_small:      # 1 iter, 2M records (~257MB): ~5.5s, 3.25GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
+        build_script: "yojson.build.sh"
+        args: "1 2000000"
+      ydump_repeat_default:    # 1 iter, 6M records (~771MB): ~16s, 10GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
+        build_script: "yojson.build.sh"
+        args: "1 6000000"
+      ydump_repeat_large:      # 1 iter, 12M records (~1.54GB): ~33s, 20GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
+        build_script: "yojson.build.sh"
+        args: "1 12000000"
 
   macro-zarith:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 900   # raised from 120 for the `huge` rung (~358s on Ryzen 9950X)
     programs:
+      # Legacy single input; kept so existing configs + the off_heap_accounting /
+      # custom_block_finalisation / ffi_bulk tag refs keep resolving.
       zarith_pi:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
         build_script: "zarith.build.sh"
         args: "15000"
+      # Input-size ladder (digit count = working set). Measured wall on
+      # Ryzen 9950X / OCaml 5.5.0: small 5.5s, default 16.7s, large 123s, huge 358s.
+      # zarith is an allocation-churn / promotion-pressure bench (GMP custom-block
+      # off-heap path): gc% FALLS with size (19%->8%, more mutator compute) while
+      # tail pauses GROW (40->253ms). small/default = GC-throughput signal;
+      # large/huge = GC-latency signal. See docs/benchmarks/zarith.md.
+      zarith_pi_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
+        build_script: "zarith.build.sh"
+        args: "22000"
+      zarith_pi_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
+        build_script: "zarith.build.sh"
+        args: "38000"
+      zarith_pi_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
+        build_script: "zarith.build.sh"
+        args: "106000"
+      zarith_pi_huge:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
+        build_script: "zarith.build.sh"
+        args: "180000"
 
+  # Two knobs (wrapper args "$LOOP $DIM"):
+  #   owl_gc      = repetition: loop=6, dim=100 (legacy ~16s steady-state).
+  #   owl_gc_*    = size ladder (working set): loop=1, dim scales the matrix size, so the
+  #                 off-heap Bigarray live set = 100 * dim^2 * 8 bytes grows RSS
+  #                 ~quadratically (a footprint ladder). top_heap_words is FLAT
+  #                 (off-heap under-reports) -> read RSS + allocated_words, not top_heap.
+  #                 Measured 5.5.0 / Ryzen 9950X (wall is BLAS-thread-bound so it is
+  #                 secondary; RSS is the stable shape signal):
+  #                   small   dim 300  ~4s    95 MB
+  #                   default dim 500  ~11s   230 MB
+  #                   large   dim 1500 ~124s  1.9 GB
+  #                   huge    dim 2400 ~320s  ~4.6 GB
+  #   Ring: re-25 (32 MB) as for owl_gc — event volume (~25-30k collections) is
+  #   similar across rungs since the grid (num_sample_pts=100) is fixed.
   macro-owl:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 900
     programs:
       owl_gc:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
@@ -295,6 +608,22 @@ suites:
         # wall_time.
         # See ~/macro-benches/README.md §"Iteration counts".
         args: "6"
+      owl_gc_small:      # dim 300: ~4s, 95MB off-heap live set
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
+        build_script: "owl.build.sh"
+        args: "1 300"
+      owl_gc_default:    # dim 500: ~11s, 230MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
+        build_script: "owl.build.sh"
+        args: "1 500"
+      owl_gc_large:      # dim 1500: ~124s, 1.9GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
+        build_script: "owl.build.sh"
+        args: "1 1500"
+      owl_gc_huge:       # dim 2400: ~320s, ~4.6GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
+        build_script: "owl.build.sh"
+        args: "1 2400"
 
   # ocamlc-self-compile: invoke the variant's own ocamlc on a generated
   # ~400k-line OCaml workload (concatenated JSOO benchmark sources × 30
@@ -309,20 +638,75 @@ suites:
     type: OCamlBenchmarkSuite
     timeout: 300
     programs:
+      # JSOO numeric programs x REPLICAS. Legacy default REPLICAS=30 (~5s, ~1GB
+      # heap) kept for continuity; the refactor "default" rung is REPLICAS=130
+      # (~15s, ~4GB heap) — set OCAMLC_SELF_COMPILE_REPLICAS=130 at build time.
+      # Large monotonic heap, minor-GC-dominated, major GC barely runs.
       ocamlc_self_compile:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-self-compile"
         build_script: "ocamlc-self-compile.build.sh"
         args: ""
+      # Companion different-CHARACTER real workload: ocamlc compiling the real
+      # uucp (Unicode) library (~2s, ~78MB heap). Data/constant-heavy -> small
+      # COLLECTED heap, ACTIVE major GC (154 cycles vs ~13 for JSOO). Opposite
+      # end of the collector from ocamlc_self_compile; see docs/benchmarks/.
+      ocamlc_compile_uucp:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
+        build_script: "ocamlc-compile-uucp.build.sh"
+        args: ""
+      # Input-size ladder (compiling N replicas of the uucp Unicode library). uucp
+      # is data/constant-heavy with a COLLECTED heap, so scaling it keeps RSS ~flat
+      # (~90-120MB) while major-GC cycles + promotion scale linearly — a cheap
+      # major-GC-throughput ladder, the counterpart to ocamlc_self_compile's
+      # memory-bound (monotonic-heap) compilation. ocamlc-compile-uucp.build.sh
+      # bakes the replica count per rung by output name (N=3/8/25). Measured 5.5.0
+      # / Ryzen 9 9950X: 6s/87MB/377 major, 17s/96MB/771 major, 58s/120MB/1582 major
+      # (promotion 144M->1.36G words). No args.
+      ocamlc_compile_uucp_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
+        build_script: "ocamlc-compile-uucp.build.sh"
+        args: ""
+      ocamlc_compile_uucp_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
+        build_script: "ocamlc-compile-uucp.build.sh"
+        args: ""
+      ocamlc_compile_uucp_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
+        build_script: "ocamlc-compile-uucp.build.sh"
+        args: ""
 
   # liquidsoap-lang: parse + typecheck liquidsoap scripts (DSL compiler).
+  # Two knobs (args "$ITERATIONS $UNITS"):
+  #   liq_parse_typecheck   = repetition: 50000 iterations of one fixed ~90-line script.
+  #   liq_parse_typecheck_* = size ladder: 1 iteration, script SIZE via generated unit
+  #     count (argv.2). Each unit is a self-contained recursion+higher-order+list
+  #     block, so the parser builds a bigger AST and the typechecker a bigger type
+  #     environment; RSS/live grow with the count and wall is super-quadratic (the
+  #     env grows and each unit unifies against it). Measured 5.5.0 / Ryzen 9950X:
+  #       small   4000 units   4.7s   261MB   37M words
+  #       default 6500 units   14s    410MB   61M words
+  #       large   12000 units  65s    757MB   113M words
+  #   (huge deferred.) In-process generation — no vendored/generated files.
   macro-liquidsoap-lang:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 300
     programs:
       liq_parse_typecheck:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
         build_script: "liquidsoap-lang.build.sh"
         args: "50000"
+      liq_parse_typecheck_small:      # 1 iter, 4000 units: ~5s, 261MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
+        build_script: "liquidsoap-lang.build.sh"
+        args: "1 4000"
+      liq_parse_typecheck_default:    # 1 iter, 6500 units: ~14s, 410MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
+        build_script: "liquidsoap-lang.build.sh"
+        args: "1 6500"
+      liq_parse_typecheck_large:      # 1 iter, 12000 units: ~65s, 757MB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
+        build_script: "liquidsoap-lang.build.sh"
+        args: "1 12000"
 
   # merlin: in-process driver replicating merlin's cram bench (the 7
   # canonical IDE queries against a 51 319-line file). Spawns a typer
@@ -360,14 +744,39 @@ suites:
   # rather than the 6.2.0 release, because 6.2.0 hard-rejects OCaml >= 5.5.
   # The branch supports 4.13 ≤ x < 5.7 — covers all our matrix runtimes.
   # Requires Cmdliner 2.0+ (vendored via setup-monorepo.sh as v2.1.0).
+  # Size axis = input BYTECODE size. jsoo is a whole-program compiler (holds the
+  # whole IR in memory), so RSS/live grow with the input — a genuine footprint
+  # ladder (unlike the per-module compiler benches). But cost tracks program
+  # STRUCTURE not raw bytes (thousands of tiny closures are pathological), so
+  # the rung inputs are REAL code: the 20 JSOO benchmark sources wrapped in
+  # modules × R replicas, compiled to a per-runtime .byte by jsoo.build.sh
+  # (generated + gitignored). The rung arg (small/default/large) selects the
+  # workload; empty = legacy ocamlc.byte. Measured 5.5.0 / Ryzen 9950X:
+  #   jsoo (ocamlc.byte 3.66MB) ~3.7s  0.27GB   (legacy anchor, repetition-ish)
+  #   small   30 reps  5.6MB  ~5s   0.5GB
+  #   default 80 reps  14MB   ~16s  1.7GB
+  #   large   200 reps 36MB   ~50s  7.8GB
+  # (huge deferred.)
   macro-jsoo:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 300
     programs:
       jsoo:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
         build_script: "jsoo.build.sh"
         args: ""
+      jsoo_small:      # 30 reps, 5.6MB bytecode: ~5s, 0.5GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
+        build_script: "jsoo.build.sh"
+        args: "small"
+      jsoo_default:    # 80 reps, 14MB bytecode: ~16s, 1.7GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
+        build_script: "jsoo.build.sh"
+        args: "default"
+      jsoo_large:      # 200 reps, 36MB bytecode: ~50s, 7.8GB
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
+        build_script: "jsoo.build.sh"
+        args: "large"
 
   # liq-video-frames: synthetic reproduction of the GC-pacer / heap-growth
   # pattern from ocaml/ocaml#13123 + #14533 (custom_major_ratio regression).
@@ -385,12 +794,37 @@ suites:
   # arg = number of iterations; arg=30000 ≈ 4–20s wall.
   macro-liq-video-frames:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    timeout: 300
     programs:
+      # args = "n_frames [width height]".
+      #   liq_video_frames_pool   = the frozen #14533 repro: 30000 720p frames.
+      #   liq_video_frames_pool_* = size ladder: frame RESOLUTION (width/height) at a
+      #     fixed 15000 frames. A bigger frame scales the per-frame off-heap
+      #     Bigarray, so caml_alloc_custom_mem tells the pacer about more off-heap
+      #     bytes and forces proportionally MORE major cycles (the #14533 pacer
+      #     regime) — major-cycle count and wall grow ~with pixels^2. RSS grows
+      #     only modestly (shared pool buffer; off-heap not counted in RSS/top_heap
+      #     — lean on the collection counts). Measured 5.5.0 / Ryzen 9950X:
+      #       small   1080p  5.6s   108MB   1104 majorGC
+      #       default 4K     22s    118MB   4413 majorGC
+      #       large   8K     101s   154MB   16837 majorGC
+      #   (huge deferred.)
       liq_video_frames_pool:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
         args: "30000"
+      liq_video_frames_pool_small:      # 15000 frames, 1080p: ~5.6s, 1104 majorGC
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
+        build_script: "liq-video-frames.build.sh"
+        args: "15000 1920 1080"
+      liq_video_frames_pool_default:    # 15000 frames, 4K: ~22s, 4413 majorGC
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
+        build_script: "liq-video-frames.build.sh"
+        args: "15000 3840 2160"
+      liq_video_frames_pool_large:      # 15000 frames, 8K: ~101s, 16837 majorGC
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
+        build_script: "liq-video-frames.build.sh"
+        args: "15000 7680 4320"
 
   # pplacer: phylogenetic placement (bioinformatics).
   macro-pplacer:
@@ -407,6 +841,28 @@ suites:
         # hardware; comfortably above noise floor on faster CI machines).
         # See ~/macro-benches/README.md §"Iteration counts" for the pattern.
         args: "5"
+      # Input-size likelihood ladder (working set = alignment length, n_sites).
+      # pplacer.build.sh builds like_bench.exe (pplacer's Felsenstein likelihood
+      # hot path) and emits a wrapper that replicates the reference alignment's
+      # columns argv.1 times and runs a fixed 40-point ML pendant-branch scan per
+      # edge. The larger inputs grow the generalized likelihood vectors (Glv, GSL-backed
+      # OFF-HEAP Bigarrays): top_heap stays ~2-8 MB while RSS spans 0.2-2.2 GB, so
+      # read this ladder by RSS/allocated_words (off-heap caveat), like owl. The
+      # per-edge scan lifts wall to owl-like bands. Measured 5.5.0 / Ryzen 9
+      # 9950X: mult 8 ~4.7s/0.22GB, 25 ~15s/0.65GB, 85 ~50s/2.2GB (allocated_words
+      # 2.1->22.4G, minor GC 8k->86k, major 147->646). argv.1 = replication factor.
+      pplacer_like_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
+        build_script: "pplacer.build.sh"
+        args: "8"
+      pplacer_like_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
+        build_script: "pplacer.build.sh"
+        args: "25"
+      pplacer_like_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
+        build_script: "pplacer.build.sh"
+        args: "85"
 
   # lavyek: multicore key-value store on Eio + kcas + io_uring (single
   # OCaml process, multi-domain).  DaCapo-style fixed-work driver; the
@@ -625,63 +1081,115 @@ benchmarks:
     - menhir_ocamly
     - menhir_sql_parser
     - menhir_sysver
+    - menhir_sysver_canonical
 
   macro-cpdf-monorepo:
     - cpdf_merge
     - cpdf_blacktext
     - cpdf_scale
     - cpdf_squeeze
+    - cpdf_squeeze_small
+    - cpdf_squeeze_default
+    - cpdf_squeeze_large
 
   macro-alt-ergo-monorepo:
     - alt_ergo_fill
     - alt_ergo_yyll
     - alt_ergo_unsat_smt2
+    - alt_ergo_chain_small
+    - alt_ergo_chain_default
+    - alt_ergo_chain_large
 
   macro-frama-c-monorepo:
     - frama_c_eva_t
     - frama_c_eva_sqlite
+    - frama_c_eva_sqlite_small
+    - frama_c_eva_sqlite_default
+    - frama_c_eva_sqlite_large
 
   macro-goblint-monorepo:
     - goblint
+    - goblint_gen_small
+    - goblint_gen_default
+    - goblint_gen_large
 
   macro-coq-monorepo:
     - coqc_corelib_stress
+    - coqc_tree_small
+    - coqc_tree_default
+    - coqc_tree_large
 
   macro-devkit:
     - devkit_htmlstream
     - devkit_stre
     - devkit_network
     - devkit_gzip
+    - devkit_htmlstream_small
+    - devkit_htmlstream_default
+    - devkit_htmlstream_large
 
   macro-irmin:
     - irmin_mem_rw
+    - irmin_mem_rw_small
+    - irmin_mem_rw_default
+    - irmin_mem_rw_large
 
   macro-ocamlformat:
     - ocamlformat_rocq
+    - ocamlformat_rocq_small
+    - ocamlformat_rocq_default
+    - ocamlformat_rocq_large
 
   macro-decompress:
     - test_decompress
+    - test_decompress_small
+    - test_decompress_default
+    - test_decompress_large
 
   macro-eio:
     - eio_fiber_stream
+    - eio_conc_small
+    - eio_conc_default
+    - eio_conc_large
 
   macro-sedlex:
     - sedlex_tokenize
+    - sedlex_tokenize_small
+    - sedlex_tokenize_default
+    - sedlex_tokenize_large
 
   macro-yojson:
     - ydump_repeat
+    - ydump_repeat_small
+    - ydump_repeat_default
+    - ydump_repeat_large
 
   macro-zarith:
     - zarith_pi
+    - zarith_pi_small
+    - zarith_pi_default
+    - zarith_pi_large
+    - zarith_pi_huge
 
   macro-owl:
     - owl_gc
+    - owl_gc_small
+    - owl_gc_default
+    - owl_gc_large
+    - owl_gc_huge
 
   macro-ocamlc-self-compile:
     - ocamlc_self_compile
+    - ocamlc_compile_uucp
+    - ocamlc_compile_uucp_small
+    - ocamlc_compile_uucp_default
+    - ocamlc_compile_uucp_large
 
   macro-liquidsoap-lang:
     - liq_parse_typecheck
+    - liq_parse_typecheck_small
+    - liq_parse_typecheck_default
+    - liq_parse_typecheck_large
 
   # macro-merlin: DISABLED pending upstream fix to a race in
   # merlin-domains' typer-domain handoff. The vendored typer hits an
@@ -695,12 +1203,21 @@ benchmarks:
 
   macro-jsoo:
     - jsoo
+    - jsoo_small
+    - jsoo_default
+    - jsoo_large
 
   macro-liq-video-frames:
     - liq_video_frames_pool
+    - liq_video_frames_pool_small
+    - liq_video_frames_pool_default
+    - liq_video_frames_pool_large
 
   macro-pplacer:
     - pplacer_testsuite
+    - pplacer_like_small
+    - pplacer_like_default
+    - pplacer_like_large
 
   # macro-lavyek-monorepo: DISABLED — the lavyek library lives in a PRIVATE
   # repo (github.com/tarides/lavyek), so builds without access to it cannot
@@ -755,6 +1272,338 @@ benchmarks:
 # rather than silently running nothing.
 # =============================================================================
 tags:
+
+  # ---------------------------------------------------------------------
+  # Input-size ladder tags — select which rung of each tool to run.
+  # A bare run (no RUNNING_TAG) auto-applies `default_run`. Other sizes,
+  # the legacy benches, and everything-at-once are opt-in via RUNNING_TAG.
+  # ---------------------------------------------------------------------
+  default_run:
+    description: |
+      Input-size ladder — the DEFAULT rung of every tool. This is the tag a bare run
+      (no RUNNING_TAG) falls back to, so `default_run` is the standard suite.
+    exercised_by:
+      macro-menhir-monorepo:
+        - menhir_ocamly
+      macro-cpdf-monorepo:
+        - cpdf_squeeze_default
+      macro-alt-ergo-monorepo:
+        - alt_ergo_chain_default
+      macro-frama-c-monorepo:
+        - frama_c_eva_sqlite_default
+      macro-goblint-monorepo:
+        - goblint_gen_default
+      macro-coq-monorepo:
+        - coqc_tree_default
+      macro-devkit:
+        - devkit_htmlstream_default
+      macro-irmin:
+        - irmin_mem_rw_default
+      macro-ocamlformat:
+        - ocamlformat_rocq_default
+      macro-decompress:
+        - test_decompress_default
+      macro-eio:
+        - eio_conc_default
+      macro-sedlex:
+        - sedlex_tokenize_default
+      macro-yojson:
+        - ydump_repeat_default
+      macro-zarith:
+        - zarith_pi_default
+      macro-owl:
+        - owl_gc_default
+      macro-ocamlc-self-compile:
+        - ocamlc_compile_uucp_default
+      macro-liquidsoap-lang:
+        - liq_parse_typecheck_default
+      macro-jsoo:
+        - jsoo_default
+      macro-liq-video-frames:
+        - liq_video_frames_pool_default
+      macro-pplacer:
+        - pplacer_like_default
+
+  small_run:
+    description: |
+      Input-size ladder — the SMALL rung of every tool (fast, correctness-oriented).
+      This is what macro-benches CI runs. Applied automatically? No — the CI passes it
+      explicitly; a bare run defaults to `default_run`.
+    exercised_by:
+      macro-menhir-monorepo:
+        - menhir_sysver
+      macro-cpdf-monorepo:
+        - cpdf_squeeze_small
+      macro-alt-ergo-monorepo:
+        - alt_ergo_chain_small
+      macro-frama-c-monorepo:
+        - frama_c_eva_sqlite_small
+      macro-goblint-monorepo:
+        - goblint_gen_small
+      macro-coq-monorepo:
+        - coqc_tree_small
+      macro-devkit:
+        - devkit_htmlstream_small
+      macro-irmin:
+        - irmin_mem_rw_small
+      macro-ocamlformat:
+        - ocamlformat_rocq_small
+      macro-decompress:
+        - test_decompress_small
+      macro-eio:
+        - eio_conc_small
+      macro-sedlex:
+        - sedlex_tokenize_small
+      macro-yojson:
+        - ydump_repeat_small
+      macro-zarith:
+        - zarith_pi_small
+      macro-owl:
+        - owl_gc_small
+      macro-ocamlc-self-compile:
+        - ocamlc_compile_uucp_small
+      macro-liquidsoap-lang:
+        - liq_parse_typecheck_small
+      macro-jsoo:
+        - jsoo_small
+      macro-liq-video-frames:
+        - liq_video_frames_pool_small
+      macro-pplacer:
+        - pplacer_like_small
+
+  large_run:
+    description: |
+      Input-size ladder — the LARGE rung of every tool (heaviest routinely-run size).
+    exercised_by:
+      macro-menhir-monorepo:
+        - menhir_sysver_canonical
+      macro-cpdf-monorepo:
+        - cpdf_squeeze_large
+      macro-alt-ergo-monorepo:
+        - alt_ergo_chain_large
+      macro-frama-c-monorepo:
+        - frama_c_eva_sqlite_large
+      macro-goblint-monorepo:
+        - goblint_gen_large
+      macro-coq-monorepo:
+        - coqc_tree_large
+      macro-devkit:
+        - devkit_htmlstream_large
+      macro-irmin:
+        - irmin_mem_rw_large
+      macro-ocamlformat:
+        - ocamlformat_rocq_large
+      macro-decompress:
+        - test_decompress_large
+      macro-eio:
+        - eio_conc_large
+      macro-sedlex:
+        - sedlex_tokenize_large
+      macro-yojson:
+        - ydump_repeat_large
+      macro-zarith:
+        - zarith_pi_large
+      macro-owl:
+        - owl_gc_large
+      macro-ocamlc-self-compile:
+        - ocamlc_compile_uucp_large
+      macro-liquidsoap-lang:
+        - liq_parse_typecheck_large
+      macro-jsoo:
+        - jsoo_large
+      macro-liq-video-frames:
+        - liq_video_frames_pool_large
+      macro-pplacer:
+        - pplacer_like_large
+
+  huge_run:
+    description: |
+      Input-size ladder — the HUGE rung (only the tools that have one). Very heavy;
+      run explicitly.
+    exercised_by:
+      macro-zarith:
+        - zarith_pi_huge
+      macro-owl:
+        - owl_gc_huge
+
+  legacy:
+    description: |
+      The pre-ladder benchmarks kept for continuity but not run by default: original
+      single-point anchors, extra per-tool workloads (cpdf ops, alt-ergo problems,
+      menhir grammars, devkit stre/network/gzip), and the frozen issue reproducers
+      (liq_video_frames_pool #14533, goblint #13733). Run with RUNNING_TAG=legacy.
+    exercised_by:
+      macro-menhir-monorepo:
+        - menhir_sql_parser
+      macro-cpdf-monorepo:
+        - cpdf_merge
+        - cpdf_blacktext
+        - cpdf_scale
+        - cpdf_squeeze
+      macro-alt-ergo-monorepo:
+        - alt_ergo_fill
+        - alt_ergo_yyll
+        - alt_ergo_unsat_smt2
+      macro-frama-c-monorepo:
+        - frama_c_eva_t
+        - frama_c_eva_sqlite
+      macro-goblint-monorepo:
+        - goblint
+      macro-coq-monorepo:
+        - coqc_corelib_stress
+      macro-devkit:
+        - devkit_htmlstream
+        - devkit_stre
+        - devkit_network
+        - devkit_gzip
+      macro-irmin:
+        - irmin_mem_rw
+      macro-ocamlformat:
+        - ocamlformat_rocq
+      macro-decompress:
+        - test_decompress
+      macro-eio:
+        - eio_fiber_stream
+      macro-sedlex:
+        - sedlex_tokenize
+      macro-yojson:
+        - ydump_repeat
+      macro-zarith:
+        - zarith_pi
+      macro-owl:
+        - owl_gc
+      macro-ocamlc-self-compile:
+        - ocamlc_self_compile
+        - ocamlc_compile_uucp
+      macro-liquidsoap-lang:
+        - liq_parse_typecheck
+      macro-jsoo:
+        - jsoo
+      macro-liq-video-frames:
+        - liq_video_frames_pool
+      macro-pplacer:
+        - pplacer_testsuite
+
+  all_benches:
+    description: |
+      Everything runnable: every ladder rung AND every legacy bench, across all enabled
+      suites (the two disabled suites, merlin and lavyek, stay disabled). Use
+      RUNNING_TAG=all_benches to run the entire suite at every size at once.
+    exercised_by:
+      macro-menhir-monorepo:
+        - menhir_ocamly
+        - menhir_sql_parser
+        - menhir_sysver
+        - menhir_sysver_canonical
+      macro-cpdf-monorepo:
+        - cpdf_merge
+        - cpdf_blacktext
+        - cpdf_scale
+        - cpdf_squeeze
+        - cpdf_squeeze_small
+        - cpdf_squeeze_default
+        - cpdf_squeeze_large
+      macro-alt-ergo-monorepo:
+        - alt_ergo_fill
+        - alt_ergo_yyll
+        - alt_ergo_chain_small
+        - alt_ergo_chain_default
+        - alt_ergo_chain_large
+        - alt_ergo_unsat_smt2
+      macro-frama-c-monorepo:
+        - frama_c_eva_t
+        - frama_c_eva_sqlite
+        - frama_c_eva_sqlite_small
+        - frama_c_eva_sqlite_default
+        - frama_c_eva_sqlite_large
+      macro-goblint-monorepo:
+        - goblint
+        - goblint_gen_small
+        - goblint_gen_default
+        - goblint_gen_large
+      macro-coq-monorepo:
+        - coqc_corelib_stress
+        - coqc_tree_small
+        - coqc_tree_default
+        - coqc_tree_large
+      macro-devkit:
+        - devkit_htmlstream
+        - devkit_htmlstream_small
+        - devkit_htmlstream_default
+        - devkit_htmlstream_large
+        - devkit_stre
+        - devkit_network
+        - devkit_gzip
+      macro-irmin:
+        - irmin_mem_rw
+        - irmin_mem_rw_small
+        - irmin_mem_rw_default
+        - irmin_mem_rw_large
+      macro-ocamlformat:
+        - ocamlformat_rocq
+        - ocamlformat_rocq_small
+        - ocamlformat_rocq_default
+        - ocamlformat_rocq_large
+      macro-decompress:
+        - test_decompress
+        - test_decompress_small
+        - test_decompress_default
+        - test_decompress_large
+      macro-eio:
+        - eio_fiber_stream
+        - eio_conc_small
+        - eio_conc_default
+        - eio_conc_large
+      macro-sedlex:
+        - sedlex_tokenize
+        - sedlex_tokenize_small
+        - sedlex_tokenize_default
+        - sedlex_tokenize_large
+      macro-yojson:
+        - ydump_repeat
+        - ydump_repeat_small
+        - ydump_repeat_default
+        - ydump_repeat_large
+      macro-zarith:
+        - zarith_pi
+        - zarith_pi_small
+        - zarith_pi_default
+        - zarith_pi_large
+        - zarith_pi_huge
+      macro-owl:
+        - owl_gc
+        - owl_gc_small
+        - owl_gc_default
+        - owl_gc_large
+        - owl_gc_huge
+      macro-ocamlc-self-compile:
+        - ocamlc_self_compile
+        - ocamlc_compile_uucp
+        - ocamlc_compile_uucp_small
+        - ocamlc_compile_uucp_default
+        - ocamlc_compile_uucp_large
+      macro-liquidsoap-lang:
+        - liq_parse_typecheck
+        - liq_parse_typecheck_small
+        - liq_parse_typecheck_default
+        - liq_parse_typecheck_large
+      macro-jsoo:
+        - jsoo
+        - jsoo_small
+        - jsoo_default
+        - jsoo_large
+      macro-liq-video-frames:
+        - liq_video_frames_pool
+        - liq_video_frames_pool_small
+        - liq_video_frames_pool_default
+        - liq_video_frames_pool_large
+      macro-pplacer:
+        - pplacer_testsuite
+        - pplacer_like_small
+        - pplacer_like_default
+        - pplacer_like_large
+
+
 
   # ---------------------------------------------------------------------
   # Coverage gaps — no benchmark currently exercises these on the hot
