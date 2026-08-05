@@ -107,7 +107,7 @@ suites:
       menhir_sysver_canonical:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
         build_script: "menhir.build.sh"
-        args: "--canonical ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/sysver.mly"
+        args: "--canonical --table ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/sysver.mly"
 
   macro-cpdf-monorepo:
     type: OCamlBenchmarkSuite
