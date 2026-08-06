@@ -1,0 +1,92 @@
+ocaml-mmtk-14d1b8f.mmtk_immix:
+  macro-coq-monorepo:
+    coqc_corelib_stress: 3
+  macro-cpdf-monorepo:
+    cpdf_blacktext: 360
+    cpdf_merge: 620
+    cpdf_scale: 442
+    cpdf_squeeze: 508
+  macro-decompress:
+    test_decompress: 3
+  macro-devkit:
+    devkit_gzip: 4
+    devkit_htmlstream: 340
+    devkit_network: 64
+    devkit_stre: 3
+  macro-eio:
+    eio_fiber_stream: 3
+  macro-frama-c-monorepo:
+    frama_c_eva_sqlite: 673
+    frama_c_eva_t: 17
+  macro-goblint-monorepo:
+    goblint: 11
+  macro-irmin:
+    irmin_mem_rw: 16
+  macro-jsoo:
+    jsoo: 313
+  macro-liq-video-frames:
+    liq_video_frames_pool: 101
+  macro-liquidsoap-lang:
+    liq_parse_typecheck: 3
+  macro-menhir-monorepo:
+    menhir_ocamly: 6059
+    menhir_sql_parser: 358
+    menhir_sysver: 693
+  macro-ocamlc-self-compile:
+    ocamlc_self_compile: 2233
+  macro-ocamlformat:
+    ocamlformat_rocq: 236
+  macro-owl:
+    owl_gc: 3
+  macro-sedlex:
+    sedlex_tokenize: 2010
+  macro-yojson:
+    ydump_repeat: 3
+  macro-zarith:
+    zarith_pi: 3
+ocaml-mmtk-14d1b8f.mmtk_sticky:
+  macro-coq-monorepo:
+    coqc_corelib_stress: 3
+  macro-cpdf-monorepo:
+    cpdf_blacktext: 290
+    cpdf_merge: 390
+    cpdf_scale: 446
+    cpdf_squeeze: 292
+  macro-decompress:
+    test_decompress: 3
+  macro-devkit:
+    devkit_gzip: 5
+    devkit_htmlstream: 275
+    devkit_network: 63
+    devkit_stre: 3
+  macro-eio:
+    eio_fiber_stream: 3
+  macro-frama-c-monorepo:
+    frama_c_eva_sqlite: 516
+    frama_c_eva_t: 15
+  macro-goblint-monorepo:
+    goblint: 11
+  macro-irmin:
+    irmin_mem_rw: 17
+  macro-jsoo:
+    jsoo: 278
+  macro-liq-video-frames:
+    liq_video_frames_pool: 102
+  macro-liquidsoap-lang:
+    liq_parse_typecheck: 3
+  macro-menhir-monorepo:
+    menhir_ocamly: 3782
+    menhir_sql_parser: 218
+    menhir_sysver: 610
+  macro-ocamlc-self-compile:
+    ocamlc_self_compile: 1346
+  macro-ocamlformat:
+    ocamlformat_rocq: 121
+  macro-owl:
+    owl_gc: 3
+  macro-sedlex:
+    sedlex_tokenize: 1002
+  macro-yojson:
+    ydump_repeat: 3
+  macro-zarith:
+    zarith_pi: 3

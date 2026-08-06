@@ -1,0 +1,75 @@
+# =============================================================================
+# MMTk minheap — smallest MMTK_HEAP_SIZE_MB each macro bench completes in
+# =============================================================================
+# Runs over the 27 macro benchmarks that RUN cleanly under MMTk (both plans).
+# EXCLUDED (crash under MMTk regardless of heap, so minheap is meaningless):
+#   - macro-alt-ergo-monorepo (alt_ergo_fill/yyll/unsat_smt2) -> SIGSEGV
+#   - macro-pplacer (pplacer_testsuite)                       -> SIGABRT
+#
+# minheap binary-searches per (benchmark, plan).  Binaries must already be
+# built (run mmtk_macro.yml first).  ASLR-off is injected by OCamlMMTk, so no
+# wrapper is needed.  Long job (GC thrashes near the boundary) — run in screen.
+#
+# Usage (see the screen one-liner in chat):
+#   cd ~/running-ng
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches PYTHONPATH=src \
+#     python3 -m running minheap \
+#       src/running/config/experiments/mmtk_minheap.yml \
+#       ~/mmtk_minheap_result.yml -a 2
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+plugins:
+zulip:
+  type: Zulip
+  request:
+    type: private
+    to: [361443]
+
+
+maxheap: 16384     # MB; hi bound of the search (benches ran fine at 16384)
+attempts: 2        # retries per heap size (override with -a)
+
+# Replace the benchmark set with exactly the 27 MMTk-runnable programs.
+overrides:
+  benchmarks:
+    macro-menhir-monorepo: [menhir_ocamly, menhir_sql_parser, menhir_sysver]
+    macro-cpdf-monorepo: [cpdf_merge, cpdf_blacktext, cpdf_scale, cpdf_squeeze]
+    macro-frama-c-monorepo: [frama_c_eva_t, frama_c_eva_sqlite]
+    macro-goblint-monorepo: [goblint]
+    macro-coq-monorepo: [coqc_corelib_stress]
+    macro-devkit: [devkit_htmlstream, devkit_stre, devkit_network, devkit_gzip]
+    macro-irmin: [irmin_mem_rw]
+    macro-ocamlformat: [ocamlformat_rocq]
+    macro-decompress: [test_decompress]
+    macro-eio: [eio_fiber_stream]
+    macro-sedlex: [sedlex_tokenize]
+    macro-yojson: [ydump_repeat]
+    macro-zarith: [zarith_pi]
+    macro-owl: [owl_gc]
+    macro-ocamlc-self-compile: [ocamlc_self_compile]
+    macro-liquidsoap-lang: [liq_parse_typecheck]
+    macro-jsoo: [jsoo]
+    macro-liq-video-frames: [liq_video_frames_pool]
+
+modifiers:
+  mmtk_immix:
+    type: EnvVar
+    var: "MMTK_PLAN"
+    val: "Immix"
+  mmtk_sticky:
+    type: EnvVar
+    var: "MMTK_PLAN"
+    val: "StickyImmix"
+
+runtimes:
+  ocaml-mmtk-14d1b8f:
+    type: OCamlMMTk
+    commit: "14d1b8f68aeb7b283ff62ecfba3ecfc61cf8252e"
+
+# No mmtk_heap modifier: minheap sets MMTK_HEAP_SIZE_MB itself per search step.
+configs:
+  - "ocaml-mmtk-14d1b8f|mmtk_immix"
+  - "ocaml-mmtk-14d1b8f|mmtk_sticky"
