@@ -1,0 +1,84 @@
+# =============================================================================
+# End-to-end pipeline check — OCaml 5.5.0 vs trunk HEAD, full MICRO suite
+# =============================================================================
+# The micro-benchmark counterpart of e2e_5.5.0_vs_trunk_head.yml: same intent,
+# same two runtimes, ~/benches instead of ~/macro-benches. Where the macro run
+# asks "did real programs get slower", this one asks "which part of the runtime
+# moved" — allocation rate, mark/sweep, effect dispatch, weak tables, domain
+# synchronisation, the OCaml->C boundary.
+#
+# 1 invocation per cell — plumbing check, not a measurement. It exercises every
+# stage from a clean slate:
+#   1. opam switch provisioning for both runtimes (running-ng deletes+rebuilds a
+#      stale switch by default, so 5.5.0 is rebuilt from the release tag and
+#      trunk is provisioned fresh from the pinned commit)
+#   2. every enabled micro benchmark builds against both compilers
+#   3. the run itself, under perf + olly
+#   4. legacy artifacts (.log + olly_/perf_ sidecars) + native data contract
+#
+# Benchmarks, suites and modifiers are inherited from micro_base.yml — the full
+# selection, all 195 non-OxCaml programs.
+#
+# Before spending a full run on this, the cheap gate is in ~/benches itself:
+#   bash ~/benches/scripts/test-runtimes.sh 5.5.0 trunk-c0f8c8ce
+# which builds and runs every program once with no perf/olly. That catches
+# build breaks and crashing benchmarks in ~25 min per runtime, without tying up
+# a quiet machine.
+#
+# Usage:
+#   RUNNING_BENCH_DIR=~/benches \
+#   CONFIG_FILE=src/running/config/experiments/e2e_micro_5.5.0_vs_trunk.yml \
+#   LOG_DIR=~/running-ng/gc-sweep-logs-e2e-micro \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/micro_base.yml"
+
+schema_version: "1.0"
+remote_host: null
+compress_logs: false
+minheap_multiplier: 1.0
+heap_range: 6
+spread_factor: 1
+
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
+
+overrides:
+  invocations: 1
+
+# =============================================================================
+# Runtimes
+# =============================================================================
+runtimes:
+  # `opam compiler create ocaml/ocaml:5.5.0` — the release tag. Switch
+  # running-ng-ocaml-5.5.0 (deleted + rebuilt from source by default).
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+
+  # ocaml/ocaml trunk HEAD as of 2026-08-05 — the same commit the macro-side
+  # e2e config pins, so the two runs describe the same pair of compilers.
+  ocaml-trunk-c0f8c8ce:
+    type: OCaml
+    commit: "c0f8c8ceef751fb3a99652d3d52399db3d1c2aae"
+
+# =============================================================================
+# Configs — no sweep, default GC settings
+# =============================================================================
+configs:
+  - "ocaml-5.5.0|perf_grp1|re-25|md-2"
+  - "ocaml-trunk-c0f8c8ce|perf_grp1|re-25|md-2"
+
+# =============================================================================
+# Comparisons
+# =============================================================================
+comparisons:
+  - label: "5.5.0 -> trunk"
+    a: ocaml-5.5.0
+    b: [ocaml-trunk-c0f8c8ce]
