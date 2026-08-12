@@ -13,13 +13,18 @@ hard-won gotchas, and the current list of known-broken files.
   it builds compilers (via `opam-compiler`), builds benchmark binaries per
   runtime, runs them under `perf` + `olly`, sweeps GC parameters, and emits
   data-contract artifacts.
-- Benchmarks live in sibling repos: micro = `~/benches` (13 suites, 200 enabled
-  programs), macro = `~/macro-benches` (20 active tools, merlin and lavyek
+- Benchmarks live in sibling repos: micro = `~/benches` (13 suites, 195 enabled
+  programs — 196 listed, `oxcaml_prefetch` needs an OxCaml runtime), macro =
+  `~/macro-benches` (22 suites, 31 enabled programs; merlin and lavyek
   disabled). Both are driven through `OCamlBenchmarkSuite`.
-  On the **`knob-a-rungs`** branch, each macro tool has an **input-size ladder**
-  (`<tool>_..._{small,default,large[,huge]}` — 92 programs total incl. legacy);
-  see "Input-size ladder + tags" below. `adding-ocaml-support` predates the
-  ladders.
+  Both repos also carry their own program list (`manifest.yml` /
+  `benchmarks/manifest.yml`) with `args` copied verbatim from the matching base
+  config here, so they can build and run themselves without this repo.
+  `~/benches/scripts/ci-manifest.py check --running-ng` diffs its manifest
+  against `micro_base.yml` program-for-program and argument-for-argument — run it
+  after touching `micro_base.yml`, since a program in only one of the two is
+  either a benchmark that silently never runs or a sweep entry that fails every
+  time.
 - Entry points: `run_ocaml_bench_gc_sweep.sh` (build **+ run**) and
   `build_ocaml_binaries_gc_sweep.sh` (build **only**) → both find/create a tools
   switch (dune/ocamlfind), build/verify olly, put both on `PATH`, then call
@@ -127,14 +132,17 @@ pass `RUNNING_TAG=small_run,default_run,large_run` for all three).
 
 ## Build / run
 
-- Env vars: see the README table. The ones that bite:
-  `run_ocaml_bench_gc_sweep.sh` treats `RUNNING_BENCH_DIR` and
-  `RUNNING_MACRO_BENCH_DIR` as **synonyms** and falls back to `../benches`
-  without requiring it to exist, but `build_ocaml_binaries_gc_sweep.sh` still
-  resolves `$(cd .../benches && pwd)` **eagerly** under `set -e`, so a missing
-  `benches/` aborts a macro-only *build*. And `RUNNING_MACRO_BENCH_DIR` is read
-  by YAML `${…}` expansion, so if it reaches the config unset you get paths
-  starting with the literal variable name rather than an error.
+- Env vars: see the README table. `RUNNING_BENCH_DIR` and
+  `RUNNING_MACRO_BENCH_DIR` are **synonyms**, and **both** launch scripts now
+  export both, with a lazy `../benches` fallback that does not require the
+  directory to exist. Until 2026-08-10 only `run_ocaml_bench_gc_sweep.sh` did
+  that; `build_ocaml_binaries_gc_sweep.sh` read `RUNNING_BENCH_DIR` alone and
+  resolved its fallback **eagerly** under `set -e`, so a macro-only *build* that
+  set only `RUNNING_MACRO_BENCH_DIR` aborted when `~/benches` was absent — and
+  when it was present, the macro config's `${RUNNING_MACRO_BENCH_DIR}` reached
+  the YAML unset. Keep the two blocks identical. The expansion is still the
+  trap: `${…}` in a config is read at YAML-load time, so an unset variable gives
+  you paths starting with its literal name rather than an error.
 - Commands (`python3 -m running`, or the launch scripts):
   - `runbms LOG_DIR CONFIG` — build (skips if the output binary exists) then run.
     Extra args after the script name are forwarded (`-i`, `--resume`, `-d`, …).

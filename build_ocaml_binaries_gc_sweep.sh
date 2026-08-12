@@ -9,7 +9,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- User-configurable paths ------------------------------------------------
-export RUNNING_BENCH_DIR="${RUNNING_BENCH_DIR:-$(cd "$ROOT_DIR/../benches" && pwd)}"
+# RUNNING_BENCH_DIR / RUNNING_MACRO_BENCH_DIR: root of the OCaml benchmark tree.
+# The two names are synonyms — micro configs expand ${RUNNING_BENCH_DIR}, macro
+# configs ${RUNNING_MACRO_BENCH_DIR} — and both must be exported so a config of
+# either kind resolves its paths.
+#
+# This block used to read RUNNING_BENCH_DIR only, and resolve the ../benches
+# fallback *eagerly* under `set -e`: a macro-only build that set just
+# RUNNING_MACRO_BENCH_DIR aborted here if ~/benches did not exist, and if it did,
+# the macro config's ${RUNNING_MACRO_BENCH_DIR} reached the YAML unset and
+# expanded to a literal. run_ocaml_bench_gc_sweep.sh already did it this way;
+# the two entry points now agree.
+export RUNNING_BENCH_DIR="${RUNNING_BENCH_DIR:-${RUNNING_MACRO_BENCH_DIR:-$(cd "$ROOT_DIR/../benches" 2>/dev/null && pwd || echo "$ROOT_DIR/../benches")}}"
+export RUNNING_MACRO_BENCH_DIR="${RUNNING_MACRO_BENCH_DIR:-$RUNNING_BENCH_DIR}"
 CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/src/running/config/examples/ocaml_gc_sweep_example.yml}"
 PYTHONPATH="$ROOT_DIR/src"
 OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"

@@ -1,5 +1,23 @@
-# Smoke: 5.5.0-rc1, a few micro benchmarks, 1 invocation. Temp config for an
-# end-to-end run test (reuses the existing running-ng-ocaml-5.5.0-rc1 switch).
+# =============================================================================
+# Smoke test — micro benchmarks, OCaml 5.5.0 vs trunk
+# =============================================================================
+# The cheap end-to-end check of the running-ng -> ~/benches pipeline:
+#   - opam-compiler provisions a switch per runtime
+#   - each benchmark's build script compiles cleanly into a binary
+#   - the benchmark runs, PerfAndOllyAttach captures JSON, sidecar written
+#   - the comparison is emitted
+#
+# Six benchmarks x two runtimes x 1 invocation — a plumbing check, not a
+# measurement. For the whole suite use experiments/e2e_micro_5.5.0_vs_trunk.yml.
+#
+# Usage:
+#   cd ~/running-ng
+#   RUNNING_BENCH_DIR=~/benches \
+#   CONFIG_FILE=src/running/config/examples/smoke_micro_550.yml \
+#   LOG_DIR=/tmp/smoke_micro_550 \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
 includes:
   - "../base/ocaml/micro_base.yml"
 
@@ -11,29 +29,32 @@ minheap_multiplier: 1.0
 heap_range: 6
 spread_factor: 1
 
+# Override the base's `benchmarks:` block. Deliberately spans the build paths:
+# ocamlopt-only (almabench, bdd, fannkuchredux), a dune multi-file build (fft),
+# a generated-data build (hamming is plain; markbench exercises the major GC).
 overrides:
   benchmarks:
     sandmark-sequential:
       - almabench
       - bdd
-      - binarytrees
       - hamming
       - fannkuchredux
       - fft
+      - markbench
 
 runtimes:
-  ocaml-5.4.1:
+  ocaml-5.5.0:
     type: OCaml
-    version: "5.4.1"
-  ocaml-5.5.0-rc1:
+    version: "5.5.0"
+  ocaml-trunk-c0f8c8ce:
     type: OCaml
-    version: "5.5.0-rc1"
+    commit: "c0f8c8ceef751fb3a99652d3d52399db3d1c2aae"
 
 configs:
-  - "ocaml-5.4.1|perf_grp1"
-  - "ocaml-5.5.0-rc1|perf_grp1"
+  - "ocaml-5.5.0|perf_grp1"
+  - "ocaml-trunk-c0f8c8ce|perf_grp1"
 
 comparisons:
-  - label: "5.5.0-rc1 vs 5.4.1"
-    a: ocaml-5.4.1
-    b: ocaml-5.5.0-rc1
+  - label: "5.5.0 -> trunk"
+    a: ocaml-5.5.0
+    b: [ocaml-trunk-c0f8c8ce]

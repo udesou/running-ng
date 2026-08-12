@@ -38,9 +38,11 @@ suites:
       bdd:
         path: "${RUNNING_BENCH_DIR}/simple/bdd"
         args: ""
-      binarytrees:
-        path: "${RUNNING_BENCH_DIR}/simple/binarytrees"
-        args: "21"
+      # `binarytrees` used to be declared here pointing at simple/binarytrees,
+      # a directory that does not exist in ~/benches. Nothing selected it in
+      # this file, so it was invisible until a config's `overrides:` picked it
+      # up (smoke_micro_550.yml did, and failed). The real one is
+      # `binarytrees5` in the sandmark-with-packages suite below.
       hamming:
         path: "${RUNNING_BENCH_DIR}/simple/hamming"
         args: "500000"
@@ -537,8 +539,11 @@ suites:
       mandelbrot6:
         path: "${RUNNING_BENCH_DIR}/with_packages/benchmarksgame"
         args: "16000"
-      nbody:
+      # Was `nbody`, which collided with multicore-numerical's own `nbody`
+      # (a different program). Build script is still nbody.build.sh.
+      nbody_benchmarksgame:
         path: "${RUNNING_BENCH_DIR}/with_packages/benchmarksgame"
+        build_script: nbody.build.sh
         args: "50000000"
       pidigits5:
         path: "${RUNNING_BENCH_DIR}/with_packages/benchmarksgame"
@@ -553,9 +558,6 @@ suites:
       zarith_fib:
         path: "${RUNNING_BENCH_DIR}/with_packages/zarith"
         args: "Z 40"
-      zarith_pi:
-        path: "${RUNNING_BENCH_DIR}/with_packages/zarith"
-        args: "10000"
       zarith_tak:
         path: "${RUNNING_BENCH_DIR}/with_packages/zarith"
         args: "Z 2500"
@@ -569,23 +571,21 @@ suites:
       thread_ring_lwt_stream:
         path: "${RUNNING_BENCH_DIR}/with_packages/thread-lwt"
         args: "20000"
-      # decompress (needs bigstringaf, checkseum, decompress)
-      test_decompress:
-        path: "${RUNNING_BENCH_DIR}/with_packages/decompress"
-        args: ""
-      # yojson (needs yojson, camlp-streams)
-      ydump:
-        path: "${RUNNING_BENCH_DIR}/with_packages/yojson"
-        args: "-c ${RUNNING_BENCH_DIR}/with_packages/yojson/sample.json"
+      # NOTE: test_decompress, ydump, owl_gc and zarith_pi used to live here.
+      # They now live in ~/macro-benches (see macro_base.yml) as vendored,
+      # input-size-laddered benchmarks; the copies here `opam install`ed
+      # whatever the solver picked per switch, which is exactly the
+      # non-hermeticity macro-benches exists to avoid.
+      # Three args: num_domains tasks_to_spawn list_length. The old "2 1000"
+      # was missing the third and crashed on Sys.argv.(3) every run.
       test_sched:
         path: "${RUNNING_BENCH_DIR}/with_packages/test_sched"
-        args: "2 1000"
-      owl_gc:
-        path: "${RUNNING_BENCH_DIR}/with_packages/owl"
-        args: ""
-      contrast:
-        path: "${RUNNING_BENCH_DIR}/with_packages/sauvola"
-        args: "${RUNNING_BENCH_DIR}/with_packages/sauvola/example2_small.ppm /tmp/sauvola_out"
+        args: "2 1000000 1000"
+      # contrast — disabled 2026-08-10: camlimages 5.0.5 does not build on
+      # OCaml >= 5.4 (`ld: final link failed: bad value`), so every sweep spent
+      # a build slot to report a failure. Source is still in ~/benches.
+      #   path: "${RUNNING_BENCH_DIR}/with_packages/sauvola"
+      #   args: "${RUNNING_BENCH_DIR}/with_packages/sauvola/example2_small.ppm /tmp/sauvola_out"
       # OxCaml-incompatible (lwt.unix locality error)
       test_lwt:
         path: "${RUNNING_BENCH_DIR}/with_packages/valet"
@@ -631,12 +631,14 @@ suites:
       eratosthenes:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
         args: "1000"
+      # Explicit size: the built-in default (2 x 500M) blows the 120s timeout.
+      # Kept identical to rec_seq_evenodd so the pair stays comparable.
       rec_eff_evenodd:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        args: ""
+        args: "2 5000000"
       rec_seq_evenodd:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        args: ""
+        args: "2 5000000"
       rec_eff_motzkin:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
         args: ""
@@ -1066,17 +1068,13 @@ benchmarks:
     - fasta3
     - fasta6
     - mandelbrot6
-    - nbody
+    - nbody_benchmarksgame
     - pidigits5
     - spectralnorm2
     - zarith_fact
     - zarith_fib
-    - zarith_pi
     - zarith_tak
-    - test_decompress
     - test_sched
-    - owl_gc
-    - contrast
     - test_lwt
     # --- OxCaml-incompatible (build OK with stock OCaml) ---
     # chameneos_redux_lwt     — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
