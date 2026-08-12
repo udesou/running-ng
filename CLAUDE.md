@@ -268,6 +268,22 @@ so unlike the olly/perf sidecars they are not appended to.
   system uptime, because per-domain wall time falls back to `now - boot_time`).
   The `_par` modifiers **require explicit values** — the bare token `re_par`
   renders the literal `e={0}` into `OCAMLRUNPARAM`.
+- **`ocamlrunparam:` (per-benchmark ring/domains, replaces global `re`/`md`).** A
+  suite field — set on a suite (default for all its programs) or a single program
+  (overrides the suite) — merged over the config-string `re`/`md` key-by-key with
+  the benchmark's value winning (`Benchmark.attach_modifiers`). This let the macro
+  `re-25|md-2` move **out of the config strings** and into the benchmarks that need
+  it, so no global value shadows another. A default-ring probe of every heavy rung
+  found most tools lose **no** olly events at the default runtime_events ring — they
+  carry nothing. Five suites overflow it and declare **`e=25,d=2`** at the suite
+  level (`macro-{zarith,menhir-monorepo,eio,coq-monorepo,decompress}`; zarith drops
+  ~290M events at default). The `d=2` is **required**, not just a domain cap: OCaml
+  sizes the ring as `max_domains * 2^e`, so `e=25` alone at the default
+  `max_domains=128` demands ~4GB and **aborts** (SIGABRT + "olly internal error") —
+  `d=2` bounds it (~64MB). `e=25,d=2` is exactly the retired global `re-25|md-2`.
+  Configs now use a bare `perf_grp1` (lavyek still adds `re_par|md_par|pin_lavyek`);
+  one specialised lab config still carries `re-25` but the suite values override it.
+  Values are 5.5.0/32-core minimums — re-probe on a very different farm.
 - **`-d` (dry run) still provisions compilers.** `_ensure_switch` is called from
   `OCaml.__init__`, which `Configuration.resolve_class()` runs before any
   dry-run check — so `-d` on a config with an unbuilt runtime compiles a

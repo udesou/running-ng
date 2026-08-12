@@ -56,6 +56,16 @@ class Benchmark(object):
         # ignore the current working directory provided by commands like runbms or minheap
         # certain benchmarks expect to be invoked from certain directories
         self.override_cwd = override_cwd
+        # Per-benchmark OCAMLRUNPARAM (e.g. "e=25,d=2"), declared in the suite.
+        # Applied in attach_modifiers AFTER the config-string OCamlRunParam
+        # modifiers (re/md), overriding the SAME keys — so a benchmark that needs
+        # its own runtime_events ring / max-domains (a bursty allocator that
+        # overflows the default ring, or a multicore workload that needs > 2
+        # domains) wins over whatever a global config string sets, without touching
+        # that config. This is the hook that lets re/md move out of the configs and
+        # be probed per-benchmark; keys a benchmark doesn't set fall through to the
+        # config.
+        self.ocamlrunparam: str = str(kwargs.get("ocamlrunparam", "") or "")
 
     def get_env_str(self) -> str:
         return " ".join([
@@ -121,6 +131,21 @@ class Benchmark(object):
                 b.memtrace_attach = m
             elif type(m) == ModifierSet:
                 logging.warning("ModifierSet should have been flattened")
+        # Per-benchmark OCAMLRUNPARAM override: merge over the modifier-built value,
+        # this benchmark's keys winning. Config keys the benchmark doesn't set are
+        # kept; keys it sets are replaced (last-value-wins matches OCaml's own
+        # OCAMLRUNPARAM parsing). See self.ocamlrunparam in __init__.
+        if self.ocamlrunparam:
+            merged: Dict[str, Optional[str]] = {}
+            for src in (b.env_args.get("OCAMLRUNPARAM", ""), self.ocamlrunparam):
+                for tok in src.split(","):
+                    tok = tok.strip()
+                    if not tok:
+                        continue
+                    key, sep, val = tok.partition("=")
+                    merged[key] = val if sep else None
+            b.env_args["OCAMLRUNPARAM"] = ",".join(
+                k if v is None else "{}={}".format(k, v) for k, v in merged.items())
         return b
 
     def to_string(self, runtime: Runtime) -> str:

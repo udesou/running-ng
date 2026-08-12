@@ -62,8 +62,8 @@ runtimes:
 # Configs — no sweep, default GC settings
 # =============================================================================
 configs:
-  - "ocaml-5.5.0|perf_grp1|re-25|md-2"
-  - "ocaml-trunk-15a9de75|perf_grp1|re-25|md-2"
+  - "ocaml-5.5.0|perf_grp1"
+  - "ocaml-trunk-15a9de75|perf_grp1"
 
 # =============================================================================
 # Comparisons — also checks that the contract manifest mirrors this block

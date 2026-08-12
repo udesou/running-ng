@@ -385,6 +385,10 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
         self.always_build_default = always_build_default_raw
         self.programs: Dict[str, Dict[str, Any]]
         self.programs = {}
+        # Suite-level OCAMLRUNPARAM default (e.g. "e=25" for a suite whose event
+        # rate overflows the default runtime_events ring); a program may override
+        # it with its own `ocamlrunparam`.
+        suite_ocamlrunparam = str(kwargs.get("ocamlrunparam", "") or "")
         for k, v in programs.items():
             build_env_raw = v.get("build_env", {})
             if not isinstance(build_env_raw, dict):
@@ -400,6 +404,9 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
                 "args": split_quoted(os.path.expandvars(v.get("args", ""))),
                 "build_args": split_quoted(v.get("build_args", "")),
                 "build_env": {str(env_k): str(env_v) for env_k, env_v in build_env_raw.items()},
+                # Per-benchmark OCAMLRUNPARAM ("e=18,d=128"), overriding config-string
+                # re/md for this benchmark only (see Benchmark.attach_modifiers).
+                "ocamlrunparam": os.path.expandvars(str(v.get("ocamlrunparam", suite_ocamlrunparam))),
                 "always_build": always_build_raw,
                 # Exit code a successful run returns; 0 unless the workload's
                 # by-design outcome is a non-zero exit (see
@@ -456,6 +463,7 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
                 name=name,
                 timeout=timeout,
                 expected_exit=p["expected_exit"],
+                ocamlrunparam=p["ocamlrunparam"],
             )
         return OCamlBenchmark(
             ocaml_args=p["ocaml_args"],
@@ -465,6 +473,7 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
             name=name,
             timeout=timeout,
             expected_exit=p["expected_exit"],
+            ocamlrunparam=p["ocamlrunparam"],
         )
 
     def get_minheap(self, bm: Benchmark) -> int:
