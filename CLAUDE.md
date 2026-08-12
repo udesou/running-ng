@@ -25,8 +25,6 @@ hard-won gotchas, and the current list of known-broken files.
   after touching `micro_base.yml`, since a program in only one of the two is
   either a benchmark that silently never runs or a sweep entry that fails every
   time.
-  The `knob-a-rungs` branch adds the small/default/large input-size rungs on top
-  of these, taking macro to 56 enabled programs; this branch does not carry them.
 - Entry points: `run_ocaml_bench_gc_sweep.sh` (build **+ run**) and
   `build_ocaml_binaries_gc_sweep.sh` (build **only**) → both find/create a tools
   switch (dune/ocamlfind), build/verify olly, put both on `PATH`, then call
@@ -60,13 +58,37 @@ and the opam-root lock documented here are all present on it.
 
 Still unmerged:
 
-- **`knob-a-rungs`** — the Knob-A input-size ladders (the small/default/large
-  rungs in `macro_base.yml` plus one olly-pass config per ladder), which take
-  macro from 31 to 56 enabled programs. Independent of the contract work; the
-  two touch `macro_base.yml` in different places. **The program counts in this
-  file and in `README.md` describe `adding-ocaml-support`, not that branch.**
+- **`knob-a-rungs`** — the input-size ladders: `<tool>_..._{small,default,large}`
+  rungs in `macro_base.yml`, the size/legacy tags, and one `*_ladder_5.5.0.yml`
+  olly-pass config per tool. Independent of the contract work; the two touch
+  `macro_base.yml` in different places. (Branch name keeps the historical
+  "knob-a" label; the docs/configs call it the input-size ladder.)
 - **`mmtk-minheap`** — `experiments/mmtk_minheap.yml` + its result file (see the
   known-broken table).
+
+## Input-size ladder + tags (macro, `knob-a-rungs`)
+
+Each macro tool has a `{small,default,large}` (a few also `huge`) input-size
+ladder — rungs chosen so each reaches a different GC/runtime regime, not just a
+scaled-up copy of the one below. `macro_base.yml` enables **every** program in
+`benchmarks:` (all rungs + legacy = 92), and `tags:` carries the run selectors:
+
+- `default_run` / `small_run` / `large_run` / `huge_run` — the rung of that size
+  across every tool (`default_run` = 20, one per tool; `huge_run` = 2).
+- `legacy` (30) — the pre-ladder benches kept but not run by default: original
+  anchors, extra per-tool workloads (cpdf ops, alt-ergo problems, menhir
+  grammars, devkit stre/network/gzip), and the frozen issue reproducers
+  (`liq_video_frames_pool` #14533, `goblint` #13733).
+- `all_benches` (92) — everything runnable at once.
+
+**A bare run (no `RUNNING_TAG`) auto-applies `default_run`** (`runbms.py` — guarded
+on the tag existing, so micro-benches is unaffected). So the standard suite is the
+default rungs; other sizes / legacy / everything are opt-in via `RUNNING_TAG`. The
+tag filter is *intersection-only* (can't re-enable a program absent from
+`benchmarks:`), which is why `benchmarks:` lists everything. Per-tool
+`*_ladder_5.5.0.yml` configs still exist for one-tool olly passes (they override
+`benchmarks:` to that tool's rungs; a bare run of one gives its `_default` rung —
+pass `RUNNING_TAG=small_run,default_run,large_run` for all three).
 
 ## Where things live (read first)
 

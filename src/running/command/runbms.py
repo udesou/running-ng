@@ -606,6 +606,19 @@ def run(args):
         # benches like the currently-disabled macro-merlin). See
         # Configuration.apply_tag_filter for full semantics.
         running_tag = os.environ.get("RUNNING_TAG")
+        # When RUNNING_TAG is unset, fall back to the `default_run` tag if the
+        # config defines one — so a bare run executes the default-size ladder
+        # rungs rather than every rung + legacy bench. Configs without a
+        # `default_run` tag (e.g. micro-benches) are unaffected: no filter.
+        if not running_tag:
+            tags_block = configuration.get("tags") or {}
+            if "default_run" in tags_block:
+                running_tag = "default_run"
+                logging.info(
+                    "RUNNING_TAG unset; defaulting to 'default_run' "
+                    "(run everything with RUNNING_TAG=all_benches, other sizes "
+                    "with small_run/large_run/huge_run, old benches with legacy)."
+                )
         if running_tag:
             tag_names = [t.strip() for t in running_tag.split(",") if t.strip()]
             if not tag_names:
