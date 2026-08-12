@@ -76,6 +76,14 @@ schema_version: "1.0"
 suites:
   macro-menhir-monorepo:
     type: OCamlBenchmarkSuite
+    # Suite-level runtime_events ring. This suite's event rate overflows the
+    # default ring under olly (measured lost events at the default ring; see the
+    # per-benchmark ring probe). The `d=2` is load-bearing, not just a domain cap:
+    # OCaml sizes the ring as max_domains * 2^e, so e=25 at the default
+    # max_domains(128) demands ~4GB and aborts (SIGABRT + "olly internal error");
+    # d=2 bounds it to ~64MB. Together e=25,d=2 == the retired global re-25|md-2,
+    # proven through running-ng; declared per-suite so configs carry no re/md.
+    ocamlrunparam: "e=25,d=2"
     timeout: 600
     programs:
       menhir_ocamly:
@@ -285,6 +293,7 @@ suites:
   # (huge D>=20 deferred — exponential, D=21 already >200s.)
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
+    ocamlrunparam: "e=25,d=2"   # overflows the default runtime_events ring under olly (see macro-menhir note)
     timeout: 900
     programs:
       coqc_corelib_stress:
@@ -432,6 +441,7 @@ suites:
   #   (huge band deferred.) Data is random (incompressible) as in the original bench.
   macro-decompress:
     type: OCamlBenchmarkSuite
+    ocamlrunparam: "e=25,d=2"   # overflows the default runtime_events ring under olly (see macro-menhir note)
     timeout: 300
     programs:
       test_decompress:
@@ -454,6 +464,7 @@ suites:
   # Eio: OCaml 5 effect-based concurrency (requires OCaml >= 5.2)
   macro-eio:
     type: OCamlBenchmarkSuite
+    ocamlrunparam: "e=25,d=2"   # overflows the default runtime_events ring under olly (see macro-menhir note)
     timeout: 120
     programs:
       eio_fiber_stream:
@@ -547,6 +558,7 @@ suites:
 
   macro-zarith:
     type: OCamlBenchmarkSuite
+    ocamlrunparam: "e=25,d=2"   # heaviest ring user (~290M events dropped at default); see macro-menhir note
     timeout: 900   # raised from 120 for the `huge` rung (~358s on Ryzen 9950X)
     programs:
       # Legacy single input; kept so existing configs + the off_heap_accounting /

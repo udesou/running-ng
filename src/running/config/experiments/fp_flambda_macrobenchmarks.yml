@@ -43,7 +43,7 @@ runtimes:
 # Configs — 4 runtimes × default GC params (no sweep)
 # =============================================================================
 configs:
-  - "ocaml-5.4.1|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
-  - "ocaml-5.4.1-fp|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
-  - "ocaml-5.4.1-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
-  - "ocaml-5.4.1-fp-flambda|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1-fp|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1-flambda|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.4.1-fp-flambda|perf_grp1|re_par-22|md_par-8|pin_lavyek"
