@@ -44,14 +44,23 @@ FILENAME_RE = re.compile(
     r"\.(?P<sub_iter>\d+)"
     r"\.ocaml-(?P<ocaml>[\w.-]+?)"
     r"\.perf_grp(?P<perf_grp>\d+)"
-    r"\.re-(?P<re>\d+)"
-    r"\.md-(?P<md>\d+)"
-    r"(?P<gc_params>(?:\.[A-Za-z]+-\d+)*)"
+    # ``re``/``md`` are only present when the run enabled the lavyek
+    # modifier set (|re_par|md_par|pin_lavyek). Runs without it (e.g. the
+    # PR-14571 sweeps) carry no re-/md- tokens, so both are optional.
+    r"(?:\.re-(?P<re>\d+))?"
+    r"(?:\.md-(?P<md>\d+))?"
+    # Modifier tokens after re/md: gc params with values (e.g. re_par-22),
+    # plus value-less wrapper modifiers (e.g. pin_lavyek). Allow underscores
+    # in the key and the trailing -<digits> is optional.
+    r"(?P<gc_params>(?:\.[A-Za-z][A-Za-z0-9_]*(?:-\d+)?)*)"
     r"(?:\.macro-(?P<macro_repo>[a-z0-9-]+))?"
     r"\.log$"
 )
 
-GC_PARAM_RE = re.compile(r"\.(?P<key>[A-Za-z]+)-(?P<val>\d+)")
+# Same shape as the gc_params slot in FILENAME_RE: optional -<digits>.
+# Value-less modifiers (e.g. pin_lavyek) get val=None and are ignored
+# by _parse_gc_params, which only emits integer-valued params.
+GC_PARAM_RE = re.compile(r"\.(?P<key>[A-Za-z][A-Za-z0-9_]*)(?:-(?P<val>\d+))?")
 
 KNOWN_FLAG_SUFFIXES = ("fp-flambda", "flambda", "fp")
 
@@ -70,12 +79,19 @@ def _split_ocaml(ocaml: str) -> tuple[str, str]:
 
 
 def _parse_gc_params(gc_params: str) -> tuple[dict[str, int], dict[str, int]]:
-    """Split the GC-param token soup into (known, extra) integer maps."""
+    """Split the GC-param token soup into (known, extra) integer maps.
+
+    Value-less modifier tokens (e.g. pin_lavyek) are ignored — they're
+    wrappers, not numeric params worth a column.
+    """
     known: dict[str, int] = {}
     extra: dict[str, int] = {}
     for m in GC_PARAM_RE.finditer(gc_params):
         key = m.group("key")
-        val = int(m.group("val"))
+        raw_val = m.group("val")
+        if raw_val is None:
+            continue
+        val = int(raw_val)
         if key in KNOWN_GC_PARAMS:
             known[key] = val
         else:
@@ -98,8 +114,8 @@ def _parse_filename(name: str) -> dict | None:
         "flags": flags,
         "variant": f"{version}/{flags}",
         "perf_grp": int(fields["perf_grp"]),
-        "re": int(fields["re"]),
-        "md": int(fields["md"]),
+        "re": int(fields["re"]) if fields["re"] is not None else np.nan,
+        "md": int(fields["md"]) if fields["md"] is not None else np.nan,
         "macro_repo": fields["macro_repo"] or None,
         "gc_params_extra": extra or None,
     }
@@ -206,7 +222,28 @@ def load_macro_dataframe(logs_dir: str | Path) -> pd.DataFrame:
     logs_dir = Path(logs_dir)
     log_files = sorted(logs_dir.glob("*.log"))
     if not log_files:
-        raise FileNotFoundError(f"No *.log files in {logs_dir}")
+        # Sidecar-only dir: the raw *.log text is never read for metrics
+        # (it only serves as a naming key for the olly_*/perf_* NDJSON
+        # sidecars), so committed sidecar-only result sets are supported
+        # by synthesising the log keys from the sidecars themselves.
+        bases: set[str] = set()
+        for p in logs_dir.glob("*.json"):
+            name = p.name[: -len(".json")]
+            for prefix in ("olly_", "perf_"):
+                if name.startswith(prefix):
+                    name = name[len(prefix):]
+                    break
+            bases.add(name)
+        for p in logs_dir.glob("*.json.gz"):
+            name = p.name[: -len(".json.gz")]
+            for prefix in ("olly_", "perf_"):
+                if name.startswith(prefix):
+                    name = name[len(prefix):]
+                    break
+            bases.add(name)
+        log_files = sorted(logs_dir / f"{b}.log" for b in bases)
+    if not log_files:
+        raise FileNotFoundError(f"No *.log files or *.json sidecars in {logs_dir}")
 
     rows: list[dict] = []
     skipped: list[str] = []
