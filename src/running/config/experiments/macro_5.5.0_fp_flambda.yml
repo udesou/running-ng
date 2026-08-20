@@ -1,0 +1,98 @@
+# =============================================================================
+# OCaml 5.5.0: stock vs -fp / -flambda / both — macrobenchmarks, default GC
+# =============================================================================
+# Four builds of the 5.5.0 release, at the compiler's own default GC params
+# (no `modifiers:`, no `config_sweep:`):
+#
+#   - ocaml-5.5.0             stock release
+#   - ocaml-5.5.0-fp          --enable-frame-pointers
+#   - ocaml-5.5.0-flambda     --enable-flambda
+#   - ocaml-5.5.0-fp-flambda  both
+#
+# Suites, benchmarks, modifiers and plugins come from macro_base.yml. lavyek
+# (private repo) and merlin (upstream domains-typer race) have empty program
+# lists there, so they need no explicit exclusion and the parallel modifier
+# triple `|re_par|md_par|pin_lavyek` is NOT needed. Ring sizing is
+# per-suite/per-benchmark in macro_base since #15 retired the global
+# `re-25|md-2` pair, so the config strings carry only `perf_grp1`.
+#
+# This replaces the retired `macro_5.5.0_fp_flambda_default.yml`, which still
+# lives on the `knob-a-rungs-running-ng` branch and predates #15 (its config
+# strings still carry the retired global re/md and the lavyek triple).
+#
+# Reference run with this runtime set: macro-benches
+# results/latest/2026-07-24-5.5.0-fp-flambda-monolith/ (31 benches, N=5).
+# NOTE that run predated the input-size ladder, so its bench set is not
+# directly comparable to a `default_run,large_run` run of this config.
+#
+# ---------------------------------------------------------------------------
+# Usage — default + large rungs of the input-size ladder (20 + 20 programs).
+# `RUNNING_TAG` is a *runtime* filter, not a config field, so it must be set on
+# the command line; a bare run would silently do `default_run` only.
+#
+#   cd ~/running-ng
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   RUNNING_TAG=default_run,large_run \
+#   CONFIG_FILE=src/running/config/experiments/macro_5.5.0_fp_flambda.yml \
+#   LOG_DIR=~/running-ng/gc-sweep-logs-5.5.0-fp-flambda-$(hostname -s)-$(date +%Y-%m-%d) \
+#     bash run_ocaml_bench_gc_sweep.sh
+#
+# 4 runtimes x 40 programs x N=5 = 800 invocations, ~9-10 h of benchmark time
+# on a 9950X, plus first-run compiler builds (~10 min per switch that does not
+# already exist; the three non-stock ones usually do not).
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
+
+# Base scalars must be changed through `overrides:` — redeclaring one at top
+# level is a combine() TypeError.
+overrides:
+  invocations: 5
+
+# =============================================================================
+# Runtimes
+# =============================================================================
+runtimes:
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+
+  ocaml-5.5.0-fp:
+    type: OCaml
+    version: "5.5.0"
+    configure_args: ["--enable-frame-pointers"]
+
+  ocaml-5.5.0-flambda:
+    type: OCaml
+    version: "5.5.0"
+    configure_args: ["--enable-flambda"]
+
+  ocaml-5.5.0-fp-flambda:
+    type: OCaml
+    version: "5.5.0"
+    configure_args: ["--enable-frame-pointers", "--enable-flambda"]
+
+# =============================================================================
+# Configs — default GC settings, no sweep
+# =============================================================================
+configs:
+  - "ocaml-5.5.0|perf_grp1"
+  - "ocaml-5.5.0-fp|perf_grp1"
+  - "ocaml-5.5.0-flambda|perf_grp1"
+  - "ocaml-5.5.0-fp-flambda|perf_grp1"
+
+# =============================================================================
+# Comparisons — consumed by notebooks A/B via load_comparisons()
+# =============================================================================
+comparisons:
+  - label: "5.5.0: fp+flambda vs stock"
+    a: ocaml-5.5.0
+    b: [ocaml-5.5.0-fp, ocaml-5.5.0-flambda, ocaml-5.5.0-fp-flambda]
