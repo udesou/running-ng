@@ -465,7 +465,12 @@ suites:
   macro-eio:
     type: OCamlBenchmarkSuite
     ocamlrunparam: "e=25,d=2"   # overflows the default runtime_events ring under olly (see macro-menhir note)
-    timeout: 120
+    # Raised 120 -> 300 (2026-08-23). The suite timeouts here were sized against
+    # the Ryzen 9 9950X reference box; on obelisk (Xeon E5-2667 v2, 5-9x slower
+    # on these workloads) eio_conc_default measured 110-120s and lost 3 of 20
+    # invocations to the 120s cap. A timeout is a hang guard, not a calibration
+    # knob, so it is sized for the slowest machine in the fleet.
+    timeout: 300
     programs:
       eio_fiber_stream:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
@@ -841,7 +846,12 @@ suites:
   # pplacer: phylogenetic placement (bioinformatics).
   macro-pplacer:
     type: OCamlBenchmarkSuite
-    timeout: 120
+    # Raised 120 -> 600 (2026-08-23): on obelisk BOTH pplacer_like_default and
+    # _large lost all 20 invocations to the 120s cap, so this suite had no
+    # measured wall time at all there. pplacer_like_default is estimated >=140s
+    # (ref 15s on the 9950X x the ~9x fleet factor); pplacer_like_large carries
+    # its own longer timeout in the benchmarks block below.
+    timeout: 600
     programs:
       pplacer_testsuite:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
@@ -1088,12 +1098,32 @@ modifiers:
 # =============================================================================
 # Benchmarks — all programs enabled
 # =============================================================================
+# Per-benchmark timeout overrides use the dict form
+# `{name: X, bm_name: X, timeout: N}` — this is the ONLY per-program timeout
+# mechanism for OCamlBenchmarkSuite. A `timeout:` placed inside a suite's
+# `programs:` entry is silently DROPPED (the suite constructor copies a fixed
+# key list that has no `timeout`; see suite.py OCamlBenchmarkSuite.__init__),
+# so it looks like it works and does nothing.
+#
+# The overrides below were added 2026-08-23 after the 5.5.0-fp-flambda run on
+# obelisk (Xeon E5-2667 v2) lost 268 of 760 invocations — 35%, across 15 of 38
+# benchmarks — to timeouts sized against the Ryzen 9 9950X reference box.
+# A killed invocation is recognisable in the olly sidecars by a NEGATIVE
+# wall_time (olly reads a zero end-timestamp when the process is SIGKILLed
+# before its runtime_events flush) with perf task-clock pinned at the cap.
+# Estimates marked "ref ratio" are obelisk's measured `_default` rung scaled by
+# the large/default wall ratio of the 9950X figures in the suite comments above;
+# that estimator validated to within ~6% on the five tools where both rungs
+# completed on obelisk (it is unreliable for owl, -15%, and menhir, -63%, so
+# those two use directly measured numbers instead). Values are ~2x the estimate.
+# NOTE obelisk was running the `ondemand` cpufreq governor (cores at 1.2-1.9GHz
+# on a 3.3GHz part) for that run, which inflates every figure here.
 benchmarks:
   macro-menhir-monorepo:
     - menhir_ocamly
     - menhir_sql_parser
     - menhir_sysver
-    - menhir_sysver_canonical
+    - {name: menhir_sysver_canonical, bm_name: menhir_sysver_canonical, timeout: 1200}   # measured 505-540s on -flambda/-fp-flambda, capped at 600 on stock/-fp
 
   macro-cpdf-monorepo:
     - cpdf_merge
@@ -1102,7 +1132,7 @@ benchmarks:
     - cpdf_squeeze
     - cpdf_squeeze_small
     - cpdf_squeeze_default
-    - cpdf_squeeze_large
+    - {name: cpdf_squeeze_large, bm_name: cpdf_squeeze_large, timeout: 900}   # est 350s (obelisk default 115s x ref ratio 3.06)
 
   macro-alt-ergo-monorepo:
     - alt_ergo_fill
@@ -1117,13 +1147,13 @@ benchmarks:
     - frama_c_eva_sqlite
     - frama_c_eva_sqlite_small
     - frama_c_eva_sqlite_default
-    - frama_c_eva_sqlite_large
+    - {name: frama_c_eva_sqlite_large, bm_name: frama_c_eva_sqlite_large, timeout: 2400}   # est 946s (obelisk default 137s x ref ratio 6.89)
 
   macro-goblint-monorepo:
     - goblint
     - goblint_gen_small
     - goblint_gen_default
-    - goblint_gen_large
+    - {name: goblint_gen_large, bm_name: goblint_gen_large, timeout: 900}   # est 375s (obelisk default 128s x ref ratio 2.94)
 
   macro-coq-monorepo:
     - coqc_corelib_stress
@@ -1144,31 +1174,31 @@ benchmarks:
     - irmin_mem_rw
     - irmin_mem_rw_small
     - irmin_mem_rw_default
-    - irmin_mem_rw_large
+    - {name: irmin_mem_rw_large, bm_name: irmin_mem_rw_large, timeout: 900}   # est 393s (obelisk default 114s x ref ratio 3.47)
 
   macro-ocamlformat:
     - ocamlformat_rocq
     - ocamlformat_rocq_small
     - ocamlformat_rocq_default
-    - ocamlformat_rocq_large
+    - {name: ocamlformat_rocq_large, bm_name: ocamlformat_rocq_large, timeout: 1200}   # measured 591-596s on -flambda, capped at 600 on the other three
 
   macro-decompress:
     - test_decompress
     - test_decompress_small
     - test_decompress_default
-    - test_decompress_large
+    - {name: test_decompress_large, bm_name: test_decompress_large, timeout: 1200}   # est 501s (obelisk default 127s x ref ratio 3.94)
 
   macro-eio:
     - eio_fiber_stream
     - eio_conc_small
     - eio_conc_default
-    - eio_conc_large
+    - {name: eio_conc_large, bm_name: eio_conc_large, timeout: 600}   # est 290s (obelisk default ~119s x ref ratio 2.44)
 
   macro-sedlex:
     - sedlex_tokenize
     - sedlex_tokenize_small
     - sedlex_tokenize_default
-    - sedlex_tokenize_large
+    - {name: sedlex_tokenize_large, bm_name: sedlex_tokenize_large, timeout: 900}   # est 380s (obelisk default 116s x ref ratio 3.29)
 
   macro-yojson:
     - ydump_repeat
@@ -1195,13 +1225,13 @@ benchmarks:
     - ocamlc_compile_uucp
     - ocamlc_compile_uucp_small
     - ocamlc_compile_uucp_default
-    - ocamlc_compile_uucp_large
+    - {name: ocamlc_compile_uucp_large, bm_name: ocamlc_compile_uucp_large, timeout: 900}   # est 421s (obelisk default 124s x ref ratio 3.41)
 
   macro-liquidsoap-lang:
     - liq_parse_typecheck
     - liq_parse_typecheck_small
     - liq_parse_typecheck_default
-    - liq_parse_typecheck_large
+    - {name: liq_parse_typecheck_large, bm_name: liq_parse_typecheck_large, timeout: 1200}   # est 488s (obelisk default 105s x ref ratio 4.64)
 
   # macro-merlin: DISABLED pending upstream fix to a race in
   # merlin-domains' typer-domain handoff. The vendored typer hits an
@@ -1223,13 +1253,13 @@ benchmarks:
     - liq_video_frames_pool
     - liq_video_frames_pool_small
     - liq_video_frames_pool_default
-    - liq_video_frames_pool_large
+    - {name: liq_video_frames_pool_large, bm_name: liq_video_frames_pool_large, timeout: 1200}   # est 556s (obelisk default 121s x ref ratio 4.59)
 
   macro-pplacer:
     - pplacer_testsuite
     - pplacer_like_small
     - pplacer_like_default
-    - pplacer_like_large
+    - {name: pplacer_like_large, bm_name: pplacer_like_large, timeout: 1200}   # est 467s; obelisk default was itself capped, so this is a lower bound
 
   # macro-lavyek-monorepo: DISABLED — the lavyek library lives in a PRIVATE
   # repo (github.com/tarides/lavyek), so builds without access to it cannot

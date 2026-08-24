@@ -378,6 +378,61 @@ def get_log_prologue(runtime: Runtime, bm: Benchmark) -> str:
     return output
 
 
+def check_cpu_governor() -> None:
+    """Warn when the CPU frequency governor is not ``performance``.
+
+    A throttling governor (``ondemand``, ``powersave``, ``schedutil``) lets the
+    clock float with load, so a wall-clock difference between two configs stops
+    being a property of the runtime under test.  On a slow machine it also
+    pushes benchmarks past their timeouts, which is how it usually gets noticed:
+    as a pile of killed invocations rather than as a machine-setup problem.
+
+    ``get_hardware_info`` already records the per-CPU governor into every
+    benchmark log, but nothing surfaced it, so a whole multi-day sweep could
+    finish before anyone read one.  Check once, up front, where it is actionable.
+
+    Warn rather than refuse: setting the governor needs root, and a run that
+    only checks builds and exit codes does not care about the clock.  Set
+    ``RUNNING_REQUIRE_PERFORMANCE_GOVERNOR=1`` to make it fatal instead.
+    """
+    governors: Dict[str, int] = {}
+    for path in sorted(Path("/sys/devices/system/cpu").glob(
+            "cpu[0-9]*/cpufreq/scaling_governor")):
+        try:
+            governor = path.read_text().strip()
+        except OSError:
+            continue
+        if governor:
+            governors[governor] = governors.get(governor, 0) + 1
+    if not governors:
+        # No cpufreq governors exposed -- a VM, a container, or a driver that
+        # does not publish them.  Nothing to check and nothing to act on.
+        logging.debug(
+            "no cpufreq governors under /sys; skipping the governor check")
+        return
+    throttling = {g: n for g, n in governors.items() if g != "performance"}
+    if not throttling:
+        logging.info("cpufreq governor: performance on all %d CPU(s)",
+                     sum(governors.values()))
+        return
+    summary = ", ".join("{} on {} CPU(s)".format(g, n)
+                        for g, n in sorted(throttling.items()))
+    message = (
+        "cpufreq governor is not `performance` ({}). The clock will float with "
+        "load, so wall-clock differences between configs are not attributable "
+        "to the runtime under test, and slower cores can push benchmarks past "
+        "their timeouts. Fix with e.g. "
+        "`sudo cpupower frequency-set -g performance` (needs root)."
+    ).format(summary)
+    if os.environ.get("RUNNING_REQUIRE_PERFORMANCE_GOVERNOR"):
+        raise RuntimeError(
+            "{} RUNNING_REQUIRE_PERFORMANCE_GOVERNOR is set, so this is "
+            "fatal; unset it to run anyway.".format(message))
+    logging.warning(
+        "%s Set RUNNING_REQUIRE_PERFORMANCE_GOVERNOR=1 to make this fatal.",
+        message)
+
+
 def run_one_benchmark(
     invocations: int,
     suite: BenchmarkSuite,
@@ -596,6 +651,10 @@ def run(args):
         # else. Errors here mean a typo or structurally-broken block; better
         # to fail before benchmarks run.
         configuration.validate()
+        # Machine-setup check, before the expensive part (switch provisioning,
+        # builds) starts -- a throttling governor invalidates every timing this
+        # run is about to produce.
+        check_cpu_governor()
         # Tag-block validation runs regardless of whether RUNNING_TAG is set
         # — catches typos in the tags: block (e.g. renamed program) at
         # config load time, before benchmarks run.
