@@ -200,7 +200,18 @@ class Configuration(object):
         filtered: dict = {}
         for suite, programs in existing.items():
             wanted = selected.get(suite, set())
-            filtered[suite] = [p for p in programs if p in wanted]
+            # An entry is either a bare program name or the dict form
+            # ``{name:, bm_name:, timeout:}`` that
+            # ``BenchmarkSuite.get_benchmark`` accepts to override a
+            # benchmark's timeout.  Compare on the program name in both
+            # cases: ``p in wanted`` on the dict form raises
+            # ``TypeError: unhashable type: 'dict'``, so before this any
+            # per-benchmark timeout override was unusable together with
+            # RUNNING_TAG.
+            filtered[suite] = [
+                p for p in programs
+                if (p if isinstance(p, str) else p.get("name")) in wanted
+            ]
         self.__items["benchmarks"] = filtered
 
         total_kept = sum(len(v) for v in filtered.values())
