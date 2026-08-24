@@ -281,6 +281,45 @@ suites:
         build_script: "goblint.build.sh"
         args: ""
 
+  macro-infer-monorepo:
+    type: OCamlBenchmarkSuite
+    timeout: 600
+    programs:
+      # Input-size ladder (working set = #classes analysed). infer.build.sh selects
+      # roots_<rung>.idx by output name and execs `infer analyze --multicore` on that
+      # subset of the shared per-runtime capture. More roots = more procedures = more
+      # shared-heap allocation + multicore GC, at a flat capture footprint. Infer is
+      # manually vendored + a per-runtime javalib/sawja prefix (the goblint/apron
+      # model), not opam-monorepo-built. Measured warm -j12, 32-core, 5.5.0: small 72
+      # roots ~9s, default 215 ~16s, large 542 ~44s (cold first run ~2-2.5x). No args:
+      # the rung is baked into the wrapper. The suite's first --multicore (multi-domain
+      # shared-heap) workload; INFER_JOBS sets the domain count (default 12).
+      #
+      # `ocamlrunparam: "e=18,d=128"` — per-benchmark override of the global re/md
+      # (see Benchmark.attach_modifiers). infer's --multicore needs both because the
+      # global `re-25|md-2` breaks it: (1) d=2 caps max-domains below the 12-domain
+      # pool -> Domain.spawn "failed to allocate domain", so d=128 lifts it; (2) a
+      # large runtime_events ring segfaults the multi-domain process (e>=22 SIGSEGVs
+      # on 5.5.0 — a runtime bug), while too small drops olly events. e=18 is the
+      # smallest ring clean for BOTH rungs (measured -j12: small needs >=16, large
+      # >=18; the default ~16 ring loses ~97k events on large) and sits under the
+      # e=22 segfault wall. Machine-relative; re-probe if the farm differs.
+      infer_small:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/infer"
+        build_script: "infer.build.sh"
+        args: ""
+        ocamlrunparam: "e=18,d=128"
+      infer_default:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/infer"
+        build_script: "infer.build.sh"
+        args: ""
+        ocamlrunparam: "e=18,d=128"
+      infer_large:
+        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/infer"
+        build_script: "infer.build.sh"
+        args: ""
+        ocamlrunparam: "e=18,d=128"
+
   # Size axis = numeral size (unary-nat kernel reduction). coqc_corelib_stress is
   # the legacy mixed workload (fib/ack/tree). The coqc_tree_* rungs are a clean
   # single-knob ladder: `Compute tree_size (make_tree D)` reduces a 2^D-deep
@@ -1078,6 +1117,7 @@ modifiers:
       macro-alt-ergo-monorepo: [alt_ergo_fill, alt_ergo_yyll, alt_ergo_unsat_smt2]
       macro-frama-c-monorepo: [frama_c_eva_t, frama_c_eva_sqlite]
       macro-goblint-monorepo: [goblint]
+      macro-infer-monorepo: [infer_small, infer_default, infer_large]
       macro-coq-monorepo: [coqc_corelib_stress]
       macro-devkit: [devkit_htmlstream, devkit_stre, devkit_network, devkit_gzip]
       macro-irmin: [irmin_mem_rw]
@@ -1154,6 +1194,11 @@ benchmarks:
     - goblint_gen_small
     - goblint_gen_default
     - {name: goblint_gen_large, bm_name: goblint_gen_large, timeout: 900}   # est 375s (obelisk default 128s x ref ratio 2.94)
+
+  macro-infer-monorepo:
+    - infer_small
+    - infer_default
+    - infer_large
 
   macro-coq-monorepo:
     - coqc_corelib_stress
@@ -1335,6 +1380,8 @@ tags:
         - frama_c_eva_sqlite_default
       macro-goblint-monorepo:
         - goblint_gen_default
+      macro-infer-monorepo:
+        - infer_default
       macro-coq-monorepo:
         - coqc_tree_default
       macro-devkit:
@@ -1382,6 +1429,8 @@ tags:
         - frama_c_eva_sqlite_small
       macro-goblint-monorepo:
         - goblint_gen_small
+      macro-infer-monorepo:
+        - infer_small
       macro-coq-monorepo:
         - coqc_tree_small
       macro-devkit:
@@ -1427,6 +1476,8 @@ tags:
         - frama_c_eva_sqlite_large
       macro-goblint-monorepo:
         - goblint_gen_large
+      macro-infer-monorepo:
+        - infer_large
       macro-coq-monorepo:
         - coqc_tree_large
       macro-devkit:
@@ -1563,6 +1614,10 @@ tags:
         - goblint_gen_small
         - goblint_gen_default
         - goblint_gen_large
+      macro-infer-monorepo:
+        - infer_small
+        - infer_default
+        - infer_large
       macro-coq-monorepo:
         - coqc_corelib_stress
         - coqc_tree_small

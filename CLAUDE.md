@@ -281,6 +281,8 @@ so unlike the olly/perf sidecars they are not appended to.
   sizes the ring as `max_domains * 2^e`, so `e=25` alone at the default
   `max_domains=128` demands ~4GB and **aborts** (SIGABRT + "olly internal error") —
   `d=2` bounds it (~64MB). `e=25,d=2` is exactly the retired global `re-25|md-2`.
+  `infer_*` instead set `"e=18,d=128"` — `--multicore` needs 12+ domains, so it keeps
+  the ring small with a smaller `e` (128 * 2^18 ≈ 256MB) rather than a small `d`.
   Configs now use a bare `perf_grp1` (lavyek still adds `re_par|md_par|pin_lavyek`);
   one specialised lab config still carries `re-25` but the suite values override it.
   Values are 5.5.0/32-core minimums — re-probe on a very different farm.
