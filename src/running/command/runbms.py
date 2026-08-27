@@ -636,6 +636,10 @@ def run(args):
         # Capture the raw runtime specs (with configure_args) BEFORE resolve_class
         # replaces them with Runtime objects — the native emitter needs the raw dict.
         _raw_runtimes = dict(configuration.get("runtimes") or {})
+        # Same for modifiers: the emitter needs each modifier's declared `type` to
+        # tell a behavioural modifier (part of config identity) from a
+        # measurement-only one, and resolve_class() replaces these with objects.
+        _raw_modifiers = dict(configuration.get("modifiers") or {})
         configuration.resolve_class()
         # Native contract emission: if the config declares a schema_version, emit
         # data-contract artifacts (measurements/{olly,perf}.ndjson + manifest.json)
@@ -647,7 +651,8 @@ def run(args):
         if schema_version and not is_dry_run():
             from running.contract import native as _native
             _native_emitter = _native.NativeEmitter(log_dir / "contract", run_id, _raw_runtimes,
-                                                    comparisons=configuration.get("comparisons"))
+                                                    comparisons=configuration.get("comparisons"),
+                                                    modifiers=_raw_modifiers)
             logging.info("native contract emission enabled (schema_version=%s) -> %s",
                          schema_version, log_dir / "contract")
         # Read from configuration, override with command line arguments if

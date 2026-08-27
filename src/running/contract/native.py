@@ -98,18 +98,32 @@ def _olly_version():
 class NativeEmitter:
     """Accumulates contract artifacts across a run; finalize() writes the manifest."""
 
-    def __init__(self, contract_dir, run_id, runtimes, comparisons=None):
+    # Modifier types that change what the measured program DOES, so two configs
+    # differing only in one are genuinely different configs and must not share a
+    # config_id. Anything else (PerfAndOllyAttach, MemtraceAttach, Companion, …)
+    # only changes how we observe the same program, so it stays out of identity.
+    BEHAVIOURAL_MODIFIER_TYPES = frozenset((
+        "EnvVar", "OCamlRunParam", "OCamlArg", "ProgramArg", "JSArg",
+        "JVMArg", "JVMClasspath", "JVMClasspathAppend", "JVMClasspathPrepend",
+        "Wrapper",
+    ))
+
+    def __init__(self, contract_dir, run_id, runtimes, comparisons=None, modifiers=None):
         # `runtimes`: the raw runtimes dict {name -> {type, version, commit,
         # configure_args}} captured BEFORE Configuration.resolve_class() turns the
-        # values into Runtime objects. `comparisons`: the config's comparisons block.
+        # values into Runtime objects. `modifiers`: likewise the raw modifiers dict
+        # {name -> {type, val, …}}, used to tell a behavioural modifier from a
+        # measurement one. `comparisons`: the config's comparisons block.
         self.dir = Path(contract_dir)
         self.run_id = run_id
         self.runtimes = runtimes or {}
+        self.modifiers = modifiers or {}
         self.comparisons = comparisons or []
         self.configs = {}         # config_id -> descriptor
         self.benchmarks = {}      # (name, suite) -> ref
         self._inv = {}            # (bench, config_id) -> next invocation index
         self._cfg_cache = {}      # config_str -> descriptor
+        self.collisions = []      # config_ids reached by >1 modifier set
         (self.dir / "measurements").mkdir(parents=True, exist_ok=True)
         # fresh files (avoid appending to stale output from a prior run in the same dir)
         for tool in ("olly", "perf"):
@@ -133,6 +147,21 @@ class NativeEmitter:
             name = parts[0]
             entry = vocab.DIMENSION_OF_MODIFIER.get(name)
             if not entry:
+                # No catalog dimension for this modifier. Skipping it here is how
+                # a run that swept `malloc_mmap32m` on/off collapsed both halves
+                # onto one config_id (2026-08-19): identity silently ignored the
+                # axis, the second descriptor overwrote the first, and the two
+                # halves' invocations piled up under one id. So any modifier that
+                # changes the measured program becomes a dimension keyed by its
+                # own name, whether or not the catalog knows it — a new modifier
+                # is then representable with no vocab.json change. Measurement-only
+                # modifiers (perf_grp1, memtrace, …) are still skipped: they do not
+                # change the program, and folding them in would split configs that
+                # differ only in how they were observed.
+                spec = self.modifiers.get(name) or {}
+                if spec.get("type") not in self.BEHAVIOURAL_MODIFIER_TYPES:
+                    continue
+                dims.setdefault(name, parts[1] if len(parts) >= 2 else True)
                 continue
             if "value" in entry:            # flag modifier, e.g. mmtk_bactrian
                 v = entry["value"]
@@ -150,6 +179,22 @@ class NativeEmitter:
                                    modifiers=config_str.split("|")[1:],
                                    tools=["olly", "perf"])
         self._cfg_cache[config_str] = d
+        prev = self.configs.get(d["config_id"])
+        if prev is not None and prev.get("_modifiers") != d["_modifiers"]:
+            # Two different config strings hashing to one id: the identity recipe
+            # is blind to something that varies here, so their measurements would
+            # merge and (config_id, invocation) would stop being unique. Never
+            # silent — the 2026-08-19 owl sweep lost the distinction between its
+            # two allocator halves exactly this way.
+            self.collisions.append({"config_id": d["config_id"],
+                                    "kept": prev.get("_modifiers"),
+                                    "dropped": d["_modifiers"]})
+            logging.error(
+                "contract config_id collision: %s and %s both hash to %s. Their "
+                "measurements will be merged under one config. Give the differing "
+                "modifier a dimension (vocab.json) or a behavioural type so it "
+                "enters the identity.", prev.get("_modifiers"), d["_modifiers"],
+                d["config_id"])
         self.configs[d["config_id"]] = d
         return d
 
@@ -234,5 +279,12 @@ class NativeEmitter:
                             tool_versions=tv, comparisons=self._map_comparisons(),
                             benchmarks=list(self.benchmarks.values()),
                             produced_by="running-ng (native)")
+        if self.collisions:
+            # Advisory (leading underscore): the contract has no field for this,
+            # but a reader must be able to see that some configs were merged.
+            man["_config_id_collisions"] = self.collisions
+            logging.error("%d config_id collision(s) recorded in the manifest; "
+                          "affected configs merged their measurements.",
+                          len(self.collisions))
         emit.write_json(str(self.dir / "manifest.json"), man)
         return len(self.configs), len(self.benchmarks)
