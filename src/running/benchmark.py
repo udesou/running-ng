@@ -3,6 +3,8 @@ import glob
 import json
 import logging
 import re
+import resource
+import select
 import shutil
 import signal
 import subprocess
@@ -22,6 +24,77 @@ from enum import Enum
 import pty
 
 COMPANION_WAIT_START = 2.0
+
+# Seconds to wait for `perf stat --control` to acknowledge `enable`.
+PERF_ARM_TIMEOUT = 10.0
+
+def _start_perf_armed(perf_cmd: List[str], tmpdir: str, tag: str) -> Tuple[subprocess.Popen, Optional[int], Optional[int]]:
+    """Start `perf stat` and return only once its counters are armed.
+
+    `Popen` returning means perf was forked, not that it has called
+    perf_event_open.  Releasing the benchmark at that point is a race: if perf
+    finishes its own startup after the target has spawned threads, those
+    threads are counted by nobody — they were absent from perf's thread map and
+    `inherit` only follows tasks created after the event exists.  The symptom is
+    a whole-process measurement that reports one thread's worth of task-clock
+    (owl_gc: 10.5s instead of 322s, and 90k page faults instead of 197k), which
+    silently under-reports every counter for any threaded benchmark.
+
+    So start perf with events disabled (`--delay -1`) and drive its control
+    protocol: write `enable` and block until perf answers `ack`.  Only then may
+    the caller let the benchmark run.  Both fifos are opened O_RDWR here so
+    neither side blocks on the other's open(), as in perf-stat(1)'s own example.
+
+    Returns (process, ctl_fd, ack_fd); the fds are the caller's to close.  If
+    the handshake fails (perf too old for --control, perf died on a bad event
+    list), perf is restarted without it and (process, None, None) is returned —
+    degraded to the old racy behaviour rather than failing the run.
+    """
+    ctl_path = os.path.join(tmpdir, "perf_ctl_{}.fifo".format(tag))
+    ack_path = os.path.join(tmpdir, "perf_ack_{}.fifo".format(tag))
+    ctl_fd = ack_fd = None
+    try:
+        os.mkfifo(ctl_path)
+        os.mkfifo(ack_path)
+        # O_RDWR on a fifo never blocks, and holding both ends keeps perf's own
+        # open() from blocking whichever order it opens them in.
+        ctl_fd = os.open(ctl_path, os.O_RDWR)
+        ack_fd = os.open(ack_path, os.O_RDWR)
+        # Options go after the `stat` subcommand, so splice at index 2.
+        armed_cmd = perf_cmd[:2] + ["--delay", "-1",
+                                    "--control", "fifo:{},{}".format(ctl_path, ack_path)] + perf_cmd[2:]
+        p = subprocess.Popen(armed_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        os.write(ctl_fd, b"enable\n")
+        # perf answers "ack\n" once the events are enabled.  Bound the wait: a
+        # perf that never acks must not hang the whole run.
+        deadline = time.time() + PERF_ARM_TIMEOUT
+        buf = b""
+        while time.time() < deadline:
+            if p.poll() is not None:
+                raise RuntimeError("perf exited with {} before acking".format(p.returncode))
+            r, _, _ = select.select([ack_fd], [], [], 0.05)
+            if r:
+                buf += os.read(ack_fd, 64)
+                if b"ack" in buf:
+                    return p, ctl_fd, ack_fd
+        raise RuntimeError("perf did not ack within {}s".format(PERF_ARM_TIMEOUT))
+    except (OSError, RuntimeError) as e:
+        logging.warning(
+            "perf --control handshake failed (%s); falling back to an unsynchronised "
+            "attach. Counters for threaded benchmarks may under-report.", e)
+        for fd in (ctl_fd, ack_fd):
+            if fd is not None:
+                os.close(fd)
+        try:
+            p.kill()
+            p.wait()
+        except (NameError, UnboundLocalError, OSError):
+            pass
+        return subprocess.Popen(perf_cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT), None, None
+
+
+
 
 
 class SubprocessrExit(Enum):
@@ -245,7 +318,15 @@ class Benchmark(object):
         perf_cmd = ["perf", "stat", "--json", "--inherit", "-p", str(pid), "-o", perf_output]
         if modifier.perf_events:
             perf_cmd.extend(["-e", ",".join(modifier.perf_events)])
-        perf_p = subprocess.Popen(perf_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        perf_p, perf_ctl_fd, perf_ack_fd = _start_perf_armed(perf_cmd, tmpdir, "main")
+
+        # Whole-process CPU time and fault counts, straight from the kernel.
+        # RUSAGE_CHILDREN only accounts for children already reaped, and nothing
+        # is reaped between here and the post-run snapshot (perf and olly are
+        # waited for later), so the delta is exactly this benchmark's usage.
+        # This is ground truth for utime/stime/faults independent of perf, and
+        # the cross-check that catches a perf attach that missed threads.
+        ru_before = resource.getrusage(resource.RUSAGE_CHILDREN)
 
         # Release: wrapper execs the benchmark, OCaml runtime starts, ring buffer is created
         os.close(sync_w)
@@ -354,10 +435,13 @@ class Benchmark(object):
                 logging.info("OCaml PID %d differs from wrapper PID %d; re-attaching perf", ocaml_pid, pid)
                 perf_p.kill()
                 perf_p.wait()
+                for _fd in (perf_ctl_fd, perf_ack_fd):
+                    if _fd is not None:
+                        os.close(_fd)
                 perf_cmd_new = ["perf", "stat", "--json", "--inherit", "-p", str(ocaml_pid), "-o", perf_output]
                 if modifier.perf_events:
                     perf_cmd_new.extend(["-e", ",".join(modifier.perf_events)])
-                perf_p = subprocess.Popen(perf_cmd_new, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                perf_p, perf_ctl_fd, perf_ack_fd = _start_perf_armed(perf_cmd_new, tmpdir, "reattach")
 
             # olly writes its JSON output to stderr by default.  That gets
             # interleaved with ring-buffer warnings like "[ring_id=0] Lost N
@@ -396,6 +480,21 @@ class Benchmark(object):
             _, bench_stderr = bench.communicate(timeout=30)
             subprocess_exit = SubprocessrExit.Timeout
 
+        # Snapshot before perf/olly are reaped so their usage stays out of the delta.
+        ru_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        rusage = {
+            "user_time": round(ru_after.ru_utime - ru_before.ru_utime, 3),
+            "system_time": round(ru_after.ru_stime - ru_before.ru_stime, 3),
+            "minor_faults": ru_after.ru_minflt - ru_before.ru_minflt,
+            "major_faults": ru_after.ru_majflt - ru_before.ru_majflt,
+            "voluntary_ctx_switches": ru_after.ru_nvcsw - ru_before.ru_nvcsw,
+            "involuntary_ctx_switches": ru_after.ru_nivcsw - ru_before.ru_nivcsw,
+        }
+
+        for _fd in (perf_ctl_fd, perf_ack_fd):
+            if _fd is not None:
+                os.close(_fd)
+
         # perf stat exits automatically when its target exits
         try:
             perf_p.wait(timeout=10)
@@ -404,7 +503,7 @@ class Benchmark(object):
             perf_p.wait()
 
         # --- Build structured JSON result ---
-        structured: Dict[str, Any] = {}
+        structured: Dict[str, Any] = {"rusage": rusage}
 
         # olly gc-stats --json output (written to olly_output via --output)
         if olly_p is not None:
@@ -455,6 +554,26 @@ class Benchmark(object):
                 structured["perf"] = perf_lines
         except FileNotFoundError:
             logging.warning("perf output file %s not found", perf_output)
+
+        # Cross-check perf against the kernel's own accounting. task-clock is
+        # CPU time over all threads, so it should match utime+stime closely; a
+        # large shortfall means perf counted only some threads and every counter
+        # in this invocation is an under-report.
+        cpu_time = rusage["user_time"] + rusage["system_time"]
+        task_clock_s = None
+        for entry in structured.get("perf", []):
+            if entry.get("event") == "task-clock":
+                try:
+                    task_clock_s = float(entry["counter-value"]) / 1e9
+                except (KeyError, TypeError, ValueError):
+                    pass
+        if task_clock_s is not None and cpu_time > 1.0 and task_clock_s < 0.8 * cpu_time:
+            structured["perf_incomplete"] = True
+            logging.warning(
+                "perf task-clock (%.1fs) is well below the kernel's CPU time for %s "
+                "(%.1fs user+sys): perf missed threads, so its counters under-report "
+                "this invocation. Use the rusage block instead.",
+                task_clock_s, self.name, cpu_time)
 
         companion_out = json.dumps(structured, indent=2).encode("utf-8")
         return bench_stderr if bench_stderr else b"", companion_out, subprocess_exit
