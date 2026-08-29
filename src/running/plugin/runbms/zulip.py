@@ -69,33 +69,43 @@ class Zulip(RunbmsPlugin):
                 return
         logging.warning("Zulip send_message failed after {} retries".format(max_retries))
 
-    def modify_message(self, content, max_retries=5):
+    # Progress edits happen inside the benchmark loop (one per config per
+    # invocation), so any waiting here is billed to the run itself: sleeping
+    # out Zulip's rate limit stretched a 195-benchmark sweep by hours
+    # (measured 2026-08-28: ~10s per invocation on otherwise sub-second
+    # benchmarks). Edits are safe to drop instead — every call rebuilds the
+    # full progress string from last_message_content, so the next edit that
+    # does land shows everything the skipped ones would have.
+    MIN_EDIT_INTERVAL = 2.0
+
+    def modify_message(self, content):
         # Update optimistically so subsequent calls build on this content
-        # even if the Zulip API call ultimately fails
+        # even if the edit below is skipped or fails
         self.last_message_content = content
+        now = time.monotonic()
+        last = getattr(self, "_last_edit_at", None)
+        if last is not None and now - last < self.MIN_EDIT_INTERVAL:
+            return
         request = {
             "message_id": self.last_message_id,
             "content": content,
         }
-        for attempt in range(max_retries):
-            try:
-                result = self.client.update_message(request)
-                if result["result"] == "success":
-                    return
-                if result.get("code") == "RATE_LIMIT_HIT":
-                    retry_after = result.get("retry-after", 1)
-                    logging.info(
-                        "Zulip rate limited, retrying after {:.1f}s (attempt {}/{})".format(
-                            retry_after, attempt + 1, max_retries))
-                    time.sleep(retry_after)
-                    continue
-                logging.warning(
-                    "Zulip update_message failed\n{}".format(result))
+        try:
+            result = self.client.update_message(request)
+            if result["result"] == "success":
+                self._last_edit_at = now
                 return
-            except:
-                logging.exception("Unhandled Zulip update_message exception")
+            if result.get("code") == "RATE_LIMIT_HIT":
+                # Do not sleep in the benchmark path; back off by pretending
+                # this edit succeeded just now, so the next attempts wait out
+                # MIN_EDIT_INTERVAL and the content catches up on its own.
+                self._last_edit_at = now
+                logging.info("Zulip rate limited; dropping this progress edit")
                 return
-        logging.warning("Zulip update_message failed after {} retries".format(max_retries))
+            logging.warning(
+                "Zulip update_message failed\n{}".format(result))
+        except:
+            logging.exception("Unhandled Zulip update_message exception")
 
     def __str__(self) -> str:
         return "Zulip {}".format(self.name)

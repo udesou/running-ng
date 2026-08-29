@@ -309,6 +309,7 @@ class Benchmark(object):
 
         events_file = None
         ocaml_pid = None
+        bench_exited_early = False
         wrapper_events = os.path.join(tmpdir, "{}.events".format(pid))
         deadline = time.time() + 10.0
         while time.time() < deadline:
@@ -326,10 +327,24 @@ class Benchmark(object):
                 events_file = max(candidates, key=os.path.getmtime)
                 ocaml_pid = int(os.path.basename(events_file)[:-len(".events")])
                 break
+            # A benchmark that already exited (crashed on startup, or finished
+            # in milliseconds) can never become attachable — a dead PID fails
+            # pid_is_benchmark forever, so waiting out the deadline is 10s of
+            # pure stall per invocation (times each config). poll() also reaps
+            # the zombie, which kill(pid, 0) would otherwise keep "alive".
+            if bench.poll() is not None:
+                bench_exited_early = True
+                break
             time.sleep(0.01)
 
         if events_file is None:
-            logging.warning("No runtime events file found in %s; olly will not attach", tmpdir)
+            if bench_exited_early:
+                logging.warning(
+                    "benchmark exited (code %s) before olly could attach — too "
+                    "short to measure; no olly data for this invocation",
+                    bench.returncode)
+            else:
+                logging.warning("No runtime events file found in %s; olly will not attach", tmpdir)
             olly_p = None
         else:
             # If the actual OCaml PID differs from bench.pid (e.g. /usr/bin/time
