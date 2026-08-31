@@ -824,7 +824,8 @@ suites:
         ocamlrunparam: "d=5"  # -procs 4 + main
       tokens:
         path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
-        args: "-f ${RUNNING_BENCH_DIR}/with_deps/mpl/inputs/words.txt --no-output -procs 4"
+        # one tokenize of the 600KB input is ~2ms; -repeat 3000 makes it ~5.8s
+        args: "-f ${RUNNING_BENCH_DIR}/with_deps/mpl/inputs/words.txt --no-output -procs 4 -repeat 3000"
         ocamlrunparam: "d=5"  # -procs 4 + main
       raytracer:
         path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
