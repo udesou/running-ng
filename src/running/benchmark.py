@@ -20,6 +20,7 @@ from pathlib import Path
 from copy import deepcopy
 from running import suite
 from running import osinfo
+from running import counters
 import os
 from enum import Enum
 import pty
@@ -63,78 +64,6 @@ def pid_is_benchmark(pid: int) -> bool:
 
 
 COMPANION_WAIT_START = 2.0
-
-# Seconds to wait for `perf stat --control` to acknowledge `enable`.
-PERF_ARM_TIMEOUT = 10.0
-
-def _start_perf_armed(perf_cmd: List[str], tmpdir: str, tag: str) -> Tuple[subprocess.Popen, Optional[int], Optional[int]]:
-    """Start `perf stat` and return only once its counters are armed.
-
-    `Popen` returning means perf was forked, not that it has called
-    perf_event_open.  Releasing the benchmark at that point is a race: if perf
-    finishes its own startup after the target has spawned threads, those
-    threads are counted by nobody — they were absent from perf's thread map and
-    `inherit` only follows tasks created after the event exists.  The symptom is
-    a whole-process measurement that reports one thread's worth of task-clock
-    (owl_gc: 10.5s instead of 322s, and 90k page faults instead of 197k), which
-    silently under-reports every counter for any threaded benchmark.
-
-    So start perf with events disabled (`--delay -1`) and drive its control
-    protocol: write `enable` and block until perf answers `ack`.  Only then may
-    the caller let the benchmark run.  Both fifos are opened O_RDWR here so
-    neither side blocks on the other's open(), as in perf-stat(1)'s own example.
-
-    Returns (process, ctl_fd, ack_fd); the fds are the caller's to close.  If
-    the handshake fails (perf too old for --control, perf died on a bad event
-    list), perf is restarted without it and (process, None, None) is returned —
-    degraded to the old racy behaviour rather than failing the run.
-    """
-    ctl_path = os.path.join(tmpdir, "perf_ctl_{}.fifo".format(tag))
-    ack_path = os.path.join(tmpdir, "perf_ack_{}.fifo".format(tag))
-    ctl_fd = ack_fd = None
-    try:
-        os.mkfifo(ctl_path)
-        os.mkfifo(ack_path)
-        # O_RDWR on a fifo never blocks, and holding both ends keeps perf's own
-        # open() from blocking whichever order it opens them in.
-        ctl_fd = os.open(ctl_path, os.O_RDWR)
-        ack_fd = os.open(ack_path, os.O_RDWR)
-        # Options go after the `stat` subcommand, so splice at index 2.
-        armed_cmd = perf_cmd[:2] + ["--delay", "-1",
-                                    "--control", "fifo:{},{}".format(ctl_path, ack_path)] + perf_cmd[2:]
-        p = subprocess.Popen(armed_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        os.write(ctl_fd, b"enable\n")
-        # perf answers "ack\n" once the events are enabled.  Bound the wait: a
-        # perf that never acks must not hang the whole run.
-        deadline = time.time() + PERF_ARM_TIMEOUT
-        buf = b""
-        while time.time() < deadline:
-            if p.poll() is not None:
-                raise RuntimeError("perf exited with {} before acking".format(p.returncode))
-            r, _, _ = select.select([ack_fd], [], [], 0.05)
-            if r:
-                buf += os.read(ack_fd, 64)
-                if b"ack" in buf:
-                    return p, ctl_fd, ack_fd
-        raise RuntimeError("perf did not ack within {}s".format(PERF_ARM_TIMEOUT))
-    except (OSError, RuntimeError) as e:
-        logging.warning(
-            "perf --control handshake failed (%s); falling back to an unsynchronised "
-            "attach. Counters for threaded benchmarks may under-report.", e)
-        for fd in (ctl_fd, ack_fd):
-            if fd is not None:
-                os.close(fd)
-        try:
-            p.kill()
-            p.wait()
-        except (NameError, UnboundLocalError, OSError):
-            pass
-        return subprocess.Popen(perf_cmd, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT), None, None
-
-
-
-
 
 class SubprocessrExit(Enum):
     Normal = 1
@@ -352,12 +281,13 @@ class Benchmark(object):
         pid = bench.pid
         os.close(sync_r)
 
-        # Attach perf to the PID while the wrapper is blocked — perf follows exec()
-        perf_output = os.path.join(tmpdir, "perf.json")
-        perf_cmd = ["perf", "stat", "--json", "--inherit", "-p", str(pid), "-o", perf_output]
-        if modifier.perf_events:
-            perf_cmd.extend(["-e", ",".join(modifier.perf_events)])
-        perf_p, perf_ctl_fd, perf_ack_fd = _start_perf_armed(perf_cmd, tmpdir, "main")
+        # Attach the counter tool to the PID while the wrapper is still blocked,
+        # so it is counting before the benchmark's first instruction.  Attaching
+        # (rather than launching) is what keeps the benchmark our own direct
+        # child: `bench.returncode` stays the benchmark's, not a tool's.  Which
+        # tool this is depends on the OS; see running.counters.
+        backend = counters.select_backend()
+        counter_handle = backend.attach(pid, tmpdir, modifier.perf_events, "main")
 
         # Whole-process CPU time and fault counts, straight from the kernel.
         # RUSAGE_CHILDREN only accounts for children already reaped, and nothing
@@ -441,20 +371,17 @@ class Benchmark(object):
                 logging.warning("No runtime events file found in %s; olly will not attach", tmpdir)
             olly_p = None
         else:
+            # events_file was found, so the scan set ocaml_pid alongside it.
+            assert ocaml_pid is not None
             # If the actual OCaml PID differs from bench.pid (e.g. /usr/bin/time
-            # forked a child), re-attach perf to the real benchmark PID so that
-            # hardware counters track the OCaml process, not the idle wrapper.
+            # forked a child), re-attach the counter tool to the real benchmark
+            # PID so it tracks the OCaml process, not the idle wrapper.
             if ocaml_pid != pid:
-                logging.info("OCaml PID %d differs from wrapper PID %d; re-attaching perf", ocaml_pid, pid)
-                perf_p.kill()
-                perf_p.wait()
-                for _fd in (perf_ctl_fd, perf_ack_fd):
-                    if _fd is not None:
-                        os.close(_fd)
-                perf_cmd_new = ["perf", "stat", "--json", "--inherit", "-p", str(ocaml_pid), "-o", perf_output]
-                if modifier.perf_events:
-                    perf_cmd_new.extend(["-e", ",".join(modifier.perf_events)])
-                perf_p, perf_ctl_fd, perf_ack_fd = _start_perf_armed(perf_cmd_new, tmpdir, "reattach")
+                logging.info("OCaml PID %d differs from wrapper PID %d; re-attaching %s",
+                             ocaml_pid, pid, backend.name)
+                backend.kill(counter_handle)
+                counter_handle = backend.attach(
+                    ocaml_pid, tmpdir, modifier.perf_events, "reattach")
 
             # olly writes its JSON output to stderr by default.  That gets
             # interleaved with ring-buffer warnings like "[ring_id=0] Lost N
@@ -504,16 +431,9 @@ class Benchmark(object):
             "involuntary_ctx_switches": ru_after.ru_nivcsw - ru_before.ru_nivcsw,
         }
 
-        for _fd in (perf_ctl_fd, perf_ack_fd):
-            if _fd is not None:
-                os.close(_fd)
-
-        # perf stat exits automatically when its target exits
-        try:
-            perf_p.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            perf_p.kill()
-            perf_p.wait()
+        # The counter tool exits on its own when its target does; this only
+        # bounds the wait and releases any control fds.
+        backend.stop(counter_handle)
 
         # --- Build structured JSON result ---
         structured: Dict[str, Any] = {"rusage": rusage}
@@ -553,25 +473,23 @@ class Benchmark(object):
                 logging.warning("Failed to parse olly JSON output: %s", e)
                 structured["olly_raw"] = olly_text
 
-        # perf stat --json output (NDJSON: one JSON object per counter)
-        try:
-            with open(perf_output, "r") as f:
-                perf_lines = []
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            perf_lines.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
-                structured["perf"] = perf_lines
-        except FileNotFoundError:
-            logging.warning("perf output file %s not found", perf_output)
+        # Counter records, normalised by the backend to {event, counter-value}.
+        # Still keyed "perf" so existing logs, the contract adapter and
+        # emit.perf_metrics keep working; `counter_backend` says which tool
+        # actually produced them.
+        structured["counter_backend"] = backend.name
+        if counter_handle is not None:
+            structured["perf"] = backend.collect(counter_handle)
 
-        # Cross-check perf against the kernel's own accounting. task-clock is
-        # CPU time over all threads, so it should match utime+stime closely; a
-        # large shortfall means perf counted only some threads and every counter
-        # in this invocation is an under-report.
+        # Cross-check the counters against the kernel's own accounting.
+        # task-clock is CPU time over all threads, so it should match
+        # utime+stime closely; a large shortfall means the tool counted only
+        # some threads and every counter here is an under-report.
+        #
+        # Only linux-perf reports task-clock.  On a backend that does not
+        # (freebsd-pmc, none) this check is simply absent, not passing: there
+        # is no equivalent instrument, because the only CPU-time number
+        # available there is the rusage we would be checking against.
         cpu_time = rusage["user_time"] + rusage["system_time"]
         task_clock_s = None
         for entry in structured.get("perf", []):
