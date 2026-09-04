@@ -9,6 +9,7 @@ from running.util import parse_config_str, system, get_logged_in_users, config_i
 import socket
 from datetime import datetime
 from running.runtime import Runtime
+from running import osinfo
 import tempfile
 import gzip
 import shutil
@@ -190,7 +191,11 @@ def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Opti
         mod_b = mod_b.attach_modifiers([runtime.get_heapsize_modifier(size)])
     if fd:
         prologue = get_log_prologue(runtime, mod_b)
-        fd.write(prologue.encode("ascii"))
+        # errors="replace": the prologue interpolates the environment and the
+        # CPU model string, neither of which is guaranteed ASCII (a UTF-8 path
+        # in PWD is enough).  A log line that cannot be encoded must not take
+        # the invocation down with it.
+        fd.write(prologue.encode("ascii", errors="replace"))
     output, companion_out, exit_status = mod_b.run(runtime, cwd=runbms_dir, memtrace_path=memtrace_path)
     # Native contract emission: convert this invocation's {olly, perf} companion
     # into per-tool contract NDJSON, keyed by identity running-ng already holds.
@@ -207,7 +212,7 @@ def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Opti
             fd.write(companion_out)
     if fd:
         epilogue = get_log_epilogue(runtime, mod_b)
-        fd.write(epilogue.encode("ascii"))
+        fd.write(epilogue.encode("ascii", errors="replace"))
     # Split the combined companion JSON into per-tool NDJSON sidecars
     # (one compact object per invocation, keyed on the tool name).  The
     # combined form is still embedded in the .log after ***** for human
@@ -338,7 +343,12 @@ def get_log_epilogue(runtime: Runtime, bm: Benchmark) -> str:
 
 
 def hz_to_ghz(hzstr: str) -> str:
-    return "{:.2f} GHz".format(int(hzstr) / 1000 / 1000)
+    try:
+        return "{:.2f} GHz".format(int(hzstr) / 1000 / 1000)
+    except ValueError:
+        # An unreadable sysfs node yields "" rather than a number; a missing
+        # frequency line must not abort the run that was about to happen.
+        return "unknown"
 
 
 def get_log_prologue(runtime: Runtime, bm: Benchmark) -> str:
@@ -347,33 +357,47 @@ def get_log_prologue(runtime: Runtime, bm: Benchmark) -> str:
     output += bm.to_string(runtime)
     output += "\n"
     output += "running-ng v{}\n".format(__VERSION__)
-    output += system("date") + "\n"
-    output += system("w") + "\n"
-    output += system("vmstat 1 2") + "\n"
-    output += system("top -bcn 1 -w512 |head -n 12") + "\n"
+    # Every probe below is informational and runs before *every* invocation, so
+    # all of them go through osinfo.probe, which never raises.  They used to go
+    # through util.system(check=True), where a probe the host does not ship
+    # (vmstat on macOS) aborted the whole sweep on invocation one.
+    output += osinfo.probe("date") + "\n"
+    output += osinfo.probe("w") + "\n"
+    for cmd in (osinfo.memory_snapshot_cmd(), osinfo.process_snapshot_cmd()):
+        if cmd:
+            output += osinfo.probe(cmd) + "\n"
     output += "Environment variables: \n"
     for k, v in sorted(os.environ.items()):
         output += "\t{}={}\n".format(k, v)
     output += "OS: "
-    output += system("uname -a")
-    output += "CPU: "
-    output += system("cat /proc/cpuinfo | grep 'model name' | head -1")
-    output += "number of cores: "
-    cores = system("cat /proc/cpuinfo | grep MHz | wc -l")
-    output += cores
-    for i in range(0, int(cores)):
+    output += osinfo.probe("uname -a")
+    output += "CPU: {}\n".format(osinfo.cpu_model() or "unknown")
+    output += "number of cores: {}\n".format(osinfo.core_count())
+    output += cpu_frequency_info()
+    return output
+
+
+def cpu_frequency_info() -> str:
+    """Per-core frequency and governor, where the OS exposes them.
+
+    Linux-only: it comes from sysfs cpufreq.  macOS exposes no governor at all
+    and FreeBSD's equivalent (dev.cpu.N.freq / powerd) is per-package rather
+    than per-core, so both return "" until someone needs them.
+    """
+    if not osinfo.IS_LINUX:
+        return ""
+    output = ""
+    for i in range(0, osinfo.core_count()):
         cpufreq_dir = Path("/sys/devices/system/cpu/cpu{}/cpufreq".format(i))
         if not cpufreq_dir.is_dir():
             continue
         output += "Frequency of cpu {}: ".format(i)
-        output += hz_to_ghz(
-            system("cat /sys/devices/system/cpu/cpu{}/cpufreq/scaling_cur_freq".format(i)))
+        output += hz_to_ghz(read_sysfs(cpufreq_dir / "scaling_cur_freq"))
         output += "\n"
         output += "Governor of cpu {}: ".format(i)
-        output += system("cat /sys/devices/system/cpu/cpu{}/cpufreq/scaling_governor".format(i))
+        output += read_sysfs(cpufreq_dir / "scaling_governor") + "\n"
         output += "Scaling_min_freq of cpu {}: ".format(i)
-        output += hz_to_ghz(
-            system("cat /sys/devices/system/cpu/cpu{}/cpufreq/scaling_min_freq".format(i)))
+        output += hz_to_ghz(read_sysfs(cpufreq_dir / "scaling_min_freq"))
         output += "\n"
     return output
 
@@ -431,6 +455,13 @@ def check_cpu_governor() -> None:
     logging.warning(
         "%s Set RUNNING_REQUIRE_PERFORMANCE_GOVERNOR=1 to make this fatal.",
         message)
+
+
+def read_sysfs(p: Path) -> str:
+    try:
+        return p.read_text().strip()
+    except OSError:
+        return ""
 
 
 def run_one_benchmark(

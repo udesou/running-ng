@@ -19,9 +19,48 @@ from running.util import smart_quote, split_quoted
 from pathlib import Path
 from copy import deepcopy
 from running import suite
+from running import osinfo
 import os
 from enum import Enum
 import pty
+
+# Executables that are never the benchmark itself.  Some benchmark wrapper
+# scripts run OCaml programs in $(...) subshells before exec'ing the real
+# binary (coq's wrapper runs `ocamlfind printconf stdlib` to set OCAMLPATH);
+# with OCAML_RUNTIME_EVENTS_START inherited, each writes its own .events file.
+BUILD_TOOLS = {"ocamlfind", "ocamlc", "ocamlc.opt", "ocamlopt",
+               "ocamlopt.opt", "ocaml", "ocamldep", "ocamlmklib",
+               "ocamllex", "ocamlyacc", "dune", "menhir",
+               "bash", "sh"}
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def pid_is_benchmark(pid: int) -> bool:
+    """PID must be alive and its exe must not be a known setup tool.
+
+    Where the platform can resolve a PID's executable, a failed lookup
+    (zombie, transient, permission denied …) is a reject rather than an
+    accept — defaulting to accept lets dying subshells slip through when the
+    lookup briefly fails.
+
+    Where the platform offers no lookup at all, only the alive check applies.
+    Rejecting there would reject *every* PID, so the olly attach would never
+    fire and every invocation would stall out its deadline with no GC data.
+    """
+    if not pid_alive(pid):
+        return False
+    exe = osinfo.pid_exe_name(pid)
+    if exe is None:
+        return not osinfo.EXE_LOOKUP_SUPPORTED
+    return exe not in BUILD_TOOLS
+
 
 COMPANION_WAIT_START = 2.0
 
@@ -344,8 +383,10 @@ class Benchmark(object):
         #   1. PID must still be alive (kill(pid, 0) succeeds), AND
         #   2. The process exe path must not look like a build/setup tool
         #      (ocamlfind, ocamlc, dune, ocamlopt ...).
-        # Tool-filter runs off /proc/<pid>/exe on Linux; on other platforms
-        # only the alive check applies.
+        # The tool filter needs a PID->executable lookup: /proc/<pid>/exe on
+        # Linux, proc_pidpath on macOS, KERN_PROC_PATHNAME on FreeBSD (see
+        # running.osinfo).  Where none is available only the alive check
+        # applies.
         # Wait for a usable *.events file in tmpdir.  Priority:
         #
         #   1. The wrapper PID's own events file.  Our Python wrapper
@@ -360,34 +401,6 @@ class Benchmark(object):
         #   2. Fall back to scanning for other alive, non-build-tool PIDs
         #      — needed when a wrapper like /usr/bin/time forks a child
         #      with a different PID than the one we launched.
-        BUILD_TOOLS = {"ocamlfind", "ocamlc", "ocamlc.opt", "ocamlopt",
-                       "ocamlopt.opt", "ocaml", "ocamldep", "ocamlmklib",
-                       "ocamllex", "ocamlyacc", "dune", "menhir",
-                       "bash", "sh"}
-
-        def pid_alive(p: int) -> bool:
-            try:
-                os.kill(p, 0)
-                return True
-            except OSError:
-                return False
-
-        def pid_is_benchmark(p: int) -> bool:
-            """PID must be alive and its exe must not be a known setup tool.
-
-            If we can't read /proc/<pid>/exe (zombie, transient, permission
-            denied …) we reject rather than accept — defaulting to accept
-            lets dying subshells slip through when their readlink briefly
-            fails.
-            """
-            if not pid_alive(p):
-                return False
-            try:
-                exe = os.path.basename(os.readlink("/proc/{}/exe".format(p)))
-            except OSError:
-                return False
-            return exe not in BUILD_TOOLS
-
         events_file = None
         ocaml_pid = None
         bench_exited_early = False
