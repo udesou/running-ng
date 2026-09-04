@@ -13,8 +13,10 @@ import ctypes.util
 import logging
 import os
 import platform
+import re
+import shutil
 import subprocess
-from typing import List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 SYSTEM = platform.system()
 IS_LINUX = SYSTEM == "Linux"
@@ -333,7 +335,7 @@ def partition_cpus(reserved_cores: int = 0) -> Tuple[List[int], List[int]]:
 
     Returns ([], []) where topology is unavailable.
     """
-    groups = sibling_groups()
+    groups = refine_groups(sibling_groups())
     if not groups:
         return [], []
     if reserved_cores < 0:
@@ -389,3 +391,150 @@ def pin_command(cpus: Sequence[int]) -> List[str]:
 
 def can_pin() -> bool:
     return bool(sibling_groups()) and bool(pin_command([0]))
+
+
+# --- optional refinement via ocaml-processor -----------------------------------
+#
+# https://github.com/haesbaert/ocaml-processor ships `ocaml-processor-dump`,
+# which knows two things the kernel interfaces above do not surface uniformly:
+# whether a core is a P-core or an E-core (hybrid Intel, Apple Silicon), and
+# which socket it is on.  Pinning a benchmark across a P/E boundary or across
+# sockets makes a nonsense of the measurement, so where that tool is present we
+# use it to *narrow* the kernel's CPU set.
+#
+# Deliberately narrowing only, never replacing.  Its own README says that on
+# anything but AMD64 and Apple it builds a fake topology where "each CPU will
+# be its own core", and that its AMD64 path (pin the caller, run CPUID per CPU)
+# is accurate only "as long as the process doesn't start in an already
+# restricted affinity".  Both failure modes are silent.  Narrowing makes them
+# harmless: a faked topology reports one socket and no E-cores, so it filters
+# nothing and the kernel's view stands.
+
+PROCESSOR_DUMP = "ocaml-processor-dump"
+
+#: Set to a falsey value ("0", "no") to ignore ocaml-processor-dump entirely.
+PROCESSOR_REFINE_ENV_VAR = "RUNNING_NG_USE_OCAML_PROCESSOR"
+
+_CPU_LINE = re.compile(
+    r"^cpu(?P<id>\d+):\s+smt=(?P<smt>\d+)\s+core=(?P<core>\d+)\s+"
+    r"socket=(?P<socket>\d+)\s+kind=(?P<kind>\S+)")
+
+
+def parse_processor_dump(text: str) -> List[Dict[str, Any]]:
+    """Parse `ocaml-processor-dump` into one dict per logical CPU.
+
+    Ignores the leading summary counters and anything unrecognised, so a new
+    field or a new summary line upstream cannot break us.
+    """
+    cpus = []
+    for line in text.splitlines():
+        m = _CPU_LINE.match(line.strip())
+        if not m:
+            continue
+        cpus.append({
+            "id": int(m.group("id")),
+            "smt": int(m.group("smt")),
+            "core": int(m.group("core")),
+            "socket": int(m.group("socket")),
+            "kind": m.group("kind"),
+        })
+    return cpus
+
+
+def processor_topology() -> List[Dict[str, Any]]:
+    """Topology per ocaml-processor-dump, or [] if unavailable or disabled."""
+    if os.environ.get(PROCESSOR_REFINE_ENV_VAR, "1").strip().lower() in (
+            "0", "no", "false", ""):
+        return []
+    if shutil.which(PROCESSOR_DUMP) is None:
+        return []
+    return parse_processor_dump(probe(PROCESSOR_DUMP))
+
+
+def _is_efficiency(kind: str) -> bool:
+    return "e_core" in kind.strip().lower()
+
+
+def refine_groups(groups: List[List[int]],
+                  cpus: Optional[List[Dict[str, Any]]] = None
+                  ) -> List[List[int]]:
+    """Narrow sibling groups to one socket's performance cores.
+
+    Returns `groups` unchanged when the extra topology says nothing useful
+    (one socket, no E-cores), which is also what a faked topology looks like.
+    Never returns empty: if filtering would remove everything, the unfiltered
+    groups are better than no pinning at all.
+    """
+    if not groups:
+        return groups
+    if cpus is None:
+        cpus = processor_topology()
+    if not cpus:
+        return groups
+    by_id = {c["id"]: c for c in cpus}
+
+    sockets = {c["socket"] for c in cpus}
+    has_ecores = any(_is_efficiency(c["kind"]) for c in cpus)
+    if len(sockets) <= 1 and not has_ecores:
+        return groups
+
+    def keep(group: List[int], socket: Optional[int]) -> bool:
+        info = [by_id.get(c) for c in group]
+        if any(i is None for i in info):
+            # A CPU the tool did not describe: keep it rather than guess.
+            return True
+        if has_ecores and all(_is_efficiency(i["kind"]) for i in info):  # type: ignore[index]
+            return False
+        if socket is not None and any(i["socket"] != socket for i in info):  # type: ignore[index]
+            return False
+        return True
+
+    chosen_socket = None
+    if len(sockets) > 1:
+        # Prefer the socket carrying the most performance cores; ties go to the
+        # lowest id so the choice is stable across runs on one machine.
+        def score(sock: int) -> Tuple[int, int]:
+            n = sum(1 for c in cpus
+                    if c["socket"] == sock and not _is_efficiency(c["kind"]))
+            return (n, -sock)
+        chosen_socket = max(sockets, key=score)
+
+    refined = [g for g in groups if keep(g, chosen_socket)]
+    if not refined:
+        logging.warning(
+            "ocaml-processor refinement would leave no CPUs; ignoring it")
+        return groups
+    if refined != groups:
+        logging.info(
+            "ocaml-processor narrowed the benchmark CPU set to %s (sockets=%d, "
+            "E-cores present=%s)",
+            format_cpu_list([c for g in refined for c in g]),
+            len(sockets), has_ecores)
+    return refined
+
+
+def machine_topology_summary() -> Dict[str, Any]:
+    """Topology facts worth recording alongside a result.
+
+    Provenance only, so it is filled in as far as each source allows and stays
+    silent about what it cannot determine.  Works on macOS too, where we can
+    describe the machine but cannot pin on it.
+    """
+    summary: Dict[str, Any] = {}
+    groups = sibling_groups()
+    if groups:
+        summary["physical_cores"] = len(groups)
+        widths = {len(g) for g in groups}
+        if len(widths) == 1:
+            summary["threads_per_core"] = widths.pop()
+    cpus = processor_topology()
+    if cpus:
+        summary["sockets"] = len({c["socket"] for c in cpus})
+        kinds: Dict[str, int] = {}
+        for c in cpus:
+            kinds[c["kind"]] = kinds.get(c["kind"], 0) + 1
+        summary["cpu_kinds"] = kinds
+        if "physical_cores" not in summary:
+            summary["physical_cores"] = len({(c["socket"], c["core"])
+                                             for c in cpus})
+    return summary

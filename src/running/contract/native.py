@@ -37,6 +37,13 @@ def _machine():
     model = osinfo.cpu_model()
     if model:
         m["cpu_model"] = model
+    # Topology provenance: physical cores and threads/core from the kernel,
+    # sockets and P/E core counts from ocaml-processor-dump when installed.
+    # Two results from the same cpu_model are not comparable if one ran on a
+    # hybrid part's E-cores or spanned sockets, and nothing else in the
+    # manifest would show it. Recorded even on macOS, where we can describe
+    # the machine but cannot pin on it.
+    m.update(osinfo.machine_topology_summary())
     return m
 
 

@@ -246,6 +246,11 @@ BUILD_TOOLS=(
     opam-compiler           # `opam compiler create` provisions every runtime
                             # switch (runtime.py); without it a run dies with
                             # `unknown command 'compiler'`
+    processor               # ocaml-processor-dump: P-core/E-core and socket
+                            # topology, used to narrow the CPU set that CpuPin
+                            # pins to, and recorded in the run manifest.
+                            # Optional: without it running-ng falls back to the
+                            # kernel's own topology view.
 )
 
 # Packages needed to build olly (runtime_events_tools).

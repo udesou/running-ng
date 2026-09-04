@@ -281,3 +281,158 @@ def test_no_cpupin_means_no_observer_pinning():
     bm = bm.attach_modifiers([PerfAndOllyAttach(
         name="perf_grp1", type="PerfAndOllyAttach", val="cycles")])
     assert bm.cpu_pin is None
+
+
+# --- ocaml-processor refinement ------------------------------------------------
+#
+# https://github.com/haesbaert/ocaml-processor. The Ryzen fixture is real output
+# captured from the calibration box; the hybrid and dual-socket ones are
+# constructed, since no such machine was available.
+
+REAL_RYZEN_DUMP = (Path(__file__).parent / "fixtures"
+                   / "processor_dump_ryzen9950x.txt").read_text()
+
+
+def _dump(cpus):
+    """Render CPU dicts the way ocaml-processor-dump does."""
+    head = "cpu_count: {}\ncore_count: {}\nsocket_count: {}\n".format(
+        len(cpus), len({(c["socket"], c["core"]) for c in cpus}),
+        len({c["socket"] for c in cpus}))
+    return head + "".join(
+        "cpu{}: smt={} core={} socket={} kind={}\n".format(
+            c["id"], c["smt"], c["core"], c["socket"], c["kind"])
+        for c in cpus)
+
+
+# 4 P-cores with SMT (cpu0-7, interleaved) + 4 single-thread E-cores (cpu8-11).
+HYBRID_CPUS = (
+    [{"id": 2 * c + t, "smt": t, "core": c, "socket": 0, "kind": "P_core"}
+     for c in range(4) for t in (0, 1)]
+    + [{"id": 8 + c, "smt": 0, "core": 4 + c, "socket": 0, "kind": "E_core"}
+       for c in range(4)]
+)
+HYBRID_GROUPS = [[0, 1], [2, 3], [4, 5], [6, 7], [8], [9], [10], [11]]
+
+# 2 sockets, 2 cores each, SMT on: socket 0 owns cpu 0-3, socket 1 owns 4-7.
+TWO_SOCKET_CPUS = [
+    {"id": s * 4 + c * 2 + t, "smt": t, "core": c, "socket": s, "kind": "P_core"}
+    for s in (0, 1) for c in range(2) for t in (0, 1)
+]
+TWO_SOCKET_GROUPS = [[0, 1], [2, 3], [4, 5], [6, 7]]
+
+
+def test_parses_real_dump_from_the_calibration_box():
+    cpus = osinfo.parse_processor_dump(REAL_RYZEN_DUMP)
+    assert len(cpus) == 32
+    assert cpus[0] == {"id": 0, "smt": 0, "core": 0, "socket": 0, "kind": "P_core"}
+    assert {c["kind"] for c in cpus} == {"P_core"}
+    assert len({(c["socket"], c["core"]) for c in cpus}) == 16
+
+
+def test_parse_ignores_summary_lines_and_unknown_text():
+    text = "cpu_count: 2\nsomething new upstream\ncpu0: smt=0 core=0 socket=0 kind=P_core\n"
+    assert osinfo.parse_processor_dump(text) == [
+        {"id": 0, "smt": 0, "core": 0, "socket": 0, "kind": "P_core"}]
+
+
+def test_parse_empty_output():
+    assert osinfo.parse_processor_dump("") == []
+
+
+def test_refinement_is_inert_on_a_uniform_machine():
+    # One socket, no E-cores: nothing to add, so the kernel's view stands.
+    cpus = osinfo.parse_processor_dump(REAL_RYZEN_DUMP)
+    groups = [[i, i + 16] for i in range(16)]
+    assert osinfo.refine_groups(groups, cpus) == groups
+
+
+def test_refinement_drops_efficiency_cores():
+    cpus = osinfo.parse_processor_dump(_dump(HYBRID_CPUS))
+    refined = osinfo.refine_groups(HYBRID_GROUPS, cpus)
+    assert refined == [[0, 1], [2, 3], [4, 5], [6, 7]]
+    # Pinning a benchmark across a P/E boundary measures two different CPUs.
+    assert all(c < 8 for g in refined for c in g)
+
+
+def test_refinement_keeps_to_one_socket():
+    cpus = osinfo.parse_processor_dump(_dump(TWO_SOCKET_CPUS))
+    assert osinfo.refine_groups(TWO_SOCKET_GROUPS, cpus) == [[0, 1], [2, 3]]
+
+
+def test_refinement_prefers_the_socket_with_more_performance_cores():
+    cpus = [dict(c) for c in TWO_SOCKET_CPUS]
+    for c in cpus:
+        if c["socket"] == 0:
+            c["kind"] = "E_core"
+    refined = osinfo.refine_groups(
+        TWO_SOCKET_GROUPS, osinfo.parse_processor_dump(_dump(cpus)))
+    assert refined == [[4, 5], [6, 7]]
+
+
+def test_refinement_never_empties_the_cpu_set(caplog):
+    cpus = [{"id": i, "smt": 0, "core": i, "socket": 0, "kind": "E_core"}
+            for i in range(4)]
+    groups = [[0], [1], [2], [3]]
+    # All E-cores is not a reason to refuse to pin at all.
+    assert osinfo.refine_groups(
+        groups, osinfo.parse_processor_dump(_dump(cpus))) == groups
+
+
+def test_refinement_keeps_cpus_the_tool_did_not_describe():
+    # Partial data must not silently drop CPUs the kernel does know about.
+    cpus = osinfo.parse_processor_dump(_dump(HYBRID_CPUS))
+    groups = HYBRID_GROUPS + [[99]]
+    assert [99] in osinfo.refine_groups(groups, cpus)
+
+
+def test_refinement_noop_without_the_tool(monkeypatch):
+    monkeypatch.setattr(osinfo, "processor_topology", lambda: [])
+    groups = [[0, 1], [2, 3]]
+    assert osinfo.refine_groups(groups) == groups
+
+
+def test_refinement_can_be_disabled(monkeypatch):
+    monkeypatch.setenv(osinfo.PROCESSOR_REFINE_ENV_VAR, "0")
+    assert osinfo.processor_topology() == []
+
+
+def test_faked_topology_cannot_corrupt_the_kernel_view():
+    """ocaml-processor fakes topology off AMD64/Apple: every CPU its own core.
+
+    Because refinement only ever narrows, and a faked topology reports one
+    socket and no E-cores, it filters nothing and the kernel's real sibling
+    groups survive intact. That is the whole reason it narrows rather than
+    replaces.
+    """
+    fake = [{"id": i, "smt": 0, "core": i, "socket": 0, "kind": "P_core"}
+            for i in range(32)]
+    real_groups = [[i, i + 16] for i in range(16)]
+    cpus = osinfo.parse_processor_dump(_dump(fake))
+    assert osinfo.refine_groups(real_groups, cpus) == real_groups
+
+
+# --- manifest summary ----------------------------------------------------------
+
+def test_summary_reports_kinds_and_sockets(monkeypatch):
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: HYBRID_GROUPS)
+    monkeypatch.setattr(osinfo, "processor_topology",
+                        lambda: osinfo.parse_processor_dump(_dump(HYBRID_CPUS)))
+    s = osinfo.machine_topology_summary()
+    assert s["sockets"] == 1
+    assert s["cpu_kinds"] == {"P_core": 8, "E_core": 4}
+    assert s["physical_cores"] == 8
+    # Mixed group widths (SMT P-cores, single-thread E-cores): no single answer.
+    assert "threads_per_core" not in s
+
+
+def test_summary_degrades_without_the_tool(monkeypatch):
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: [[i, i + 16] for i in range(16)])
+    monkeypatch.setattr(osinfo, "processor_topology", lambda: [])
+    s = osinfo.machine_topology_summary()
+    assert s == {"physical_cores": 16, "threads_per_core": 2}
+
+
+def test_summary_is_empty_where_nothing_is_knowable(monkeypatch):
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: [])
+    monkeypatch.setattr(osinfo, "processor_topology", lambda: [])
+    assert osinfo.machine_topology_summary() == {}
