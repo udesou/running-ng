@@ -1,6 +1,8 @@
 from typing import Any, Dict, List, TYPE_CHECKING
 from running.util import register, smart_quote, split_quoted, parse_modifier_strs
 import copy
+import logging
+from running import osinfo
 if TYPE_CHECKING:
     from running.config import Configuration
 
@@ -207,3 +209,50 @@ class MemtraceAttach(Modifier):
 
     def __str__(self) -> str:
         return "{} MemtraceAttach rate={}".format(super().__str__(), self.rate)
+
+
+@register(Modifier)
+class CpuPin(Modifier):
+    """Confine the benchmark to one hardware thread per physical core.
+
+    The portable replacement for a hand-written `taskset -c 0-15` Wrapper.
+    That mask is correct only on the machine it was measured on: the *policy*
+    ("one thread per physical core") is stable, but the CPU numbers realising
+    it are not.  On one Ryzen 9 9950X, Linux enumerates SMT siblings as
+    (0,16),(1,17)... so the policy is 0-15, while FreeBSD on the same silicon
+    typically enumerates (0,1),(2,3)... so it is 0,2,4,...,30.  So the list is
+    derived from the running machine instead of written down.
+
+    Optional `val`: whole physical cores to hand to olly and the counter tool
+    instead of the benchmark.  Default 0, which reproduces the historical
+    behaviour exactly: the benchmark gets every physical core and the
+    observers land on its SMT siblings.  Raising it improves isolation but
+    takes cores away from the benchmark, so it changes what is being measured;
+    do not change it partway through a sweep meant to be comparable.
+
+    Contributes nothing where the OS cannot pin (macOS), so a config carrying
+    it stays portable rather than failing.
+    """
+
+    def __init__(self, value_opts=None, **kwargs):
+        super().__init__(value_opts, **kwargs)
+        raw = self._kwargs.get("val", 0)
+        try:
+            self.reserved_cores = int(raw) if raw not in (None, "") else 0
+        except (TypeError, ValueError):
+            raise ValueError(
+                "CpuPin modifier {}: val must be a whole number of reserved "
+                "cores, got {!r}".format(self.name, raw))
+        self.benchmark_cpus, self.observer_cpus = osinfo.partition_cpus(
+            self.reserved_cores)
+        self.val = osinfo.pin_command(self.benchmark_cpus)
+        if not self.val:
+            logging.warning(
+                "CpuPin modifier %s cannot pin on %s; the benchmark will run "
+                "unpinned", self.name, osinfo.SYSTEM)
+
+    def __str__(self) -> str:
+        return "{} CpuPin cpus={} reserved_cores={}".format(
+            super().__str__(),
+            osinfo.format_cpu_list(self.benchmark_cpus) or "none",
+            self.reserved_cores)

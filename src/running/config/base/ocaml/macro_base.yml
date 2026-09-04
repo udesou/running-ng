@@ -1077,14 +1077,28 @@ modifiers:
   # inherit the process default mask (every logical CPU); this wrapper
   # confines them to the same physical-core set the workers use.
   #
-  # Assumption: cores 0-15 are physical (smt=0).  This holds on the
-  # AMD Ryzen 9 9950X box where the suite is calibrated; on Intel
-  # SMT-enabled hardware where logical CPUs alternate physical/sibling,
-  # adjust the mask per-machine in the experiment file.  Lavyek-only
-  # via the shared anchor; sequential macros stay unmasked.
+  # CpuPin derives the CPU list from the running machine instead of
+  # hardcoding it.  The policy is unchanged (one hardware thread per
+  # physical core), and on the AMD Ryzen 9 9950X box this suite is
+  # calibrated on it still resolves to exactly "taskset -c 0-15", so
+  # existing lavyek numbers stay comparable.  It is now also correct on
+  # a box with a different core count, on Intel parts where logical CPUs
+  # alternate physical/sibling, and on FreeBSD (cpuset -l, and a
+  # different sibling enumeration for the same policy).
+  #
+  # `val` is the number of whole physical cores handed to olly and the
+  # counter tool instead of the benchmark.  0 keeps the historical
+  # behaviour: the benchmark gets every physical core.  What does change
+  # at 0 is that olly and the counter tool are now confined to the SMT
+  # siblings rather than floating across every CPU, so they can no
+  # longer preempt a worker.  Raise it to give the observers whole cores
+  # of their own, but only between sweeps: it takes cores away from the
+  # benchmark and so changes what is being measured.
+  #
+  # Lavyek-only via the shared anchor; sequential macros stay unmasked.
   pin_lavyek:
-    type: Wrapper
-    val: "taskset -c 0-15"
+    type: CpuPin
+    val: "0"
     excludes: *non_lavyek_excludes
   perf_grp1:
     type: PerfAndOllyAttach

@@ -61,7 +61,8 @@ class CounterBackend:
         return True
 
     def attach(self, pid: int, tmpdir: str, events: Sequence[str],
-               tag: str = "main") -> Optional[CounterHandle]:
+               tag: str = "main",
+               pin_prefix: Sequence[str] = ()) -> Optional[CounterHandle]:
         return None
 
     def stop(self, handle: Optional[CounterHandle], timeout: float = 10.0) -> None:
@@ -106,7 +107,8 @@ class CounterBackend:
 # Seconds to wait for `perf stat --control` to acknowledge `enable`.
 PERF_ARM_TIMEOUT = 10.0
 
-def _start_perf_armed(perf_cmd: List[str], tmpdir: str, tag: str) -> Tuple[subprocess.Popen, Optional[int], Optional[int]]:
+def _start_perf_armed(perf_cmd: List[str], tmpdir: str, tag: str,
+                      skip: int = 0) -> Tuple[subprocess.Popen, Optional[int], Optional[int]]:
     """Start `perf stat` and return only once its counters are armed.
 
     `Popen` returning means perf was forked, not that it has called
@@ -138,9 +140,10 @@ def _start_perf_armed(perf_cmd: List[str], tmpdir: str, tag: str) -> Tuple[subpr
         # open() from blocking whichever order it opens them in.
         ctl_fd = os.open(ctl_path, os.O_RDWR)
         ack_fd = os.open(ack_path, os.O_RDWR)
-        # Options go after the `stat` subcommand, so splice at index 2.
-        armed_cmd = perf_cmd[:2] + ["--delay", "-1",
-                                    "--control", "fifo:{},{}".format(ctl_path, ack_path)] + perf_cmd[2:]
+        # Options go after the `stat` subcommand, so splice at index 2 --
+        # past any pin prefix (`taskset -c ...`) prepended by the caller.
+        armed_cmd = perf_cmd[:skip + 2] + ["--delay", "-1",
+                                    "--control", "fifo:{},{}".format(ctl_path, ack_path)] + perf_cmd[skip + 2:]
         p = subprocess.Popen(armed_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         os.write(ctl_fd, b"enable\n")
         # perf answers "ack\n" once the events are enabled.  Bound the wait: a
@@ -179,12 +182,16 @@ class PerfBackend(CounterBackend):
         return osinfo.IS_LINUX and _tool_on_path("perf")
 
     def attach(self, pid: int, tmpdir: str, events: Sequence[str],
-               tag: str = "main") -> Optional[CounterHandle]:
+               tag: str = "main",
+               pin_prefix: Sequence[str] = ()) -> Optional[CounterHandle]:
         output = os.path.join(tmpdir, "perf.json")
         cmd = ["perf", "stat", "--json", "--inherit", "-p", str(pid), "-o", output]
         if events:
             cmd.extend(["-e", ",".join(events)])
-        proc, ctl_fd, ack_fd = _start_perf_armed(cmd, tmpdir, tag)
+        # _start_perf_armed splices its own options in after the subcommand, so
+        # it needs to know how many leading tokens are the pin prefix.
+        proc, ctl_fd, ack_fd = _start_perf_armed(
+            list(pin_prefix) + cmd, tmpdir, tag, skip=len(pin_prefix))
         return CounterHandle(proc, output, (ctl_fd, ack_fd))
 
     def collect(self, handle: Optional[CounterHandle]) -> List[Dict]:
@@ -318,13 +325,14 @@ class PmcStatBackend(CounterBackend):
         return osinfo.IS_FREEBSD and _tool_on_path("pmcstat")
 
     def attach(self, pid: int, tmpdir: str, events: Sequence[str],
-               tag: str = "main") -> Optional[CounterHandle]:
+               tag: str = "main",
+               pin_prefix: Sequence[str] = ()) -> Optional[CounterHandle]:
         output = os.path.join(tmpdir, "pmcstat_{}.txt".format(tag))
         chosen = split_event_list(events) or list(self.DEFAULT_EVENTS)
         # -C (cumulative) and -d (count descendants, the --inherit equivalent)
         # are toggles that must precede the -p they apply to.
-        cmd = ["pmcstat", "-C", "-d",
-               "-w", str(self.INTERVAL_SECONDS), "-o", output]
+        cmd = list(pin_prefix) + ["pmcstat", "-C", "-d",
+                                  "-w", str(self.INTERVAL_SECONDS), "-o", output]
         for ev in chosen:
             cmd.extend(["-p", ev])
         cmd.extend(["-t", str(pid)])

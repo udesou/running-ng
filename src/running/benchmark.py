@@ -92,6 +92,9 @@ class Benchmark(object):
         else:
             self.companion = []
         self.perf_and_olly_attach: Optional[PerfAndOllyAttach] = None
+        # Set by a CpuPin modifier; carries the observer CPU set so olly
+        # and the counter tool can be kept off the benchmark's cores.
+        self.cpu_pin: Optional[CpuPin] = None
         self.memtrace_attach: Optional[MemtraceAttach] = None
         self.timeout = timeout
         # ignore the current working directory provided by commands like runbms or minheap
@@ -156,6 +159,12 @@ class Benchmark(object):
                     continue
             elif type(m) == Wrapper:
                 b.wrapper.extend(m.val)
+            elif type(m) == CpuPin:
+                # Same effect as a Wrapper, but its command is derived from
+                # this machine's topology rather than written in the config.
+                # Empty where the OS cannot pin, which contributes nothing.
+                b.wrapper.extend(m.val)
+                b.cpu_pin = m
             elif type(m) == Companion:
                 b.companion.extend(m.val)
             elif type(m) == EnvVar:
@@ -287,7 +296,16 @@ class Benchmark(object):
         # child: `bench.returncode` stays the benchmark's, not a tool's.  Which
         # tool this is depends on the OS; see running.counters.
         backend = counters.select_backend()
-        counter_handle = backend.attach(pid, tmpdir, modifier.perf_events, "main")
+        # Keep olly and the counter tool off the benchmark's own CPUs when a
+        # CpuPin modifier says which those are.  olly is the one that matters:
+        # perf stat in counting mode just reads counters at start and end,
+        # while olly continuously drains the runtime_events ring alongside the
+        # benchmark.  Empty (so a no-op) without CpuPin, or on an OS that
+        # cannot pin.
+        observer_prefix = (osinfo.pin_command(self.cpu_pin.observer_cpus)
+                           if self.cpu_pin is not None else [])
+        counter_handle = backend.attach(pid, tmpdir, modifier.perf_events, "main",
+                                        pin_prefix=observer_prefix)
 
         # Whole-process CPU time and fault counts, straight from the kernel.
         # RUSAGE_CHILDREN only accounts for children already reaped, and nothing
@@ -381,7 +399,8 @@ class Benchmark(object):
                              ocaml_pid, pid, backend.name)
                 backend.kill(counter_handle)
                 counter_handle = backend.attach(
-                    ocaml_pid, tmpdir, modifier.perf_events, "reattach")
+                    ocaml_pid, tmpdir, modifier.perf_events, "reattach",
+                    pin_prefix=observer_prefix)
 
             # olly writes its JSON output to stderr by default.  That gets
             # interleaved with ring-buffer warnings like "[ring_id=0] Lost N
@@ -390,6 +409,7 @@ class Benchmark(object):
             # warnings we want to discard.
             olly_output = os.path.join(tmpdir, "olly.json")
             olly_p = subprocess.Popen(
+                list(observer_prefix) +
                 ["olly", "gc-stats", "--json", "--output", olly_output,
                  "--attach", "{}:{}".format(tmpdir, ocaml_pid)],
                 stdout=subprocess.DEVNULL,
