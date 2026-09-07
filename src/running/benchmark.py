@@ -279,8 +279,14 @@ class Benchmark(object):
             "os.read(fd,1); os.close(fd); "
             "os.execvp(sys.argv[1], sys.argv[1:])"
         )
+        # sys.executable, not "python3": the trampoline is our own code, so it
+        # must run the interpreter the harness is running, not whichever
+        # python3 the child's PATH happens to resolve.  A bare "python3" also
+        # depends on the child env carrying a usable PATH, and when it does not
+        # subprocess falls back to os.defpath (":/bin:/usr/bin"), which has no
+        # python3 on FreeBSD (it lives in /usr/local/bin).
         bench = subprocess.Popen(
-            ["python3", "-c", wrapper] + [str(c) for c in cmd],
+            [sys.executable, "-c", wrapper] + [str(c) for c in cmd],
             env=sync_env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,

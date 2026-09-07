@@ -81,40 +81,60 @@ print("  counter backend   :", b.name, "(available=%s)" % b.available())
 PYEOF
 
 say "available PMC events (first 40)"
+# `pmc list-events`, not `pmc list`: the latter is not a subcommand.
 if have pmc; then
-    pmc list 2>&1 | head -40
+    pmc list-events 2>&1 | head -40
 elif have pmccontrol; then
     pmccontrol -L 2>&1 | head -40
 else
     echo "(no pmc/pmccontrol)"
 fi
 
-say "live pmcstat attach against 'sleep 3'"
-# The real goal: raw pmcstat output to check the table parser against.
+say "live pmcstat attach: harness sequence"
+# Reproduces what the harness actually does: start the child BLOCKED on a
+# pipe, attach pmcstat to the blocked PID, then release it. Attaching to an
+# already-running, spinning process instead is only ~20% reliable and reports
+# working event names as broken, which is exactly the wrong conclusion.
 if have pmcstat; then
-    OUT=/tmp/running-ng-probe-pmcstat.txt
-    rm -f "$OUT"
-    sleep 3 &
-    TARGET=$!
-    # Event names are the thing most likely to be wrong here: libpmc has no
-    # portable aliases on modern x86. Try a few spellings and report each.
     for EV in instructions unhalted-cycles cycles; do
+        OUT="/tmp/running-ng-probe-$EV.txt"
         rm -f "$OUT"
-        pmcstat -C -d -w 1 -o "$OUT" -p "$EV" -t "$TARGET" 2>/tmp/probe-err.txt &
-        PMC=$!
-        sleep 1
-        kill "$PMC" 2>/dev/null
-        wait "$PMC" 2>/dev/null
+        ERR="/tmp/running-ng-probe-$EV.err"
+        "$PY" - "$EV" "$OUT" "$ERR" <<'PYEOF2'
+import os, subprocess, sys, time
+event, out, err = sys.argv[1], sys.argv[2], sys.argv[3]
+WRAPPER = ("import os,sys; fd=int(os.environ.pop('_BENCH_SYNC_FD')); "
+           "os.read(fd,1); os.close(fd); os.execvp(sys.argv[1], sys.argv[1:])")
+BURN = "t=0\nfor i in range(4000000): t+=i\n"
+r, w = os.pipe()
+env = dict(os.environ); env["_BENCH_SYNC_FD"] = str(r)
+bench = subprocess.Popen([sys.executable, "-c", WRAPPER, sys.executable, "-c", BURN],
+                         env=env, pass_fds=(r,),
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+os.close(r)
+with open(err, "wb") as ef:
+    pmc = subprocess.Popen(["pmcstat", "-C", "-d", "-w", "1", "-o", out,
+                            "-p", event, "-t", str(bench.pid)],
+                           stdout=subprocess.DEVNULL, stderr=ef)
+    time.sleep(0.5)            # let pmcstat attach while the child is blocked
+    os.write(w, b"x"); os.close(w)   # release it
+    bench.wait()
+    try:
+        pmc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        pmc.kill(); pmc.wait()
+print("    pmcstat exit=%s benchmark exit=%s" % (pmc.returncode, bench.returncode))
+PYEOF2
         if [ -s "$OUT" ]; then
             printf '  event %-18s OK\n' "$EV"
         else
-            printf '  event %-18s FAILED: %s\n' "$EV" "$(head -1 /tmp/probe-err.txt)"
+            printf '  event %-18s FAILED: %s\n' "$EV" "$(head -1 "$ERR" 2>/dev/null)"
         fi
+        # Each event keeps its own file, so all of them survive to be printed.
+        echo "--- raw output for $EV (this is what the parser must handle):"
+        cat "$OUT" 2>/dev/null || echo "(none produced)"
+        echo "--- end"
     done
-    wait "$TARGET" 2>/dev/null
-    echo "--- last raw pmcstat output (this is what the parser must handle):"
-    cat "$OUT" 2>/dev/null || echo "(none produced)"
-    echo "--- end raw output"
 else
     echo "(pmcstat not present)"
 fi

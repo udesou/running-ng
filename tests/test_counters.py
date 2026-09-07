@@ -32,6 +32,21 @@ PMCSTAT_REPEATED_HEADER = (
     "     300000000000      600000000000 "
 )
 
+# Real pmcstat output ends WITHOUT a trailing newline: the file stops in the
+# whitespace after the last value. splitlines() copes; a refactor to
+# split("\n") would not, which is why this shape is pinned.
+#
+# The gap after "#" is padding to the first column's width, so it varies with
+# the event name's length: one space here, two in PMCSTAT_TWO_EVENTS. The
+# parser is immune because it lstrips "#" and splits on whitespace.
+# Captured shape from FreeBSD 15.1 / Xeon E5-2640 v4.
+PMCSTAT_REAL_NO_TRAILING_NEWLINE = (
+    "# p/unhalted-cycles \n"
+    "                  0 \n"
+    "         8077883251 \n"
+    "        37037553393 "
+)
+
 PMCSTAT_SYSTEM_SCOPE = (
     "# s/00/instructions s/01/instructions \n"
     "        1111111111        2222222222 "
@@ -96,6 +111,35 @@ def test_non_numeric_row_is_ignored():
 def test_unparseable_header_does_not_mislabel_following_rows():
     text = "# garbage garbage \n     111111111111      222222222222 "
     assert counters.parse_pmcstat_table(text) == {}
+
+
+def test_parses_output_with_no_trailing_newline():
+    # The exact shape pmcstat leaves on disk.
+    assert counters.parse_pmcstat_table(PMCSTAT_REAL_NO_TRAILING_NEWLINE) == {
+        "unhalted-cycles": 37037553393,
+    }
+
+
+def test_intermediate_rows_are_ignored_in_favour_of_the_last():
+    """The intermediate rows are stale, not a time series.
+
+    hwpmc saves a process-scope counter when the target is switched out, so
+    reading it against a spinning process returns the last saved value. Here
+    8077883251 repeats and the true total only appears at exit. Picking any
+    row but the last would under-report by 4.6x.
+    """
+    table = counters.parse_pmcstat_table(PMCSTAT_REAL_NO_TRAILING_NEWLINE)
+    assert table["unhalted-cycles"] == 37037553393
+    assert 8077883251 not in table.values()
+
+
+def test_header_padding_width_does_not_affect_parsing():
+    # One space after "#" here, two in PMCSTAT_TWO_EVENTS: the padding is to
+    # the first column's width, which depends on the event name's length.
+    one = counters.parse_pmcstat_table(PMCSTAT_REAL_NO_TRAILING_NEWLINE)
+    two = counters.parse_pmcstat_table(PMCSTAT_TWO_EVENTS)
+    assert set(one) == {"unhalted-cycles"}
+    assert set(two) == {"instructions", "unhalted-cycles"}
 
 
 # --- backend record shape ------------------------------------------------------

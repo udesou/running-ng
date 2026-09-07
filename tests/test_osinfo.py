@@ -4,9 +4,14 @@ The point of most of these is the *non-Linux* behaviour, which CI cannot
 exercise natively, so they simulate it by patching running.osinfo.
 """
 import os
+import shutil
 import subprocess
 
 import pytest
+
+#: `true` lives in /bin on Linux and /usr/bin on FreeBSD and macOS, so the
+#: path is looked up rather than written down.
+TRUE_BIN = shutil.which("true")
 
 from running import osinfo
 # running.suite must be imported before running.benchmark: the two import each
@@ -138,7 +143,7 @@ def _prologue():
     from running.runtime import DummyRuntime
     from running.benchmark import BinaryBenchmark
     from pathlib import Path
-    bm = BinaryBenchmark(Path("/bin/true"), [], suite_name="s", name="b")
+    bm = BinaryBenchmark(Path(TRUE_BIN), [], suite_name="s", name="b")
     return runbms.get_log_prologue(DummyRuntime(""), bm)
 
 

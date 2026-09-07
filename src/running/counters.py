@@ -230,10 +230,21 @@ _PMCSTAT_COLUMN = re.compile(r"^[ps]/(?:\d+/)?(?P<name>.+)$")
 def parse_pmcstat_table(text: str) -> Dict[str, int]:
     """Return the final cumulative counter values from pmcstat's output.
 
-    pmcstat prints a time series, not a total: a `# p/<event>` header followed
-    by right-aligned columns, one row per `-w` interval plus a final row when
-    the target exits, with the header reprinted every 256 rows.  Run with `-C`
-    the values are cumulative, so the last complete row is the run total.
+    pmcstat prints a `# p/<event>` header followed by right-aligned columns,
+    one row per `-w` interval plus a final row written when the target exits,
+    with the header reprinted every 256 rows.
+
+    Only that final row is trustworthy.  The intermediate rows look like a
+    time series but are not one: hwpmc saves a process-scope counter when the
+    target is switched out, so `pmc_read` against a running process returns
+    whatever was last saved.  On a spinning benchmark that means the same
+    stale value repeats for the whole run and then jumps to the true total at
+    exit.  Measured on FreeBSD 15.1, a 6 s workload reported 8,077,883,251
+    five times in a row and 37,037,553,393 at the end.
+
+    So taking the last complete row is not merely convenient, it is the only
+    safe reading, and a run whose final row is missing has no usable counters
+    at all rather than an approximate answer.  See PmcStatBackend.collect.
 
     Returns {} when there is no usable row, which is what a failed PMC
     allocation looks like from here.
@@ -293,12 +304,21 @@ class PmcStatBackend(CounterBackend):
     security.bsd.unprivileged_proc_debug at its default of 1).  It does need
     the module loaded: `kldload hwpmc`, or hwpmc_load="YES" in loader.conf.
 
-    Event names are NOT portable.  libpmc only installs its alias table
-    ("instructions", "cycles", ...) for AMD K8, the generic class and a few ARM
-    cores, so on a modern Intel or Zen host those names do not resolve and the
-    events must be named explicitly from `pmc list`.  A bad event list makes
-    pmcstat exit immediately; that is reported loudly and the invocation
-    continues without counters rather than failing the sweep.
+    Event names are partly portable, and the failures are not where reading
+    libpmc's static alias table (lib/libpmc.c around 1560-1610) suggests.
+    Modern libpmc also resolves through the pmu-events tables, so on FreeBSD
+    15.1 / Broadwell "instructions" and "unhalted-cycles" both resolve and
+    count correctly.  Coverage is incomplete though, and the gaps are exactly
+    the spellings a config carried over from Linux reaches for first:
+    "cycles", "task-clock", "branch-misses" and "cache-misses" do NOT resolve,
+    while "unhalted-cycles" does.  So a name is never silently substituted: a
+    bad event list makes pmcstat exit immediately, which is reported loudly
+    and costs the invocation its counters rather than failing the sweep.
+
+    `pmc list-events` lists what this CPU actually supports.  Naming
+    instructions and cycles by their fixed-function events
+    ("inst_retired.any", "cpu_clk_unhalted.thread") leaves all the
+    programmable counters free for other events.
     """
 
     name = "freebsd-pmc"
@@ -310,15 +330,16 @@ class PmcStatBackend(CounterBackend):
         "tsc": "cycles",
     }
 
-    #: Print interval.  pmcstat emits nothing until the first tick, so this is
-    #: also the granularity of the free time series we get alongside the total.
-    #: pmcstat's own default of 5s would lose short benchmarks entirely, since
-    #: their only row would be the final one.
+    #: Print interval.  Does not affect the result: the final row is written
+    #: when the target exits whatever `-w` says, and the intermediate rows are
+    #: stale (see parse_pmcstat_table), so nothing is gained or lost by tuning
+    #: this.  Kept short only so a stalled run shows signs of life in the
+    #: output file.
     INTERVAL_SECONDS = 1.0
 
-    #: Only meaningful where libpmc installs an alias table.  Deliberately not
-    #: silently substituted on other hardware: a wrong event is worse than a
-    #: missing one, so let pmcstat reject it and say so.
+    #: Verified to resolve and count on FreeBSD 15.1 / Xeon E5-2640 v4.  Never
+    #: silently substituted elsewhere: a wrong event is worse than a missing
+    #: one, so let pmcstat reject an unknown name and say so.
     DEFAULT_EVENTS = ("instructions", "unhalted-cycles")
 
     def available(self) -> bool:
@@ -351,8 +372,9 @@ class PmcStatBackend(CounterBackend):
                 pass
             logging.warning(
                 "pmcstat exited %s; no counters for this invocation. Check the "
-                "event names against `pmc list` (libpmc has no portable aliases "
-                "on modern x86) and that hwpmc is loaded. stderr: %s",
+                "event names against `pmc list-events` (not every portable alias "
+                "resolves: `cycles` does not, `unhalted-cycles` does) and that "
+                "hwpmc is loaded. stderr: %s",
                 handle.proc.returncode,
                 stderr.decode("utf-8", "replace").strip()[:400])
             return []

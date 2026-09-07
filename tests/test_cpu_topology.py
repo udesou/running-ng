@@ -5,7 +5,13 @@ sys/kern/sched_ule.c:3211-3250: nested <group> elements each carrying a <cpu>
 list, with SMT sibling groups marked by a THREAD (and usually SMT) flag.
 Nobody has run this on FreeBSD yet, so the fixtures are the specification.
 """
+import shutil
+
 import pytest
+
+#: `true` lives in /bin on Linux and /usr/bin on FreeBSD and macOS, so the
+#: path is looked up rather than written down.
+TRUE_BIN = shutil.which("true")
 
 from running import osinfo
 
@@ -260,7 +266,7 @@ def test_cpupin_is_inert_where_the_os_cannot_pin(monkeypatch, caplog):
 
 def test_cpupin_prepends_to_the_benchmark_command(monkeypatch):
     m = _pin(monkeypatch, [[i, i + 16] for i in range(16)])
-    bm = BinaryBenchmark(Path("/bin/true"), [], suite_name="s", name="b")
+    bm = BinaryBenchmark(Path(TRUE_BIN), [], suite_name="s", name="b")
     bm = bm.attach_modifiers([m])
     assert [str(x) for x in bm.get_full_args(None)][:3] == ["taskset", "-c", "0-15"]
     assert bm.cpu_pin is m
@@ -269,7 +275,7 @@ def test_cpupin_prepends_to_the_benchmark_command(monkeypatch):
 def test_cpupin_excludes_still_apply(monkeypatch):
     m = _pin(monkeypatch, [[0, 1]])
     m.excludes = {"s": ["b"]}
-    bm = BinaryBenchmark(Path("/bin/true"), [], suite_name="s", name="b")
+    bm = BinaryBenchmark(Path(TRUE_BIN), [], suite_name="s", name="b")
     bm = bm.attach_modifiers([m])
     # Excluded benchmarks must not be pinned, and must not record the modifier.
     assert bm.wrapper == []
@@ -277,7 +283,7 @@ def test_cpupin_excludes_still_apply(monkeypatch):
 
 
 def test_no_cpupin_means_no_observer_pinning():
-    bm = BinaryBenchmark(Path("/bin/true"), [], suite_name="s", name="b")
+    bm = BinaryBenchmark(Path(TRUE_BIN), [], suite_name="s", name="b")
     bm = bm.attach_modifiers([PerfAndOllyAttach(
         name="perf_grp1", type="PerfAndOllyAttach", val="cycles")])
     assert bm.cpu_pin is None
