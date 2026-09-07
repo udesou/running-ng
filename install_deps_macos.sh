@@ -26,9 +26,10 @@
 #   7. Installs Python dependencies (pyyaml)
 #   8. Clones the benches repo if not present
 #
-# Note: perf is Linux-only and not available on macOS.  Configs using
-# PerfAndOllyAttach modifiers (perf_grp1/2/3) will not work.  Use the
-# olly_gc or time_stats modifiers instead.
+# Note: there is no hardware-counter backend for macOS yet.  running-ng
+# selects the "none" backend there, so PerfAndOllyAttach modifiers
+# (perf_grp1/2/3) yield no counters, while olly and rusage still work.
+# Linux uses perf and FreeBSD uses pmcstat; see src/running/counters.py.
 #
 # The OCaml/OxCaml runtimes used for actual benchmarking are built
 # automatically by running-ng on first run — this script only prepares
