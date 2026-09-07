@@ -1096,9 +1096,16 @@ modifiers:
   # benchmark and so changes what is being measured.
   #
   # Lavyek-only via the shared anchor; sequential macros stay unmasked.
+  # `one_node` confines the benchmark to one NUMA node and hands the others
+  # to olly and the counter tool.  Exactly a no-op on a single-socket box
+  # (monolith), so it changes nothing here; on a 2-socket box it keeps the
+  # benchmark's memory traffic off the interconnect, which for GC work is a
+  # large source of run-to-run variance, and gives the observers a whole
+  # socket instead of the benchmark's own SMT siblings.
   pin_lavyek:
     type: CpuPin
     val: "0"
+    one_node: true
     excludes: *non_lavyek_excludes
   perf_grp1:
     type: PerfAndOllyAttach

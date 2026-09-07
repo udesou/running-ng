@@ -516,3 +516,119 @@ def test_linux_numa_covers_every_cpu():
     flat = [c for n in nodes for c in n]
     assert len(flat) == len(set(flat))
     assert len(flat) == osinfo.core_count()
+
+
+# --- one-node pinning ----------------------------------------------------------
+#
+# Modelled on rosemary, the 2-socket Xeon E5-2640 v4 the FreeBSD work runs on:
+# 2 sockets x 10 cores x 2 threads, siblings adjacent ([0,1],[2,3],...), NUMA
+# boundary at cpu 20.
+
+ROSEMARY_GROUPS = [[2 * i, 2 * i + 1] for i in range(20)]
+ROSEMARY_NODES = [list(range(20)), list(range(20, 40))]
+
+
+@pytest.fixture
+def rosemary(monkeypatch):
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: ROSEMARY_GROUPS)
+    monkeypatch.setattr(osinfo, "refine_groups", lambda g, cpus=None: g)
+    monkeypatch.setattr(osinfo, "numa_nodes", lambda: ROSEMARY_NODES)
+    monkeypatch.setattr(osinfo, "IS_LINUX", False)
+    monkeypatch.setattr(osinfo, "IS_FREEBSD", True)
+
+
+def test_default_still_spans_both_nodes(rosemary):
+    # The observed behaviour before one_node existed, kept as the default so
+    # nothing changes under anyone mid-sweep.
+    bench, _ = osinfo.partition_cpus()
+    assert osinfo.format_cpu_list(bench) == \
+        "0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38"
+    assert len(bench) == 20
+
+
+def test_one_node_confines_the_benchmark_to_a_single_node(rosemary):
+    bench, observers = osinfo.partition_cpus(one_node=True)
+    assert osinfo.format_cpu_list(bench) == "0,2,4,6,8,10,12,14,16,18"
+    assert len(bench) == 10
+    # Every benchmark cpu is on node 0.
+    assert all(c in ROSEMARY_NODES[0] for c in bench)
+    # The whole of node 1 goes to the observers rather than sitting idle.
+    assert set(ROSEMARY_NODES[1]) <= set(observers)
+    assert not (set(bench) & set(observers))
+
+
+def test_one_node_still_partitions_every_cpu(rosemary):
+    bench, observers = osinfo.partition_cpus(one_node=True)
+    assert set(bench) | set(observers) == set(range(40))
+
+
+def test_one_node_composes_with_reserved_cores(rosemary):
+    # reserved_cores applies within the chosen node, which is what you want
+    # when there is only one node left to give.
+    bench, observers = osinfo.partition_cpus(reserved_cores=2, one_node=True)
+    assert osinfo.format_cpu_list(bench) == "0,2,4,6,8,10,12,14"
+    assert len(bench) == 8
+    assert set(ROSEMARY_NODES[1]) <= set(observers)
+
+
+def test_one_node_is_a_noop_on_a_single_node_machine(monkeypatch):
+    groups = [[i, i + 16] for i in range(16)]
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: groups)
+    monkeypatch.setattr(osinfo, "refine_groups", lambda g, cpus=None: g)
+    monkeypatch.setattr(osinfo, "numa_nodes", lambda: [list(range(32))])
+    monkeypatch.setattr(osinfo, "IS_LINUX", True)
+    # Safe to leave on in a shared config precisely because of this.
+    assert osinfo.partition_cpus() == osinfo.partition_cpus(one_node=True)
+
+
+def test_one_node_is_a_noop_without_numa_information(monkeypatch):
+    groups = [[0, 1], [2, 3]]
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: groups)
+    monkeypatch.setattr(osinfo, "refine_groups", lambda g, cpus=None: g)
+    monkeypatch.setattr(osinfo, "numa_nodes", lambda: [])
+    assert osinfo.split_groups_by_node(groups) == (groups, [])
+
+
+def test_node_choice_prefers_the_larger_node_then_the_lower_id(monkeypatch):
+    # Ties go to the lowest id so the choice is stable across runs.
+    monkeypatch.setattr(osinfo, "numa_nodes", lambda: [[0, 1], [2, 3]])
+    kept, rest = osinfo.split_groups_by_node([[0, 1], [2, 3]])
+    assert kept == [[0, 1]] and rest == [[2, 3]]
+
+    monkeypatch.setattr(osinfo, "numa_nodes", lambda: [[0, 1], [2, 3, 4, 5]])
+    kept, rest = osinfo.split_groups_by_node([[0, 1], [2, 3], [4, 5]])
+    assert kept == [[2, 3], [4, 5]] and rest == [[0, 1]]
+
+
+def test_group_straddling_nodes_stays_with_the_benchmark(monkeypatch):
+    # Should not happen, but is not worth crashing over.
+    monkeypatch.setattr(osinfo, "numa_nodes", lambda: [[0], [1]])
+    kept, rest = osinfo.split_groups_by_node([[0, 1]])
+    assert kept == [[0, 1]] and rest == []
+
+
+# --- CpuPin one_node option ----------------------------------------------------
+
+def test_cpupin_accepts_one_node(rosemary):
+    m = CpuPin(name="pin_bench", type="CpuPin", one_node=True)
+    assert m.val == ["cpuset", "-l", "0,2,4,6,8,10,12,14,16,18"]
+    assert m.one_node is True
+
+
+@pytest.mark.parametrize("raw,expected", [
+    (True, True), (False, False), ("true", True), ("yes", True),
+    ("1", True), ("false", False), ("no", False), ("0", False),
+])
+def test_cpupin_one_node_accepts_yaml_bool_and_string(rosemary, raw, expected):
+    # YAML hands this over as a bool or a string depending on quoting.
+    assert CpuPin(name="p", type="CpuPin", one_node=raw).one_node is expected
+
+
+def test_cpupin_rejects_a_non_boolean_one_node(rosemary):
+    with pytest.raises(ValueError, match="one_node must be a boolean"):
+        CpuPin(name="p", type="CpuPin", one_node="sometimes")
+
+
+def test_cpupin_defaults_to_spanning_nodes(rosemary):
+    # Unchanged default: turning this on is an explicit config decision.
+    assert CpuPin(name="p", type="CpuPin").one_node is False

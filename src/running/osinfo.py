@@ -320,18 +320,69 @@ def sibling_groups() -> List[List[int]]:
     return []
 
 
-def partition_cpus(reserved_cores: int = 0) -> Tuple[List[int], List[int]]:
+def split_groups_by_node(groups: List[List[int]]
+                         ) -> Tuple[List[List[int]], List[List[int]]]:
+    """Split sibling groups into (one NUMA node's, everything else's).
+
+    Returns (groups, []) unchanged on a single-node machine, or where the
+    platform does not report NUMA topology.  The node kept is the one holding
+    the most sibling groups; ties go to the lowest-numbered node so the choice
+    is stable across runs on one machine.
+
+    A group straddling nodes (which should not happen, but is not worth
+    crashing over) counts as belonging to none and stays with the benchmark.
+    """
+    nodes = numa_nodes()
+    if len(nodes) <= 1 or not groups:
+        return groups, []
+    node_of = {}
+    for index, cpus in enumerate(nodes):
+        for cpu in cpus:
+            node_of[cpu] = index
+
+    def node_for(group: List[int]) -> Optional[int]:
+        seen = {node_of.get(c) for c in group}
+        if len(seen) == 1:
+            return seen.pop()
+        return None
+
+    by_node: Dict[Optional[int], List[List[int]]] = {}
+    for group in groups:
+        by_node.setdefault(node_for(group), []).append(group)
+    real = {n: g for n, g in by_node.items() if n is not None}
+    if not real:
+        return groups, []
+    chosen = max(sorted(real), key=lambda n: len(real[n]))
+    kept = [g for g in groups if node_for(g) in (chosen, None)]
+    rest = [g for g in groups if node_for(g) not in (chosen, None)]
+    return kept, rest
+
+
+def partition_cpus(reserved_cores: int = 0,
+                   one_node: bool = False) -> Tuple[List[int], List[int]]:
     """Split the machine into (benchmark CPUs, observer CPUs).
 
     The benchmark gets one hardware thread per physical core, which is the
-    policy `pin_lavyek` encodes by hand today.  `reserved_cores` hands that
-    many whole physical cores (both threads) to the observers instead.
+    policy `pin_lavyek` used to encode by hand.
 
-    Reserving costs the benchmark cores, so it changes what is being measured:
-    do not turn it on midway through a sweep that is meant to be comparable.
-    The default of 0 reproduces today's behaviour exactly, leaving observers on
-    the SMT siblings, which is weaker isolation than it looks since siblings
-    share execution resources with the benchmark.
+    `reserved_cores` hands that many whole physical cores (both threads) to
+    the observers instead.  The default of 0 reproduces the historical
+    behaviour: the benchmark gets every physical core and the observers land
+    on its SMT siblings, which is weaker isolation than it looks since
+    siblings share execution resources with the benchmark threads.  Reserving
+    costs the benchmark cores, so it changes what is being measured: not a
+    mid-sweep decision.
+
+    `one_node` confines the benchmark to a single NUMA node and gives every
+    other node to the observers.  On a multi-socket machine that is usually
+    the best arrangement available: the benchmark keeps a whole node's cores
+    with no SMT contention at all, rather than giving cores up.  It also stops
+    the benchmark's own memory traffic crossing the interconnect, which for GC
+    work is a large source of run-to-run variance.  No effect on a
+    single-node machine, so a config carrying it stays portable.
+
+    `reserved_cores` still applies within the chosen node if both are given,
+    which is what you want when there is only one node to give.
 
     Returns ([], []) where topology is unavailable.
     """
@@ -340,6 +391,9 @@ def partition_cpus(reserved_cores: int = 0) -> Tuple[List[int], List[int]]:
         return [], []
     if reserved_cores < 0:
         raise ValueError("reserved_cores must be >= 0")
+    off_node: List[List[int]] = []
+    if one_node:
+        groups, off_node = split_groups_by_node(groups)
     # Never hand away so many cores that the benchmark has none left.
     reserved = min(reserved_cores, max(0, len(groups) - 1))
     if reserved != reserved_cores:
@@ -352,6 +406,9 @@ def partition_cpus(reserved_cores: int = 0) -> Tuple[List[int], List[int]]:
     bench = [g[0] for g in bench_groups]
     observers = [c for g in bench_groups for c in g[1:]]
     observers += [c for g in observer_groups for c in g]
+    # Whole nodes the benchmark gave up go to the observers: idle cores are
+    # worth more as isolation than as nothing.
+    observers += [c for g in off_node for c in g]
     return sorted(bench), sorted(observers)
 
 

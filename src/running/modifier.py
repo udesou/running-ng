@@ -230,6 +230,13 @@ class CpuPin(Modifier):
     takes cores away from the benchmark, so it changes what is being measured;
     do not change it partway through a sweep meant to be comparable.
 
+    Optional `one_node`: confine the benchmark to a single NUMA node and give
+    the others to the observers.  On a multi-socket machine this is usually
+    the better trade than `val`, because the benchmark keeps a whole node's
+    cores with no SMT contention at all instead of giving cores up, and its
+    memory traffic stops crossing the interconnect.  Exactly a no-op on a
+    single-node machine, so it is safe to leave on in a shared config.
+
     Contributes nothing where the OS cannot pin (macOS), so a config carrying
     it stays portable rather than failing.
     """
@@ -243,8 +250,20 @@ class CpuPin(Modifier):
             raise ValueError(
                 "CpuPin modifier {}: val must be a whole number of reserved "
                 "cores, got {!r}".format(self.name, raw))
+        # YAML may hand this over as a bool or as a string, depending on how
+        # it was quoted.
+        node_raw = self._kwargs.get("one_node", False)
+        if isinstance(node_raw, str):
+            node_raw = node_raw.strip().lower()
+            if node_raw not in ("true", "false", "yes", "no", "1", "0", ""):
+                raise ValueError(
+                    "CpuPin modifier {}: one_node must be a boolean, got "
+                    "{!r}".format(self.name, self._kwargs.get("one_node")))
+            self.one_node = node_raw in ("true", "yes", "1")
+        else:
+            self.one_node = bool(node_raw)
         self.benchmark_cpus, self.observer_cpus = osinfo.partition_cpus(
-            self.reserved_cores)
+            self.reserved_cores, one_node=self.one_node)
         self.val = osinfo.pin_command(self.benchmark_cpus)
         if not self.val:
             logging.warning(
@@ -252,7 +271,7 @@ class CpuPin(Modifier):
                 "unpinned", self.name, osinfo.SYSTEM)
 
     def __str__(self) -> str:
-        return "{} CpuPin cpus={} reserved_cores={}".format(
+        return "{} CpuPin cpus={} reserved_cores={} one_node={}".format(
             super().__str__(),
             osinfo.format_cpu_list(self.benchmark_cpus) or "none",
-            self.reserved_cores)
+            self.reserved_cores, self.one_node)
