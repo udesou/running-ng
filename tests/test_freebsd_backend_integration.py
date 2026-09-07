@@ -19,7 +19,7 @@ import sys
 
 import pytest
 
-from running import counters, suite  # noqa: F401  (suite first: see test_osinfo)
+from running import counters
 from running.benchmark import BinaryBenchmark
 from running.modifier import PerfAndOllyAttach
 from pathlib import Path

@@ -6,6 +6,7 @@ exercise natively, so they simulate it by patching running.osinfo.
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -14,12 +15,6 @@ import pytest
 TRUE_BIN = shutil.which("true")
 
 from running import osinfo
-# running.suite must be imported before running.benchmark: the two import each
-# other, and only the suite-first order resolves (benchmark takes the module
-# object, suite takes names from it).  Pre-existing, unrelated to this module —
-# tests/test_modifier.py and tests/test_ocaml_built_binary.py hit the same
-# thing when run in isolation.
-from running import suite  # noqa: F401
 from running.benchmark import pid_alive, pid_is_benchmark
 from running.command import runbms
 
@@ -167,3 +162,23 @@ def test_log_prologue_survives_a_host_with_no_probes(monkeypatch):
     out = _prologue()
     assert "CPU: unknown" in out
     assert "number of cores: " in out
+
+
+# --- import hygiene ------------------------------------------------------------
+
+def test_benchmark_and_suite_import_in_either_order():
+    """running.benchmark and running.suite import each other.
+
+    suite does `from running.benchmark import JavaBenchmark, ...`, so it needs
+    those names to exist; benchmark used to import suite back at module level,
+    which meant `import running.benchmark` on its own failed with "cannot
+    import name 'JavaBenchmark' from partially initialized module" while
+    `import running.suite` worked. Either order must work, so neither is a
+    trap for whoever writes the next focused test.
+    """
+    for first in ("running.benchmark", "running.suite"):
+        second = "running.suite" if first == "running.benchmark" else "running.benchmark"
+        code = "import {}; import {}".format(first, second)
+        r = subprocess.run([sys.executable, "-c", code],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, "{} first: {}".format(first, r.stderr)

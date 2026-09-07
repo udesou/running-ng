@@ -212,7 +212,6 @@ def test_linux_topology_is_self_consistent():
 
 # --- CpuPin modifier -----------------------------------------------------------
 
-from running import suite  # noqa: E402,F401  (suite first: see test_osinfo)
 from running.benchmark import BinaryBenchmark  # noqa: E402
 from running.modifier import CpuPin, PerfAndOllyAttach  # noqa: E402
 from pathlib import Path  # noqa: E402

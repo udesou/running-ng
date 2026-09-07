@@ -18,12 +18,26 @@ from running.modifier import *
 from running.util import smart_quote, split_quoted
 from pathlib import Path
 from copy import deepcopy
-from running import suite
 from running import osinfo
 from running import counters
 import os
 from enum import Enum
 import pty
+
+def _is_dry_run() -> bool:
+    """Whether this is a dry run, asked lazily to keep the import cycle open.
+
+    running.suite imports names from this module (`from running.benchmark
+    import JavaBenchmark, ...`), so it needs those names to already exist.
+    Importing running.suite back at module level here therefore made the pair
+    order-dependent: `import running.suite` worked, because it only needs this
+    module's *module object*, while `import running.benchmark` on its own
+    failed with "cannot import name 'JavaBenchmark' from partially initialized
+    module". Deferring to call time means either order works.
+    """
+    from running import suite
+    return suite.is_dry_run()
+
 
 # Executables that are never the benchmark itself.  Some benchmark wrapper
 # scripts run OCaml programs in $(...) subshells before exec'ing the real
@@ -536,7 +550,7 @@ class Benchmark(object):
         return bench_stderr if bench_stderr else b"", companion_out, subprocess_exit
 
     def run(self, runtime: Runtime, cwd: Optional[Path] = None, memtrace_path: Optional[Path] = None) -> Tuple[bytes, bytes, SubprocessrExit]:
-        if suite.is_dry_run():
+        if _is_dry_run():
             print(
                 self.to_string(runtime),
                 file=sys.stderr
@@ -841,7 +855,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         return (self.benchmark_dir / declared).resolve()
 
     def _run_build(self, runtime: OCaml, out_binary: Path):
-        if suite.is_dry_run():
+        if _is_dry_run():
             return
         if out_binary.exists() and not self.always_build:
             logging.warning(
@@ -923,7 +937,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
                 "Build previously failed for {} (sentinel: {}). "
                 "Delete the sentinel file to retry.".format(out_binary.name, sentinel)
             )
-        if suite.is_dry_run():
+        if _is_dry_run():
             self._binary_cache[runtime_key] = out_binary
             return out_binary
         try:
