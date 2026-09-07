@@ -58,6 +58,7 @@ fi
 step "Checking system prerequisites (cannot install these without root)"
 
 BLOCKED=""
+NO_CMAKE=0
 need() {
     if have "$1"; then
         ok "$1"
@@ -91,6 +92,16 @@ else
     warn "will mis-detect features. Needs root: pkg install pkgconf"
     BLOCKED="$BLOCKED pkgconf"
 fi
+if have cmake; then
+    ok "cmake"
+else
+    warn "cmake absent: hdr_histogram will not build (it depends on conf-cmake),"
+    warn "and without hdr_histogram olly has no gc-stats subcommand -- which is"
+    warn "exactly what running-ng invokes. Hardware counters and rusage still"
+    warn "work, but there will be no GC metrics. Needs root: pkg install cmake"
+    BLOCKED="$BLOCKED cmake"
+    NO_CMAKE=1
+fi
 
 step "Checking hwpmc (needed for hardware counters)"
 if kldstat -m hwpmc >/dev/null 2>&1; then
@@ -115,7 +126,7 @@ if [ -n "$BLOCKED" ]; then
     # Only the hard prerequisites are fatal; gmp/pkgconf only cost benchmarks.
     for pkg in $BLOCKED; do
         case "$pkg" in
-            gmp|pkgconf) ;;
+            gmp|pkgconf|cmake) ;;
             *) red "Cannot continue without $pkg."; exit 1 ;;
         esac
     done
@@ -200,13 +211,42 @@ step "Installing the harness's OCaml dependencies"
 # processor: ocaml-processor-dump, which supplies P/E-core and socket topology
 #   for CpuPin and the run manifest. Optional; running-ng falls back to the
 #   kernel's own view without it.
-PKGS="dune ocamlfind opam-compiler cmdliner hdr_histogram trace trace-fuchsia processor"
-"$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes $PKGS
+# Split deliberately: under `set -e` a single failing package used to abort the
+# script before olly was built and the benchmarks were fetched.
+# Required: build tools plus olly's non-cmake dependencies.
+PKGS_REQUIRED="dune ocamlfind opam-compiler cmdliner trace trace-fuchsia"
+# gc-stats only: hdr_histogram pulls conf-cmake, needing a system cmake we
+# cannot install without root. Skipped rather than fatal.
+PKGS_GCSTATS="hdr_histogram"
+# Optional: supplies P/E-core and socket topology. running-ng falls back to the
+# kernel's own view, so a failure here must not stop the run.
+PKGS_OPTIONAL="processor"
+
+"$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes $PKGS_REQUIRED
+
+if [ "$NO_CMAKE" = "1" ]; then
+    warn "skipping $PKGS_GCSTATS: no system cmake (see the check above)"
+else
+    "$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes $PKGS_GCSTATS
+fi
+
+if "$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes $PKGS_OPTIONAL; then
+    :
+else
+    warn "optional packages failed: $PKGS_OPTIONAL"
+    warn "continuing; running-ng falls back to the kernel's own topology view."
+fi
 
 # =============================================================================
 # 5. olly
 # =============================================================================
 step "Building olly (runtime_events_tools)"
+if [ "$NO_CMAKE" = "1" ]; then
+    warn "SKIPPED: olly needs hdr_histogram, which needs a system cmake."
+    warn "Everything else is installed. Get cmake installed (needs root) and"
+    warn "re-run this script; the switch and packages above will be reused."
+    OLLY_EXE=""
+else
 if [ ! -d "$OLLY_DIR" ]; then
     git clone https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
 fi
@@ -219,6 +259,7 @@ if [ -x "$OLLY_EXE" ]; then
 else
     red "ERROR: olly not found at $OLLY_EXE after the build"
     exit 1
+fi
 fi
 
 # =============================================================================
@@ -239,7 +280,9 @@ echo ""
 step "Done. To use this environment:"
 echo "  export PATH=\"$LOCAL_BIN:\$PATH\""
 echo "  eval \$($OPAM_BIN env --switch=$OPAM_SWITCH --set-switch)"
-echo "  export PATH=\"$OLLY_DIR/_build/install/default/bin:\$PATH\""
+if [ -n "$OLLY_EXE" ]; then
+    echo "  export PATH=\"$OLLY_DIR/_build/install/default/bin:\$PATH\""
+fi
 echo ""
 echo "Then check what running-ng makes of the host:"
 echo "  sh $ROOT_DIR/scripts/portability_probe.sh"
