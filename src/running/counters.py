@@ -43,6 +43,10 @@ class CounterHandle:
         self.proc = proc
         self.output_path = output_path
         self.ctl_fds = tuple(ctl_fds)
+        #: Set by stop() when the tool had to be killed rather than exiting on
+        #: its own.  Backends whose output is only complete at exit must treat
+        #: that as no result at all; see PmcStatBackend.collect.
+        self.killed = False
 
 
 class CounterBackend:
@@ -79,6 +83,10 @@ class CounterBackend:
         try:
             handle.proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            logging.warning(
+                "counter tool did not exit within %ss of the benchmark; killing it. "
+                "Its output may be incomplete.", timeout)
+            handle.killed = True
             handle.proc.kill()
             handle.proc.wait()
 
@@ -363,6 +371,20 @@ class PmcStatBackend(CounterBackend):
 
     def collect(self, handle: Optional[CounterHandle]) -> List[Dict]:
         if handle is None:
+            return []
+        if handle.killed:
+            # Refusing the result rather than parsing it. pmcstat's totals are
+            # only correct in the row it writes at exit; every earlier row is a
+            # stale mid-run snapshot (see parse_pmcstat_table). A killed
+            # pmcstat therefore leaves a last-complete-row that is wrong by an
+            # arbitrary factor -- 8.07e9 against a true 37.0e9 in one measured
+            # case -- and entirely plausible-looking, with nothing downstream
+            # able to tell. Losing the counters for one invocation is recoverable;
+            # silently publishing a number that is wrong by 4.6x is not.
+            logging.warning(
+                "pmcstat was killed before it could write its final row, so its "
+                "totals for this invocation are a stale mid-run snapshot. "
+                "Discarding them; this invocation has no counter data.")
             return []
         if handle.proc.returncode not in (0, None):
             stderr = b""

@@ -149,6 +149,7 @@ class _FakeHandle:
         self.proc = type("P", (), {"returncode": 0, "stderr": None})()
         self.output_path = path
         self.ctl_fds = ()
+        self.killed = False
 
 
 def test_pmcstat_backend_emits_canonical_records(tmp_path):
@@ -265,3 +266,43 @@ def test_split_event_list_drops_empties():
 
 def test_split_event_list_empty_input():
     assert counters.split_event_list([]) == []
+
+
+# --- killed counter tool -------------------------------------------------------
+
+def test_killed_pmcstat_yields_no_counters_rather_than_stale_ones(tmp_path, caplog):
+    """A killed pmcstat leaves a plausible but badly wrong total.
+
+    Its only correct row is the one written at exit; the rows before it are
+    stale mid-run snapshots. So the last complete row of a killed run can be
+    wrong by an arbitrary factor while looking entirely reasonable, and
+    nothing downstream could tell. Discard rather than publish.
+    """
+    p = tmp_path / "pmcstat_main.txt"
+    p.write_text(PMCSTAT_REAL_NO_TRAILING_NEWLINE)
+    h = _FakeHandle(str(p))
+    h.killed = True
+    assert counters.PmcStatBackend().collect(h) == []
+    assert "stale" in caplog.text
+
+
+def test_stop_marks_the_handle_when_it_has_to_kill(caplog):
+    import subprocess as sp
+    proc = sp.Popen(["sleep", "30"])
+    h = counters.CounterHandle(proc, "/tmp/unused")
+    try:
+        counters.CounterBackend().stop(h, timeout=0.2)
+        assert h.killed is True
+        assert "killing it" in caplog.text
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_stop_does_not_mark_a_tool_that_exited_on_its_own():
+    import subprocess as sp
+    proc = sp.Popen(["true"])
+    h = counters.CounterHandle(proc, "/tmp/unused")
+    counters.CounterBackend().stop(h, timeout=10)
+    assert h.killed is False
