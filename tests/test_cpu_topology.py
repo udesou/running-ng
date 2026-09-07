@@ -432,13 +432,88 @@ def test_summary_reports_kinds_and_sockets(monkeypatch):
 
 
 def test_summary_degrades_without_the_tool(monkeypatch):
+    # Without ocaml-processor the kernel-derived fields remain; only cpu_kinds,
+    # which nothing else can supply, goes missing.
     monkeypatch.setattr(osinfo, "sibling_groups", lambda: [[i, i + 16] for i in range(16)])
     monkeypatch.setattr(osinfo, "processor_topology", lambda: [])
+    monkeypatch.setattr(osinfo, "numa_nodes", lambda: [list(range(32))])
+    monkeypatch.setattr(osinfo, "IS_LINUX", True)
+    monkeypatch.setattr(osinfo, "_linux_socket_count", lambda: 1)
     s = osinfo.machine_topology_summary()
-    assert s == {"physical_cores": 16, "threads_per_core": 2}
+    assert s == {"physical_cores": 16, "threads_per_core": 2,
+                 "numa_nodes": 1, "sockets": 1}
+    assert "cpu_kinds" not in s
 
 
 def test_summary_is_empty_where_nothing_is_knowable(monkeypatch):
     monkeypatch.setattr(osinfo, "sibling_groups", lambda: [])
     monkeypatch.setattr(osinfo, "processor_topology", lambda: [])
+    monkeypatch.setattr(osinfo, "numa_nodes", lambda: [])
+    monkeypatch.setattr(osinfo, "IS_LINUX", False)
     assert osinfo.machine_topology_summary() == {}
+
+
+# --- NUMA and socket detection -------------------------------------------------
+#
+# Kernel-derived, so unlike the socket data from ocaml-processor these are
+# available without any optional tool. The FreeBSD fixture models the
+# 2-socket Xeon E5-2640 v4 the branch was validated on: 20 physical cores,
+# 40 threads, node boundary at cpu 20.
+
+FREEBSD_TWO_NODES = """<groups>
+ <group level="1" cache-level="0">
+  <cpu count="8" mask="ff">0, 1, 2, 3, 4, 5, 6, 7</cpu>
+  <children>
+   <group level="2" cache-level="3">
+    <cpu count="4" mask="f">0, 1, 2, 3</cpu>
+    <flags><flag name="NODE">NUMA node</flag></flags>
+   </group>
+   <group level="2" cache-level="3">
+    <cpu count="4" mask="f0">4, 5, 6, 7</cpu>
+    <flags><flag name="NODE">NUMA node</flag></flags>
+   </group>
+  </children>
+ </group>
+</groups>
+"""
+
+
+def test_freebsd_numa_nodes(as_freebsd, monkeypatch):
+    monkeypatch.setattr(osinfo, "probe", lambda cmd: FREEBSD_TWO_NODES)
+    assert osinfo.numa_nodes() == [[0, 1, 2, 3], [4, 5, 6, 7]]
+
+
+def test_freebsd_numa_absent_when_not_flagged(as_freebsd, monkeypatch):
+    # SMT groups are THREAD-flagged, not NODE-flagged: they must not be
+    # mistaken for NUMA nodes.
+    monkeypatch.setattr(osinfo, "probe", lambda cmd: FREEBSD_SMT)
+    assert osinfo.numa_nodes() == []
+
+
+def test_numa_nodes_empty_where_unknown(monkeypatch):
+    monkeypatch.setattr(osinfo, "IS_LINUX", False)
+    monkeypatch.setattr(osinfo, "IS_FREEBSD", False)
+    assert osinfo.numa_nodes() == []
+
+
+def test_summary_carries_numa_without_ocaml_processor(monkeypatch):
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: [[i, i + 20] for i in range(20)])
+    monkeypatch.setattr(osinfo, "numa_nodes",
+                        lambda: [list(range(20)), list(range(20, 40))])
+    monkeypatch.setattr(osinfo, "processor_topology", lambda: [])
+    monkeypatch.setattr(osinfo, "IS_LINUX", True)
+    monkeypatch.setattr(osinfo, "_linux_socket_count", lambda: 2)
+    s = osinfo.machine_topology_summary()
+    assert s["numa_nodes"] == 2
+    assert s["sockets"] == 2
+    assert s["physical_cores"] == 20
+
+
+@pytest.mark.skipif(not osinfo.IS_LINUX, reason="sysfs NUMA is Linux-only")
+def test_linux_numa_covers_every_cpu():
+    nodes = osinfo.numa_nodes()
+    if not nodes:
+        pytest.skip("no NUMA info exposed")
+    flat = [c for n in nodes for c in n]
+    assert len(flat) == len(set(flat))
+    assert len(flat) == osinfo.core_count()

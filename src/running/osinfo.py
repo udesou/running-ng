@@ -355,6 +355,86 @@ def partition_cpus(reserved_cores: int = 0) -> Tuple[List[int], List[int]]:
     return sorted(bench), sorted(observers)
 
 
+def _linux_numa_nodes() -> List[List[int]]:
+    """CPUs per NUMA node from sysfs."""
+    nodes = []
+    base = "/sys/devices/system/node"
+    try:
+        names = sorted((n for n in os.listdir(base)
+                        if n.startswith("node") and n[4:].isdigit()),
+                       key=lambda n: int(n[4:]))
+    except OSError:
+        return []
+    for name in names:
+        try:
+            with open("{}/{}/cpulist".format(base, name)) as f:
+                cpus = _parse_cpu_list(f.read().strip())
+        except OSError:
+            continue
+        if cpus:
+            nodes.append(sorted(cpus))
+    return nodes
+
+
+def _linux_socket_count() -> Optional[int]:
+    """Distinct physical_package_id values, or None if sysfs does not say."""
+    base = "/sys/devices/system/cpu"
+    packages = set()
+    try:
+        entries = [n for n in os.listdir(base)
+                   if n.startswith("cpu") and n[3:].isdigit()]
+    except OSError:
+        return None
+    for name in entries:
+        try:
+            with open("{}/{}/topology/physical_package_id".format(base, name)) as f:
+                packages.add(f.read().strip())
+        except OSError:
+            continue
+    return len(packages) or None
+
+
+def _freebsd_numa_nodes() -> List[List[int]]:
+    """CPUs per NUMA node from kern.sched.topology_spec's NODE-flagged groups."""
+    import xml.etree.ElementTree as ET
+    xml = probe("sysctl -n kern.sched.topology_spec")
+    if not xml.strip():
+        return []
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return []
+    nodes = []
+    for group in root.iter("group"):
+        flags_el = group.find("flags")
+        flags = ({f.get("name") for f in flags_el.findall("flag")}
+                 if flags_el is not None else set())
+        if "NODE" not in flags:
+            continue
+        cpu_el = group.find("cpu")
+        if cpu_el is not None and cpu_el.text:
+            cpus = sorted(_parse_cpu_list(cpu_el.text))
+            if cpus:
+                nodes.append(cpus)
+    return nodes
+
+
+def numa_nodes() -> List[List[int]]:
+    """CPUs per NUMA node, or [] where the platform does not say.
+
+    Kernel-derived, so unlike the socket data from ocaml-processor this is
+    available without any optional tool.  A benchmark CPU set that straddles a
+    node boundary pays cross-socket memory traffic, which for GC work shows up
+    as run-to-run variance; recording the boundary is the first step to being
+    able to see that in the results.
+    """
+    if IS_LINUX:
+        return _linux_numa_nodes()
+    if IS_FREEBSD:
+        return _freebsd_numa_nodes()
+    return []
+
+
 def format_cpu_list(cpus: Sequence[int]) -> str:
     """Render CPUs as the compact ranges both taskset and cpuset accept."""
     ordered = sorted(cpus)
@@ -527,8 +607,17 @@ def machine_topology_summary() -> Dict[str, Any]:
         widths = {len(g) for g in groups}
         if len(widths) == 1:
             summary["threads_per_core"] = widths.pop()
+    # Kernel-derived, so present even without ocaml-processor installed.
+    nodes = numa_nodes()
+    if nodes:
+        summary["numa_nodes"] = len(nodes)
+    if IS_LINUX:
+        sockets = _linux_socket_count()
+        if sockets:
+            summary["sockets"] = sockets
     cpus = processor_topology()
     if cpus:
+        # ocaml-processor knows sockets directly; prefer it where present.
         summary["sockets"] = len({c["socket"] for c in cpus})
         kinds: Dict[str, int] = {}
         for c in cpus:
