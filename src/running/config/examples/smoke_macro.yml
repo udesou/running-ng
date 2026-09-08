@@ -43,7 +43,9 @@ runtimes:
 
 # Sequential macros carry no re/md now — each suite declares its own
 # runtime_events ring via `ocamlrunparam:` (most use the default; a few set e=25).
-# lavyek gets re_par-22|md_par-8 + pin_lavyek (taskset -c 0-15, lavyek-only).
+# lavyek gets re_par-22|md_par-8 + pin_lavyek (lavyek-only; CpuPin, so the
+# CPU list is derived per machine and the command is taskset on Linux,
+# cpuset on FreeBSD).
 # All routings are defined in macro_base.yml.
 configs:
   - "ocaml-5.4.1|perf_grp1|re_par-22|md_par-8|pin_lavyek"

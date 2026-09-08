@@ -33,8 +33,9 @@
 #
 # Note: `re_par` and `md_par` REQUIRE explicit values (`-22`, `-8`). The bare
 # tokens `re_par|md_par` render to the literal string `e={0}` / `d={0}` and
-# break OCAMLRUNPARAM at runtime. `pin_lavyek` takes no value (Wrapper-type
-# modifier with a fixed `taskset -c 0-15` payload).
+# break OCAMLRUNPARAM at runtime. `pin_lavyek` takes no value: it is a CpuPin
+# modifier, which derives its CPU list from the running machine and emits
+# `taskset -c` on Linux or `cpuset -l` on FreeBSD.
 #
 # Reason: `re`/`md` are scoped to non-lavyek programs via `excludes`, and `re_par`/
 # `md_par`/`pin_lavyek` are scoped to lavyek-only. Omitting the parallel triple
@@ -941,9 +942,12 @@ suites:
   # → pthread_setaffinity_np), keyed off id_domain.  This is what
   # makes the 1d/2d/4d/8d wall times comparable run-to-run — without
   # it the kernel migrates domains within whatever mask was inherited.
-  # The pin_lavyek modifier wraps the process in `taskset -c 0-15` to
-  # also fence the few helper threads (first iou-wrk + Eio setup) that
-  # spawn before pinning runs.  See benchmarks/lavyek/lavyek_bench.ml.
+  # The pin_lavyek modifier confines the process to one hardware thread
+  # per physical core to also fence the few helper threads (first
+  # iou-wrk + Eio setup) that spawn before pinning runs.  The CPU list is
+  # derived per machine, not hardcoded, and the command is `taskset -c`
+  # on Linux and `cpuset -l` on FreeBSD, which has no taskset at all.
+  # See benchmarks/lavyek/lavyek_bench.ml.
   #
   # Requires md=8 and a smaller per-domain ring (re=22).  Wired via
   # the re_par / md_par modifiers — see the modifiers section below.
@@ -1080,7 +1084,8 @@ modifiers:
   # CpuPin derives the CPU list from the running machine instead of
   # hardcoding it.  The policy is unchanged (one hardware thread per
   # physical core), and on the AMD Ryzen 9 9950X box this suite is
-  # calibrated on it still resolves to exactly "taskset -c 0-15", so
+  # calibrated on it still resolves on Linux to exactly the
+  # "taskset -c 0-15" that used to be written out by hand, so
   # existing lavyek numbers stay comparable.  It is now also correct on
   # a box with a different core count, on Intel parts where logical CPUs
   # alternate physical/sibling, and on FreeBSD (cpuset -l, and a
