@@ -1,0 +1,60 @@
+# =============================================================================
+# Smoke test — micro benchmarks, FreeBSD
+# =============================================================================
+# The FreeBSD counterpart of smoke_micro.yml. Identical in every respect
+# except the event group, so it is the one-command way to check the FreeBSD
+# path after any change:
+#
+#   - opam-compiler creates a switch for the runtime
+#   - the suite's build script compiles cleanly into a binary
+#   - the benchmark runs, PerfAndOllyAttach captures JSON, sidecar written
+#   - pmcstat allocates its PMCs, the wait_ready handshake fires, and the
+#     counters come back non-zero
+#   - CpuPin emits `cpuset -l` and the observers land off the benchmark's node
+#
+# Why a separate file rather than a per-OS switch inside the modifier: the
+# config string is the provenance for a set of numbers, so it should record
+# which events actually ran. FreeBSD's are approximations of the Linux ones
+# for groups 2 and 3 (see the comments in micro_base.yml), so the two
+# platforms' figures for those are not interchangeable.
+#
+# Expected on a Xeon E5-2640 v4 under FreeBSD 15.1: two counters per
+# invocation, `instructions` and `cycles`, both non-zero. Zeros or missing
+# counters mean something regressed in the pmcstat path, not in the workload;
+# a warning naming `pmc list-events` means an event failed to allocate.
+#
+# Usage:
+#   cd ~/running-ng
+#   RUNNING_BENCH_DIR=~/benches \
+#   CONFIG_FILE=src/running/config/examples/smoke_micro_freebsd.yml \
+#   LOG_DIR=/tmp/smoke_micro_freebsd \
+#     sh run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/micro_base.yml"
+
+invocations: 1
+remote_host: null
+compress_logs: false
+minheap_multiplier: 1.0
+heap_range: 6
+spread_factor: 1
+
+# Override the base's `benchmarks:` block: only run two cheap simples.
+overrides:
+  benchmarks:
+    sandmark-sequential:
+      - almabench
+      - bdd
+
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+
+# perf_grp1_freebsd, not perf_grp1: of the latter's events only
+# `instructions` resolves on FreeBSD, and pmcstat is all-or-nothing, so
+# perf_grp1 would yield no counters at all here.
+configs:
+  - "ocaml-5.4.1|perf_grp1_freebsd"

@@ -1121,6 +1121,94 @@ modifiers:
   perf_grp3:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,cache-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses"
+  # --- FreeBSD event groups (hwpmc via pmcstat) ---
+  #
+  # The groups above cannot allocate on FreeBSD: of their event names only
+  # `instructions` resolves as a PMC. `task-clock`, `page-faults`, `cycles`,
+  # `branch-misses` and `cache-misses` do not. And pmcstat is all-or-nothing:
+  # one unresolvable name makes it exit 71 and write nothing, so the whole
+  # group yields no counters rather than a partial set. Hence separate groups
+  # rather than per-OS substitution inside the modifier: the config string is
+  # the provenance for a set of numbers, so it should say which events ran.
+  #
+  # Verified as complete groups (not merely event by event) on a Xeon E5-2640
+  # v4 (Broadwell-EP) under FreeBSD 15.1, against a real GC-heavy OCaml
+  # workload: 2/2, 4/4 and 6/6 counters non-zero respectively.
+  #
+  # Hard ceiling: 7 events, being 3 fixed-function plus 4 programmable. Four,
+  # not eight, because SMT is enabled. An 8th event fails `Invalid argument`.
+  # `instructions` and `unhalted-cycles` land on fixed-function counters, so
+  # grp3's four dotted events fill every programmable slot: it is AT the
+  # ceiling. The only event addable to grp3 is the remaining fixed-function
+  # counter, `cpu_clk_unhalted.ref_tsc`; anything else needs a grp4.
+  #
+  # Unlike perf, hwpmc never multiplexes. Over-subscribe and it hard-fails
+  # instead of time-slicing and scaling, so a FreeBSD count is always an
+  # unscaled true count. Both platforms' groups fit within the programmable
+  # counters SMT leaves, so neither is scaling today, but a future addition
+  # will be refused here where Linux would quietly start estimating.
+  #
+  # These are counting PMCs, not sampling ones: `pmcstat -p` allocates a
+  # process-mode counting PMC, and the harness passes none of the sampling
+  # flags (-P/-S/-n/-D/-g). `-C` makes the running total cumulative and `-w`
+  # only sets how often it is printed, so the final row is the exact total
+  # rather than an extrapolation. (This is also why `inst_retired.prec_dist`
+  # is not used even though it resolves: its purpose is PEBS sampling.)
+  #
+  # `task-clock` and `page-faults` are dropped rather than substituted: they
+  # have no PMC equivalent. Do not "fix" their absence. The per-invocation
+  # result record still carries user_time, system_time, minor_faults,
+  # major_faults and context-switch counts from getrusage. NOTE though that
+  # rusage is not a contract source, so unlike on Linux the `task_clock` and
+  # `page_faults` contract metrics are simply absent from a FreeBSD run.
+  #
+  # Alias spellings are deliberate: `instructions` and `unhalted-cycles`
+  # rather than `inst_retired.any` / `cpu_clk_unhalted.thread`, though all
+  # four resolve. PmcStatBackend.EVENT_ALIASES canonicalises
+  # `unhalted-cycles` to `cycles`, so the recorded names come out as
+  # `instructions` / `cycles`, identical to Linux perf's, keeping the two
+  # platforms in one result schema. Only these two reach the contract
+  # vocabulary on either platform; every dotted event below is archival in
+  # the raw sidecar, exactly as Linux's stalled-cycles-* and *-misses are.
+  #
+  # Group 1: baseline IPC. Direct equivalent of perf_grp1.
+  perf_grp1_freebsd:
+    type: PerfAndOllyAttach
+    val: "instructions,unhalted-cycles"
+  # Group 2: pipeline stalls. APPROXIMATIONS, not equivalents: perf's
+  # stalled-cycles-frontend/backend are derived events with specific umasks,
+  # so these numbers are NOT comparable with Linux's. Directionally useful
+  # within FreeBSD.
+  perf_grp2_freebsd:
+    type: PerfAndOllyAttach
+    val: "instructions,unhalted-cycles,idq_uops_not_delivered.core,resource_stalls.any"
+  # Group 3: cache and TLB hierarchy.
+  #
+  #   cache-misses     -> longest_lat_cache.miss
+  #       Linux's cache-misses is PERF_COUNT_HW_CACHE_MISSES, all-request LLC
+  #       misses (loads, stores and prefetches), which is exactly this event.
+  #   LLC-load-misses  -> mem_load_uops_retired.l3_miss
+  #       Closest available, but it counts RETIRED LOAD UOPS where Linux
+  #       counts requests, so speculative loads that never retire and
+  #       prefetches are excluded. NOT numerically comparable with a Linux
+  #       figure. The measured split corroborates the shape: 12.27M load
+  #       misses within 77.61M total LLC misses on an allocation-heavy run.
+  #   dTLB/iTLB-load-misses -> *.walk_completed
+  #       Completed page walks, the conventional perf mapping. Alternatives if
+  #       a different flavour is ever wanted: *.miss_causes_a_walk (walks
+  #       started), *.walk_duration, *.stlb_hit, page_walker_loads.itlb_l*.
+  #
+  # DO NOT add `llc-misses`: it is the SAME counter as longest_lat_cache.miss
+  # (measured 77,610,381 against 77,610,362 in one run, and 48,445,804
+  # against 48,445,767 in another). Adding both would burn one of only four
+  # programmable slots on a duplicate.
+  #
+  # `instructions` here is a deliberate addition that Linux's grp3 lacks. It
+  # costs no programmable slot, being fixed-function, and makes
+  # per-instruction normalisation possible.
+  perf_grp3_freebsd:
+    type: PerfAndOllyAttach
+    val: "instructions,unhalted-cycles,longest_lat_cache.miss,mem_load_uops_retired.l3_miss,dtlb_load_misses.walk_completed,itlb_misses.walk_completed"
   # memtrace: unlike perf/olly, this requires the traced binary to call
   # Memtrace.trace_if_requested () at startup — macro-benches only patches
   # this in for test_decompress today (see macro-benches commit adding
