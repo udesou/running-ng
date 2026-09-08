@@ -31,6 +31,9 @@ set -eu
 ROOT_DIR=$(cd "$(dirname "$0")" && pwd)
 OPAM_VERSION="${OPAM_VERSION:-2.5.2}"
 OPAM_SWITCH="${OPAM_SWITCH:-running-ng-tools}"
+# olly gets its own switch: it needs cmdliner >= 2.0.0 and
+# opam-compiler, which lives in the tools switch, pins it < 2.0.0.
+OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
 OCAML_VERSION="${OCAML_VERSION:-5.4.0}"
 LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
 OLLY_DIR="${OLLY_DIR:-$HOME/runtime_events_tools}"
@@ -204,31 +207,23 @@ else
 fi
 
 step "Installing the harness's OCaml dependencies"
+# olly's dependencies are deliberately NOT here: they go in their own switch
+# below, because olly and opam-compiler cannot coexist. Every published
+# opam-compiler pins cmdliner < 2.0.0 while olly needs >= 2.0.0, and opam's
+# only way to satisfy both is to remove opam-compiler -- which running-ng
+# needs for `opam compiler create`, so a run would die on
+# `unknown command 'compiler'`.
+#
 # dune/ocamlfind: build tools most benchmark build scripts expect on PATH.
-# opam-compiler: `opam compiler create` provisions every runtime switch
-#   (runtime.py); without it a run dies with `unknown command 'compiler'`.
-# cmdliner/hdr_histogram/trace/trace-fuchsia: olly's dependencies.
-# processor: ocaml-processor-dump, which supplies P/E-core and socket topology
-#   for CpuPin and the run manifest. Optional; running-ng falls back to the
-#   kernel's own view without it.
-# Split deliberately: under `set -e` a single failing package used to abort the
-# script before olly was built and the benchmarks were fetched.
-# Required: build tools plus olly's non-cmake dependencies.
-PKGS_REQUIRED="dune ocamlfind opam-compiler cmdliner trace trace-fuchsia"
-# gc-stats only: hdr_histogram pulls conf-cmake, needing a system cmake we
-# cannot install without root. Skipped rather than fatal.
-PKGS_GCSTATS="hdr_histogram"
-# Optional: supplies P/E-core and socket topology. running-ng falls back to the
-# kernel's own view, so a failure here must not stop the run.
+# opam-compiler: provisions every runtime switch (runtime.py).
+PKGS_REQUIRED="dune ocamlfind opam-compiler"
+# Optional: ocaml-processor-dump, supplying P/E-core and socket topology for
+# CpuPin and the run manifest. running-ng falls back to the kernel's own view,
+# so a failure here must not stop the run. Installed separately because under
+# `set -e` one failing package used to abort before olly and the benchmarks.
 PKGS_OPTIONAL="processor"
 
 "$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes $PKGS_REQUIRED
-
-if [ "$NO_CMAKE" = "1" ]; then
-    warn "skipping $PKGS_GCSTATS: no system cmake (see the check above)"
-else
-    "$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes $PKGS_GCSTATS
-fi
 
 if "$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes $PKGS_OPTIONAL; then
     :
@@ -240,26 +235,51 @@ fi
 # =============================================================================
 # 5. olly
 # =============================================================================
-step "Building olly (runtime_events_tools)"
+step "Building olly (runtime_events_tools) in its own switch"
+# Its own switch because olly needs cmdliner >= 2.0.0 and opam-compiler pins
+# it < 2.0.0 (see above). The binary is a self-contained native executable, so
+# which switch built it does not matter at run time: only its bin directory
+# needs to be on PATH.
 if [ "$NO_CMAKE" = "1" ]; then
     warn "SKIPPED: olly needs hdr_histogram, which needs a system cmake."
     warn "Everything else is installed. Get cmake installed (needs root) and"
     warn "re-run this script; the switch and packages above will be reused."
     OLLY_EXE=""
 else
-if [ ! -d "$OLLY_DIR" ]; then
-    git clone https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
-fi
-NCPU=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
-( cd "$OLLY_DIR" && eval "$("$OPAM_BIN" env --switch="$OPAM_SWITCH")" && \
-  dune build -p runtime_events_tools -j "$NCPU" @install 2>&1 | tail -5 )
-OLLY_EXE="$OLLY_DIR/_build/install/default/bin/olly"
-if [ -x "$OLLY_EXE" ]; then
-    ok "olly built at $OLLY_EXE"
-else
-    red "ERROR: olly not found at $OLLY_EXE after the build"
-    exit 1
-fi
+    if [ ! -d "$OLLY_DIR" ]; then
+        git clone https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
+    fi
+    if "$OPAM_BIN" switch list --short 2>/dev/null | grep -qx "$OLLY_SWITCH"; then
+        ok "switch $OLLY_SWITCH already exists"
+    else
+        echo "  creating $OLLY_SWITCH; this compiles a second compiler"
+        "$OPAM_BIN" switch create "$OLLY_SWITCH" \
+            "ocaml-base-compiler.$OCAML_VERSION" --yes
+    fi
+    # --deps-only from olly's own opam file rather than a hand-written package
+    # list. The hand-written list is what let the cmdliner conflict through in
+    # the first place, and it silently goes stale every time olly changes.
+    ( cd "$OLLY_DIR" && \
+      "$OPAM_BIN" install --switch="$OLLY_SWITCH" --deps-only --yes . )
+
+    NCPU=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+    BUILD_LOG="${TMPDIR:-/tmp}/running-ng-olly-build.log"
+    # Not piped to `tail`, which would mask dune's exit status behind tail's.
+    if ( cd "$OLLY_DIR" && eval "$("$OPAM_BIN" env --switch="$OLLY_SWITCH")" && \
+         dune build -p runtime_events_tools -j "$NCPU" @install ) \
+         > "$BUILD_LOG" 2>&1; then
+        ok "olly built"
+    else
+        red "ERROR: the olly build failed. Last 30 lines of $BUILD_LOG:"
+        tail -30 "$BUILD_LOG"
+        exit 1
+    fi
+    OLLY_EXE="$OLLY_DIR/_build/install/default/bin/olly"
+    if [ ! -x "$OLLY_EXE" ]; then
+        red "ERROR: olly not found at $OLLY_EXE after a successful build"
+        exit 1
+    fi
+    ok "olly at $OLLY_EXE"
 fi
 
 # =============================================================================

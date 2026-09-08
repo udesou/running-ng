@@ -21,7 +21,7 @@
 #      - dune, ocamlfind (build tools used by most benchmarks)
 #      - domainslib (multicore benchmarks)
 #      - zarith, lwt, decompress, yojson, etc. (with_packages benchmarks)
-#      - hdr_histogram, trace, trace-fuchsia, cmdliner (for olly)
+#      (olly's own dependencies go in a separate switch; see below)
 #   5. Builds runtime_events_tools (olly) from source
 #   6. Installs Python dependencies (pyyaml)
 #   7. Clones the benches repo if not present
@@ -36,6 +36,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCHES_DIR="${BENCHES_DIR:-$(cd "$ROOT_DIR/.." && pwd)/benches}"
 OLLY_DIR="${OLLY_DIR:-$HOME/runtime_events_tools}"
 OPAM_SWITCH="5.4.0"
+# olly needs cmdliner >= 2.0.0; opam-compiler in the switch above
+# pins it < 2.0.0, so olly gets a switch of its own.
+OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
 
 # Minimum opam version required (the ~/.opam directory format requires >= 2.2).
 OPAM_MIN_VERSION="2.2.0"
@@ -213,13 +216,13 @@ BUILD_TOOLS=(
                             # kernel's own topology view.
 )
 
-# Packages needed to build olly (runtime_events_tools).
-OLLY_PKGS=(
-    cmdliner                # CLI framework
-    hdr_histogram           # GC stats histograms
-    trace                   # tracing library
-    trace-fuchsia           # fuchsia trace format
-)
+# olly's dependencies are deliberately NOT installed here. olly and
+# opam-compiler cannot share a switch: every published opam-compiler pins
+# cmdliner < 2.0.0 while olly needs >= 2.0.0, and opam's only way to satisfy
+# both is to remove opam-compiler. running-ng needs it for `opam compiler
+# create`, so a run would then die on `unknown command 'compiler'`.
+# olly gets its own switch below, with its dependencies resolved from its own
+# opam file rather than from a list here that goes stale whenever olly changes.
 
 # Benchmark-specific opam packages.
 # The build scripts in ~/benches auto-install their own opam deps at build time
@@ -237,7 +240,7 @@ BENCH_PKGS=(
     str                     # benchmarksgame (fasta, spectralnorm)
 )
 
-ALL_PKGS=("${BUILD_TOOLS[@]}" "${OLLY_PKGS[@]}" "${BENCH_PKGS[@]}")
+ALL_PKGS=("${BUILD_TOOLS[@]}" "${BENCH_PKGS[@]}")
 
 echo "  Installing: ${ALL_PKGS[*]}"
 "$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes "${ALL_PKGS[@]}"
@@ -254,10 +257,31 @@ if [[ ! -d "$OLLY_DIR" ]]; then
     git clone https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
 fi
 
+if "$OPAM_BIN" switch list --short 2>/dev/null | grep -qx "$OLLY_SWITCH"; then
+    ok "switch $OLLY_SWITCH already exists"
+else
+    echo "  creating $OLLY_SWITCH; this compiles a second compiler"
+    "$OPAM_BIN" switch create "$OLLY_SWITCH" \
+        "ocaml-base-compiler.$OPAM_SWITCH" --yes
+fi
+
 pushd "$OLLY_DIR" >/dev/null
 
-eval "$("$OPAM_BIN" env --switch="$OPAM_SWITCH" --set-switch)"
-dune build -p runtime_events_tools -j "$(nproc)" @install 2>&1 | tail -5
+# --deps-only from olly's own opam file: a hand-maintained list is what let
+# the cmdliner conflict through in the first place.
+"$OPAM_BIN" install --switch="$OLLY_SWITCH" --deps-only --yes .
+
+# No --set-switch: this only needs to affect the build below, not
+# change the user's global switch, which an early exit would leave set.
+eval "$("$OPAM_BIN" env --switch="$OLLY_SWITCH")"
+# Not piped to `tail`, which would report tail's exit status rather than dune's.
+BUILD_LOG="${TMPDIR:-/tmp}/running-ng-olly-build.log"
+if ! dune build -p runtime_events_tools -j "$(nproc)" @install > "$BUILD_LOG" 2>&1; then
+    red "ERROR: the olly build failed. Last 30 lines of $BUILD_LOG:"
+    tail -30 "$BUILD_LOG"
+    popd >/dev/null
+    exit 1
+fi
 
 OLLY_EXE="$OLLY_DIR/_build/install/default/bin/olly"
 if [[ -x "$OLLY_EXE" ]]; then
