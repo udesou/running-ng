@@ -47,6 +47,10 @@ class CounterHandle:
         #: its own.  Backends whose output is only complete at exit must treat
         #: that as no result at all; see PmcStatBackend.collect.
         self.killed = False
+        #: Cleared by wait_ready when the tool could not be confirmed to be
+        #: counting before the benchmark was released.  Whatever it then
+        #: reports covers an unknown part of the run.
+        self.ready = True
 
 
 class CounterBackend:
@@ -68,6 +72,15 @@ class CounterBackend:
                tag: str = "main",
                pin_prefix: Sequence[str] = ()) -> Optional[CounterHandle]:
         return None
+
+    def wait_ready(self, handle: Optional[CounterHandle],
+                   timeout: float = 5.0) -> bool:
+        """Block until the tool is actually counting, before the benchmark runs.
+
+        Nothing to wait for by default: perf arms itself through its --control
+        handshake inside attach(), and the `none` backend has nothing to arm.
+        """
+        return True
 
     def stop(self, handle: Optional[CounterHandle], timeout: float = 10.0) -> None:
         """Release the tool.  Both real backends exit on their own when the
@@ -369,6 +382,45 @@ class PmcStatBackend(CounterBackend):
                                 stderr=subprocess.PIPE)
         return CounterHandle(proc, output)
 
+    def wait_ready(self, handle: Optional[CounterHandle],
+                   timeout: float = 5.0) -> bool:
+        """Wait until pmcstat has written its header, meaning it is counting.
+
+        pmcstat emits the header only after allocating the PMC and attaching to
+        the target, so the header appearing is a real readiness signal, and the
+        direct analogue of perf's --control handshake.  Popen returning tells
+        us only that fork+exec happened, which on this path is several steps
+        too early: pmcstat has still to exec through `cpuset`, open its log,
+        allocate the PMC and issue PMC_OP_PMCATTACH.
+
+        Without this the benchmark is released into that gap.  Measured on a
+        20-core Broadwell running the real harness, roughly half of all
+        invocations recorded zero, and one that did report a number reported
+        6.13e9 against a true 9.7e9 -- so the race under-counts as well as
+        zeroing, which is the more dangerous half.
+        """
+        if handle is None:
+            return True
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if handle.proc.poll() is not None:
+                # pmcstat died on its own; collect() reports its stderr, which
+                # says more than a readiness failure would.
+                return False
+            try:
+                with open(handle.output_path, "r") as f:
+                    if f.read(1) == "#":
+                        return True
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.01)
+        handle.ready = False
+        logging.warning(
+            "pmcstat did not start counting within %.1fs; releasing the "
+            "benchmark anyway, but this invocation's counters will be "
+            "discarded as untrustworthy", timeout)
+        return False
+
     def collect(self, handle: Optional[CounterHandle]) -> List[Dict]:
         if handle is None:
             return []
@@ -400,11 +452,35 @@ class PmcStatBackend(CounterBackend):
                 handle.proc.returncode,
                 stderr.decode("utf-8", "replace").strip()[:400])
             return []
+        if not handle.ready:
+            # We released the benchmark without confirming pmcstat was
+            # counting, so whatever it reports covers an unknown part of the
+            # run. Same reasoning as the killed case: a plausible-looking
+            # under-count is worse than a gap.
+            logging.warning(
+                "pmcstat was never confirmed to be counting for this "
+                "invocation; discarding its totals rather than publishing a "
+                "partial count.")
+            return []
         try:
             with open(handle.output_path, "r") as f:
                 table = parse_pmcstat_table(f.read())
         except FileNotFoundError:
             logging.warning("pmcstat output file %s not found", handle.output_path)
+            return []
+        if table and not any(table.values()):
+            # A benchmark cannot execute zero instructions. All-zero means the
+            # PMC never counted (see wait_ready), which is missing data rather
+            # than a measurement of zero, and pmcstat exits 0 in this case so
+            # neither the returncode nor the killed guard catches it.
+            #
+            # In principle a group of only rare events could read all-zero
+            # legitimately. In practice every group carries instructions or
+            # cycles, so this is safe; if that ever stops being true, this is
+            # the check to revisit.
+            logging.warning(
+                "pmcstat reported zero for every counter in %s; treating as no "
+                "data rather than publishing zeros", handle.output_path)
             return []
         if not table:
             logging.warning(

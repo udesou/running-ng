@@ -335,6 +335,13 @@ class Benchmark(object):
         # the cross-check that catches a perf attach that missed threads.
         ru_before = resource.getrusage(resource.RUSAGE_CHILDREN)
 
+        # Do not release the benchmark until the counter tool is actually
+        # counting.  perf handles this inside attach() via --control; pmcstat
+        # has no such protocol, and releasing into the gap between Popen
+        # returning and the PMC being attached recorded zero or partial totals
+        # in roughly half of all invocations.
+        backend.wait_ready(counter_handle)
+
         # Release: wrapper execs the benchmark, OCaml runtime starts, ring buffer is created
         os.close(sync_w)
 

@@ -9,6 +9,7 @@ counter field.  Nobody has run this against real FreeBSD hardware yet, so the
 fixtures are the specification until someone does.
 """
 import os
+import time
 import subprocess
 
 import pytest
@@ -150,6 +151,7 @@ class _FakeHandle:
         self.output_path = path
         self.ctl_fds = ()
         self.killed = False
+        self.ready = True
 
 
 def test_pmcstat_backend_emits_canonical_records(tmp_path):
@@ -306,3 +308,95 @@ def test_stop_does_not_mark_a_tool_that_exited_on_its_own():
     h = counters.CounterHandle(proc, "/tmp/unused")
     counters.CounterBackend().stop(h, timeout=10)
     assert h.killed is False
+
+
+# --- readiness handshake -------------------------------------------------------
+#
+# pmcstat has no equivalent of perf's --control, so nothing stopped the harness
+# releasing the benchmark before the PMC was attached. On a 20-core Broadwell
+# that lost roughly half of all invocations to zero counters, and made one
+# report 6.13e9 against a true 9.7e9.
+
+def test_pmcstat_wait_ready_returns_true_once_the_header_appears(tmp_path):
+    out = tmp_path / "pmcstat_main.txt"
+    proc = subprocess.Popen(["sleep", "5"])
+    h = counters.CounterHandle(proc, str(out))
+    try:
+        # The header is written only after the PMC is allocated and attached.
+        out.write_text("#  p/instructions \n")
+        assert counters.PmcStatBackend().wait_ready(h, timeout=2.0) is True
+        assert h.ready is True
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_pmcstat_wait_ready_returns_false_promptly_if_the_tool_died(tmp_path):
+    proc = subprocess.Popen(["false"])
+    proc.wait()
+    h = counters.CounterHandle(proc, str(tmp_path / "never_written.txt"))
+    started = time.monotonic()
+    assert counters.PmcStatBackend().wait_ready(h, timeout=5.0) is False
+    # Must notice the death rather than sit out the timeout.
+    assert time.monotonic() - started < 2.0
+
+
+def test_pmcstat_wait_ready_times_out_without_raising(tmp_path, caplog):
+    proc = subprocess.Popen(["sleep", "5"])
+    h = counters.CounterHandle(proc, str(tmp_path / "never_written.txt"))
+    try:
+        assert counters.PmcStatBackend().wait_ready(h, timeout=0.2) is False
+        assert h.ready is False
+        assert "did not start counting" in caplog.text
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_pmcstat_wait_ready_handles_no_handle():
+    assert counters.PmcStatBackend().wait_ready(None) is True
+
+
+def test_base_wait_ready_is_a_noop_so_linux_is_unchanged(tmp_path):
+    # perf arms itself inside attach() via --control, so the Linux path must
+    # not grow a second wait. Asserting it explicitly because a regression here
+    # would silently add latency to every invocation of a working backend.
+    assert counters.CounterBackend().wait_ready(None) is True
+    assert counters.PerfBackend().wait_ready(None) is True
+    assert counters.PerfBackend.wait_ready is counters.CounterBackend.wait_ready
+    h = _FakeHandle(str(tmp_path / "x"))
+    started = time.monotonic()
+    assert counters.PerfBackend().wait_ready(h, timeout=5.0) is True
+    assert time.monotonic() - started < 0.1
+
+
+# --- zero and partial results --------------------------------------------------
+
+def test_all_zero_table_is_treated_as_missing_data(tmp_path, caplog):
+    # pmcstat exits 0 here, so neither the returncode nor the killed guard
+    # fires. A benchmark cannot execute zero instructions.
+    p = tmp_path / "pmcstat_main.txt"
+    p.write_text("#  p/instructions p/unhalted-cycles \n"
+                 "                0                 0 ")
+    assert counters.PmcStatBackend().collect(_FakeHandle(str(p))) == []
+    assert "zero for every counter" in caplog.text
+
+
+def test_partly_zero_table_is_still_published(tmp_path):
+    # Only all-zero is suspect; a single zero counter can be real.
+    p = tmp_path / "pmcstat_main.txt"
+    p.write_text("#  p/instructions p/unhalted-cycles \n"
+                 "       123456789012                 0 ")
+    records = counters.PmcStatBackend().collect(_FakeHandle(str(p)))
+    assert {r["event"]: r["counter-value"] for r in records} == {
+        "instructions": 123456789012.0, "cycles": 0.0}
+
+
+def test_unready_handle_discards_its_totals(tmp_path, caplog):
+    # A timed-out handshake means the count covers an unknown part of the run.
+    p = tmp_path / "pmcstat_main.txt"
+    p.write_text(PMCSTAT_TWO_EVENTS)
+    h = _FakeHandle(str(p))
+    h.ready = False
+    assert counters.PmcStatBackend().collect(h) == []
+    assert "never confirmed to be counting" in caplog.text
