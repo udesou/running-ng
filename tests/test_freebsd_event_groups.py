@@ -41,6 +41,12 @@ VERIFIED_EVENTS = {
     # stalls and uops
     "resource_stalls.any", "uops_retired.retire_slots",
     "idq_uops_not_delivered.core",
+    # soft PMCs (pmc.soft(3)); see SOFT_EVENTS for why they cost no
+    # programmable counter. Measured on rosemary: PAGE_FAULT.ALL read 60,636
+    # against rusage's 62,357, within 2.8%, and READ + WRITE summed exactly to
+    # ALL (20 + 60,616). On GC workloads write faults are ~99.97% of the
+    # total, the first-touch signature of a growing major heap.
+    "PAGE_FAULT.ALL", "PAGE_FAULT.READ", "PAGE_FAULT.WRITE",
 }
 
 #: Events added on source evidence but NOT yet run on FreeBSD hardware, each
@@ -48,16 +54,7 @@ VERIFIED_EVENTS = {
 #: and temporary state: pmcstat allocates all-or-nothing, so an event that
 #: does not resolve costs its whole group every counter. Move an entry into
 #: VERIFIED_EVENTS once measured, or take it out of the group.
-PENDING_HARDWARE_VERIFICATION = {
-    "PAGE_FAULT.ALL": (
-        "Soft PMC. Defined in sys/amd64/amd64/trap.c:74-76 and fired from the "
-        "page-fault handler at :849-854; hwpmc_soft.c:402 increments a "
-        "readable counter whenever the PMC is not in sampling mode, which is "
-        "our case. Unverified: whether a per-CPU soft counter attributes "
-        "correctly to a process-scope PMC across context switches. If it does "
-        "not allocate, perf_grp1_freebsd yields nothing at all."
-    ),
-}
+PENDING_HARDWARE_VERIFICATION: dict = {}
 
 #: Events that cost no programmable counter. Fixed-function hardware ones, and
 #: soft PMCs, which are a separate class with their own 16 rows entirely.

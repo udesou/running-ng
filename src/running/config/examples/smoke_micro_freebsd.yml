@@ -18,10 +18,22 @@
 # for groups 2 and 3 (see the comments in micro_base.yml), so the two
 # platforms' figures for those are not interchangeable.
 #
-# Expected on a Xeon E5-2640 v4 under FreeBSD 15.1: two counters per
-# invocation, `instructions` and `cycles`, both non-zero. Zeros or missing
-# counters mean something regressed in the pmcstat path, not in the workload;
-# a warning naming `pmc list-events` means an event failed to allocate.
+# Expected on a Xeon E5-2640 v4 under FreeBSD 15.1: THREE counters per
+# invocation, all non-zero. Measured there:
+#
+#   [{"event":"instructions","counter-value":23130401195.0},
+#    {"event":"cycles","counter-value":11636030550.0},
+#    {"event":"page-faults","counter-value":60767.0}]
+#
+# The recorded names are perf's, not pmcstat's, via two alias hops:
+# counters.py maps `unhalted-cycles` to `cycles` and `PAGE_FAULT.ALL` to
+# `page-faults`, then contract/vocab.py maps `page-faults` to the
+# `page_faults` contract metric. So the counter sidecar says `page-faults`
+# while the contract says `page_faults`. That is intended, not a bug.
+#
+# Zeros or missing counters mean something regressed in the pmcstat path, not
+# in the workload; a warning naming `pmc list-events` means an event failed to
+# allocate, and pmcstat allocates all-or-nothing so the group yields nothing.
 #
 # Usage:
 #   cd ~/running-ng

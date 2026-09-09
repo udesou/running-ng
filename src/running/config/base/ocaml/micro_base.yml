@@ -979,9 +979,11 @@ modifiers:
   # equivalent. Worth a look for GC work, since write faults are where
   # copy-on-write and first-touch of freshly-mapped major-heap pages show up.
   #
-  # NOT YET RUN ON FREEBSD. Added from source evidence to save a round trip.
-  # If PAGE_FAULT.ALL fails to allocate, pmcstat exits 71 and this group
-  # yields NOTHING, so that is the first thing to check if grp1 goes quiet.
+  # Verified on a Xeon E5-2640 v4 under FreeBSD 15.1: allocates alongside
+  # hardware PMCs in one group, and read 60,636 against rusage's 62,357,
+  # within 2.8%. READ and WRITE sum exactly to ALL (20 + 60,616), and on GC
+  # workloads write faults are ~99.97% of the total, which is the first-touch
+  # signature of a growing major heap.
   perf_grp1_freebsd:
     type: PerfAndOllyAttach
     val: "instructions,unhalted-cycles,PAGE_FAULT.ALL"
