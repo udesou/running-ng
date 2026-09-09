@@ -190,8 +190,14 @@ def test_linux_groups_are_untouched():
 
 # --- the smoke config ----------------------------------------------------------
 
-SMOKE = (Path(__file__).parent.parent / "src" / "running" / "config"
-         / "examples" / "smoke_micro_freebsd.yml")
+EXAMPLES = (Path(__file__).parent.parent / "src" / "running" / "config"
+            / "examples")
+SMOKE = EXAMPLES / "smoke_micro_freebsd.yml"
+
+#: Every config meant to run on FreeBSD. Each must use a _freebsd group: the
+#: Linux ones cannot allocate there, and pmcstat is all-or-nothing, so such a
+#: config would silently produce no counters at all.
+FREEBSD_CONFIGS = ["smoke_micro_freebsd.yml", "all_micro_freebsd.yml"]
 
 
 def test_smoke_config_uses_a_freebsd_group():
@@ -263,3 +269,26 @@ def test_page_fault_alias_reaches_the_contract_metric():
     canonical = counters.PmcStatBackend.EVENT_ALIASES["PAGE_FAULT.ALL"]
     assert canonical == "page-faults"
     assert vocab.PERF_EVENT_MAP[canonical] == "page_faults"
+
+
+@pytest.mark.parametrize("config", FREEBSD_CONFIGS)
+def test_freebsd_configs_use_freebsd_groups(config):
+    d = yaml.safe_load((EXAMPLES / config).read_text())
+    for entry in d["configs"]:
+        groups = [t for t in entry.split("|") if t.startswith("perf_grp")]
+        assert groups, "{} names no counter group".format(config)
+        for g in groups:
+            assert g.endswith("_freebsd"), (
+                "{} uses {}, whose events do not resolve on FreeBSD; pmcstat "
+                "allocates all-or-nothing so it would yield no counters at "
+                "all".format(config, g))
+
+
+def test_coverage_config_runs_every_micro_benchmark_once():
+    # Its purpose is to find what fails to build or run, so it must not
+    # narrow the suite, and one invocation answers the question.
+    d = yaml.safe_load((EXAMPLES / "all_micro_freebsd.yml").read_text())
+    assert d["invocations"] == 1
+    assert "benchmarks" not in d.get("overrides", {}), \
+        "narrowing the suite defeats the point of a coverage run"
+    assert "benchmarks" not in d
