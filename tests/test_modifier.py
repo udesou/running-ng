@@ -118,4 +118,6 @@ def test_ocaml_benchmark_with_ocaml_modifiers():
     runtime = OCaml(name="ocaml-local", executable="/usr/bin/ocaml")
     cmd = b.to_string(runtime)
     assert "-domain-count 4" in cmd
-    assert "OCAMLRUNPARAM=s=262144,o=80" in cmd
+    # smart_quote quotes the value because it contains a comma, which a
+    # shell would otherwise not treat as one word.
+    assert 'OCAMLRUNPARAM="s=262144,o=80"' in cmd
