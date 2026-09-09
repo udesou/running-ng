@@ -316,11 +316,18 @@ ever matters.
 - **PMCs need no root**, but `hwpmc` must be loaded (`kldload hwpmc`).
   `hwpmc(4)` requires root only for system-scope PMCs; process-scope ones need
   `p_candebug(9)`, and `security.bsd.unprivileged_proc_debug` defaults to 1.
-- **Event names differ and are all-or-nothing.** `task-clock`, `page-faults`,
-  `cycles`, `branch-misses` and `cache-misses` do NOT resolve; one bad name
+- **Event names differ and are all-or-nothing.** `task-clock`, `cycles`,
+  `branch-misses` and `cache-misses` do NOT resolve; one bad name
   makes pmcstat exit 71 and write nothing, so the whole group yields no
   counters. Use the `perf_grp*_freebsd` modifiers, never the Linux ones.
   `pmc list-events` (not `pmc list`) enumerates what a CPU supports.
+- **Page faults come from a SOFT PMC**, `PAGE_FAULT.ALL` (`pmc.soft(3)`),
+  aliased onto perf's `page-faults`. Soft PMCs are a separate hwpmc class with
+  their own 16 rows, so they cost no programmable counter. `PAGE_FAULT.READ`
+  and `PAGE_FAULT.WRITE` also exist and have no Linux equivalent. `task-clock`
+  has no usable equivalent (`CLOCK.STAT` is ~127 Hz), so a FreeBSD run is
+  missing that one contract metric and no other; olly's `cpu_time` covers what
+  it was wanted for.
 - **Counter ceiling is 7**: 3 fixed-function plus 4 programmable (four, not
   eight, because SMT is on). `perf_grp3_freebsd` is exactly at that ceiling.
   hwpmc never multiplexes, so it hard-fails where perf would silently

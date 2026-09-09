@@ -43,6 +43,27 @@ VERIFIED_EVENTS = {
     "idq_uops_not_delivered.core",
 }
 
+#: Events added on source evidence but NOT yet run on FreeBSD hardware, each
+#: with the evidence and the consequence if it is wrong. This is a deliberate
+#: and temporary state: pmcstat allocates all-or-nothing, so an event that
+#: does not resolve costs its whole group every counter. Move an entry into
+#: VERIFIED_EVENTS once measured, or take it out of the group.
+PENDING_HARDWARE_VERIFICATION = {
+    "PAGE_FAULT.ALL": (
+        "Soft PMC. Defined in sys/amd64/amd64/trap.c:74-76 and fired from the "
+        "page-fault handler at :849-854; hwpmc_soft.c:402 increments a "
+        "readable counter whenever the PMC is not in sampling mode, which is "
+        "our case. Unverified: whether a per-CPU soft counter attributes "
+        "correctly to a process-scope PMC across context switches. If it does "
+        "not allocate, perf_grp1_freebsd yields nothing at all."
+    ),
+}
+
+#: Events that cost no programmable counter. Fixed-function hardware ones, and
+#: soft PMCs, which are a separate class with their own 16 rows entirely.
+SOFT_EVENTS = {"PAGE_FAULT.ALL", "PAGE_FAULT.READ", "PAGE_FAULT.WRITE",
+               "CLOCK.HARD", "CLOCK.STAT", "CLOCK.PROF"}
+
 #: Events that land on fixed-function counters, so cost no programmable slot.
 FIXED_FUNCTION = {
     "instructions", "inst_retired.any", "inst_retired.any_p",
@@ -78,7 +99,8 @@ def test_the_three_groups_exist(config):
 @pytest.mark.parametrize("config", BASE_CONFIGS)
 def test_every_event_was_verified_on_hardware(config):
     for name, events in _freebsd_groups(config).items():
-        unverified = [e for e in events if e not in VERIFIED_EVENTS]
+        allowed = VERIFIED_EVENTS | set(PENDING_HARDWARE_VERIFICATION)
+        unverified = [e for e in events if e not in allowed]
         assert not unverified, (
             "{} in {} uses event(s) never verified on FreeBSD: {}. pmcstat "
             "allocates all-or-nothing, so one bad name costs the whole group "
@@ -90,7 +112,8 @@ def test_every_event_was_verified_on_hardware(config):
 def test_groups_fit_the_counter_ceiling(config):
     for name, events in _freebsd_groups(config).items():
         assert len(events) <= MAX_EVENTS, "{}: {} events".format(name, len(events))
-        programmable = [e for e in events if e not in FIXED_FUNCTION]
+        programmable = [e for e in events
+                        if e not in FIXED_FUNCTION and e not in SOFT_EVENTS]
         assert len(programmable) <= MAX_PROGRAMMABLE, (
             "{} in {} needs {} programmable counters, but SMT leaves only {}: "
             "{}".format(name, config, len(programmable), MAX_PROGRAMMABLE,
@@ -203,3 +226,43 @@ def test_group_names_are_legal_modifier_names():
         # arrives as one element; split_event_list is what fans it out per -p.
         from running import counters
         assert counters.split_event_list(m.perf_events) == events
+
+
+def test_pending_events_carry_their_evidence():
+    # An entry here bypasses the hardware-verified allowlist, so it must say
+    # what the evidence is and what breaks if it is wrong. Otherwise the
+    # allowlist quietly becomes a rubber stamp.
+    for event, reason in PENDING_HARDWARE_VERIFICATION.items():
+        assert len(reason) > 80, "{} needs a real justification".format(event)
+
+
+@pytest.mark.parametrize("config", BASE_CONFIGS)
+def test_pending_events_are_confined_to_group_1(config):
+    # Deliberate blast-radius limit: an unresolvable name takes its whole
+    # group down, so nothing unverified goes near grp2 or grp3.
+    for name, events in _freebsd_groups(config).items():
+        pending = set(events) & set(PENDING_HARDWARE_VERIFICATION)
+        if pending:
+            assert name == "perf_grp1_freebsd", (
+                "{} carries unverified event(s) {}".format(name, pending))
+
+
+@pytest.mark.parametrize("config", BASE_CONFIGS)
+def test_soft_pmcs_do_not_consume_programmable_counters(config):
+    # Soft PMCs are a separate hwpmc class with their own 16 rows, so grp1 can
+    # carry PAGE_FAULT.ALL without touching the 4 programmable counters SMT
+    # leaves. If this stopped holding, grp3 would be the one to break first.
+    for name, events in _freebsd_groups(config).items():
+        hardware = [e for e in events if e not in SOFT_EVENTS]
+        assert len(hardware) <= MAX_EVENTS
+
+
+def test_page_fault_alias_reaches_the_contract_metric():
+    # The whole reason for the alias: PAGE_FAULT.ALL -> page-faults ->
+    # page_faults, so FreeBSD regains that contract metric with no vocabulary
+    # change.
+    from running import counters
+    from running.contract import vocab
+    canonical = counters.PmcStatBackend.EVENT_ALIASES["PAGE_FAULT.ALL"]
+    assert canonical == "page-faults"
+    assert vocab.PERF_EVENT_MAP[canonical] == "page_faults"

@@ -945,12 +945,15 @@ modifiers:
   # rather than an extrapolation. (This is also why `inst_retired.prec_dist`
   # is not used even though it resolves: its purpose is PEBS sampling.)
   #
-  # `task-clock` and `page-faults` are dropped rather than substituted: they
-  # have no PMC equivalent. Do not "fix" their absence. The per-invocation
-  # result record still carries user_time, system_time, minor_faults,
-  # major_faults and context-switch counts from getrusage. NOTE though that
-  # rusage is not a contract source, so unlike on Linux the `task_clock` and
-  # `page_faults` contract metrics are simply absent from a FreeBSD run.
+  # `page-faults` IS available, as the soft PMC PAGE_FAULT.ALL (see grp1).
+  # `task-clock` is not, and is dropped rather than substituted: CLOCK.STAT is
+  # the nearest soft event but counts stat-clock ticks at ~127 Hz, so it would
+  # be a coarse estimate wearing the name of a Linux exact one, and olly's
+  # `cpu_time` already covers what task-clock was wanted for. So a FreeBSD run
+  # is missing the `task_clock` contract metric and nothing else. The
+  # per-invocation record still carries user_time, system_time, minor_faults,
+  # major_faults and context-switch counts from getrusage, but rusage is not a
+  # contract source, so those do not appear as contract metrics.
   #
   # Alias spellings are deliberate: `instructions` and `unhalted-cycles`
   # rather than `inst_retired.any` / `cpu_clk_unhalted.thread`, though all
@@ -961,10 +964,27 @@ modifiers:
   # vocabulary on either platform; every dotted event below is archival in
   # the raw sidecar, exactly as Linux's stalled-cycles-* and *-misses are.
   #
-  # Group 1: baseline IPC. Direct equivalent of perf_grp1.
+  # Group 1: baseline IPC plus page faults. Direct equivalent of perf_grp1
+  # apart from task-clock.
+  #
+  # PAGE_FAULT.ALL is a SOFT PMC (pmc.soft(3)), not a hardware one. hwpmc
+  # defines page_fault all/read/write in sys/amd64/amd64/trap.c and fires them
+  # from the page-fault handler; hwpmc_soft.c increments a readable counter
+  # whenever the allocated PMC is not in sampling mode, which is our case.
+  # Soft PMCs live in their own class with their own 16 rows, so this costs NO
+  # programmable hardware counter. It is aliased onto perf's `page-faults`, so
+  # it reaches the `page_faults` contract metric with no vocabulary change.
+  #
+  # PAGE_FAULT.READ and PAGE_FAULT.WRITE also exist and have no Linux
+  # equivalent. Worth a look for GC work, since write faults are where
+  # copy-on-write and first-touch of freshly-mapped major-heap pages show up.
+  #
+  # NOT YET RUN ON FREEBSD. Added from source evidence to save a round trip.
+  # If PAGE_FAULT.ALL fails to allocate, pmcstat exits 71 and this group
+  # yields NOTHING, so that is the first thing to check if grp1 goes quiet.
   perf_grp1_freebsd:
     type: PerfAndOllyAttach
-    val: "instructions,unhalted-cycles"
+    val: "instructions,unhalted-cycles,PAGE_FAULT.ALL"
   # Group 2: pipeline stalls. APPROXIMATIONS, not equivalents: perf's
   # stalled-cycles-frontend/backend are derived events with specific umasks,
   # so these numbers are NOT comparable with Linux's. Directionally useful

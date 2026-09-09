@@ -349,6 +349,12 @@ class PmcStatBackend(CounterBackend):
     EVENT_ALIASES = {
         "unhalted-cycles": "cycles",
         "tsc": "cycles",
+        # A soft PMC (pmc.soft(3)), not a hardware one: hwpmc defines
+        # page_fault all/read/write in sys/amd64/amd64/trap.c and fires them
+        # from the page-fault handler. Aliased onto perf's spelling so it maps
+        # through PERF_EVENT_MAP to the `page_faults` contract metric with no
+        # vocabulary change.
+        "PAGE_FAULT.ALL": "page-faults",
     }
 
     #: Print interval.  Does not affect the result: the final row is written
