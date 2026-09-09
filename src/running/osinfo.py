@@ -376,10 +376,21 @@ def partition_cpus(reserved_cores: int = 0,
     `one_node` confines the benchmark to a single NUMA node and gives every
     other node to the observers.  On a multi-socket machine that is usually
     the best arrangement available: the benchmark keeps a whole node's cores
-    with no SMT contention at all, rather than giving cores up.  It also stops
-    the benchmark's own memory traffic crossing the interconnect, which for GC
-    work is a large source of run-to-run variance.  No effect on a
-    single-node machine, so a config carrying it stays portable.
+    and the observers get a whole node of their own, rather than either giving
+    cores up.  It also stops the benchmark's own memory traffic crossing the
+    interconnect, which for GC work is a large source of run-to-run variance.
+    No effect on a single-node machine, so a config carrying it stays
+    portable.
+
+    When it does take effect the benchmark's own SMT siblings are left IDLE
+    rather than handed to the observers: with a whole spare node available the
+    siblings buy nothing and would contend for the same physical cores.  So
+    `one_node` genuinely means no SMT contention, whereas the default (where
+    the siblings are the only spare CPUs there are) does not.
+
+    Note `cpuset -l` sets CPU affinity but not the NUMA memory domain, so
+    observer allocations can still land on either node.  `cpuset -n` is the
+    knob if that ever matters.
 
     `reserved_cores` still applies within the chosen node if both are given,
     which is what you want when there is only one node to give.
@@ -404,10 +415,18 @@ def partition_cpus(reserved_cores: int = 0,
     observer_groups = groups[len(groups) - reserved:] if reserved else []
 
     bench = [g[0] for g in bench_groups]
-    observers = [c for g in bench_groups for c in g[1:]]
+    observers: List[int] = []
+    # The benchmark's SMT siblings go to the observers only when there is
+    # nothing better to give them. With a whole spare node available they buy
+    # nothing and cost real contention, so they are left idle instead, and
+    # that is what makes one_node's "no SMT contention" claim hold. Measured
+    # on a 2-socket Xeon before this: every one of the benchmark's 10 cores
+    # had its sibling in the observer set, which is precisely the interference
+    # the physical-core split exists to avoid.
+    if not off_node:
+        observers += [c for g in bench_groups for c in g[1:]]
     observers += [c for g in observer_groups for c in g]
-    # Whole nodes the benchmark gave up go to the observers: idle cores are
-    # worth more as isolation than as nothing.
+    # Whole nodes the benchmark gave up go to the observers.
     observers += [c for g in off_node for c in g]
     return sorted(bench), sorted(observers)
 

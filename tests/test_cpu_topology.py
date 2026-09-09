@@ -557,9 +557,13 @@ def test_one_node_confines_the_benchmark_to_a_single_node(rosemary):
     assert not (set(bench) & set(observers))
 
 
-def test_one_node_still_partitions_every_cpu(rosemary):
+def test_one_node_deliberately_leaves_cpus_unassigned(rosemary):
+    # Not a partition of every CPU any more: the benchmark's SMT siblings are
+    # left idle on purpose, because a whole spare node is available for the
+    # observers and a busy sibling contends with the benchmark thread.
     bench, observers = osinfo.partition_cpus(one_node=True)
-    assert set(bench) | set(observers) == set(range(40))
+    assert not (set(bench) & set(observers))
+    assert set(bench) | set(observers) < set(range(40))
 
 
 def test_one_node_composes_with_reserved_cores(rosemary):
@@ -632,3 +636,47 @@ def test_cpupin_rejects_a_non_boolean_one_node(rosemary):
 def test_cpupin_defaults_to_spanning_nodes(rosemary):
     # Unchanged default: turning this on is an explicit config decision.
     assert CpuPin(name="p", type="CpuPin").one_node is False
+
+
+# --- one_node leaves the benchmark's SMT siblings idle --------------------------
+
+def test_one_node_leaves_the_benchmarks_siblings_idle(rosemary):
+    """The claim in partition_cpus's docstring, now enforced.
+
+    With a whole spare node for the observers, the benchmark's own SMT
+    siblings buy nothing and would contend for the same physical cores. Before
+    this, every one of the benchmark's 10 cores had its sibling in the
+    observer set, so "no SMT contention at all" was false.
+    """
+    bench, observers = osinfo.partition_cpus(one_node=True)
+    siblings = {c + 1 for c in bench}          # adjacent enumeration on this box
+    assert not (siblings & set(observers)), "a benchmark sibling is an observer"
+    idle = set(range(40)) - set(bench) - set(observers)
+    assert idle == siblings
+    assert osinfo.format_cpu_list(observers) == "20-39"
+
+
+def test_default_still_gives_observers_the_siblings(rosemary):
+    # Without one_node there is no spare node, so the siblings are the only
+    # spare CPUs there are and leaving them idle would buy nothing.
+    bench, observers = osinfo.partition_cpus()
+    assert set(bench) | set(observers) == set(range(40)), "no CPU left idle"
+    assert {c + 1 for c in bench} <= set(observers)
+
+
+def test_one_node_with_reserved_cores_still_idles_the_siblings(rosemary):
+    bench, observers = osinfo.partition_cpus(reserved_cores=2, one_node=True)
+    assert not ({c + 1 for c in bench} & set(observers))
+    # The two reserved cores go over whole, both threads.
+    assert {16, 17, 18, 19} <= set(observers)
+
+
+def test_single_node_machine_leaves_nothing_idle(monkeypatch):
+    groups = [[i, i + 16] for i in range(16)]
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: groups)
+    monkeypatch.setattr(osinfo, "refine_groups", lambda g, cpus=None: g)
+    monkeypatch.setattr(osinfo, "numa_nodes", lambda: [list(range(32))])
+    monkeypatch.setattr(osinfo, "IS_LINUX", True)
+    for kwargs in ({}, {"one_node": True}):
+        bench, observers = osinfo.partition_cpus(**kwargs)
+        assert set(bench) | set(observers) == set(range(32))

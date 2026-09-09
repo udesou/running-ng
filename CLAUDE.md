@@ -109,7 +109,14 @@ pass `RUNNING_TAG=small_run,default_run,large_run` for all three).
   - `suite.py` — `OCamlBenchmarkSuite`, `OCamlMulticoreBenchmarkSuite`,
     `OCamlOxcamlBenchmarkSuite`, `OCamlMacroBenchmarkSuite`.
   - `modifier.py` — `OCamlRunParam`, `EnvVar`, `Wrapper`, `ProgramArg`,
-    `PerfAndOllyAttach`, `MemtraceAttach`, `ModifierSet`, `Companion`.
+    `PerfAndOllyAttach`, `MemtraceAttach`, `ModifierSet`, `Companion`,
+    `CpuPin`.
+  - `osinfo.py` — the OS abstraction: PID-to-executable lookup, host probes
+    for the log prologue, CPU/SMT/NUMA topology, and the pinning command.
+    Everything degrades rather than raising, because it all runs on the
+    measurement path.
+  - `counters.py` — hardware counter backends (`linux-perf`, `freebsd-pmc`,
+    `none`) behind one interface.
   - `config.py` — includes/overrides merge, `validate()`, `validate_tags()`,
     `apply_tag_filter()`.
   - `contract/` — native contract emission (`native.py` orchestrates,
@@ -125,7 +132,8 @@ pass `RUNNING_TAG=small_run,default_run,large_run` for all three).
   for poking at memtrace output; separate from the shipped
   `config/experiments/memtrace_poc.yml`.
 - `run_ocaml_bench_gc_sweep.sh`, `build_ocaml_binaries_gc_sweep.sh`,
-  `install_deps{,_linux,_macos}.sh`, `scripts/plot_gc_sweep.py`, `notebooks/`.
+  `install_deps{,_linux,_macos,_freebsd}.sh`, `scripts/plot_gc_sweep.py`,
+  `scripts/portability_probe.sh`, `notebooks/`.
 - `docs/` — upstream's mdBook (`docs/src/`, JVM-oriented) plus this fork's
   methodology notes (`benchmark-calibration-triage.md`,
   `benchmark-noise-and-comparison-plan.md`, `benchmark-coverage-gaps-plan.md`).
@@ -242,6 +250,100 @@ memtrace adds `memtrace_<same base>.<invocation>.trace` (raw) and
 **per invocation**, not per cell, because a trace covers one process lifetime —
 so unlike the olly/perf sidecars they are not appended to.
 
+## Platform support (Linux, FreeBSD, macOS)
+
+The goal is "the same harness runs everywhere and emits contract-conformant
+data", NOT numbers comparable across operating systems. Allocators, page
+policy and schedulers differ too much for the latter to mean anything.
+
+### Counter backends (`counters.py`)
+
+| backend | tool | notes |
+|---|---|---|
+| `linux-perf` | `perf stat --json --inherit -p PID` | arms via the `--control` fifo handshake |
+| `freebsd-pmc` | `pmcstat -C -d -t PID -p EVENT` | arms by waiting for pmcstat's `#` header |
+| `none` | nothing | supported configuration, not a failure; olly and rusage still run |
+
+All three ATTACH to a PID the harness already owns. This is deliberate and
+should not be "simplified" into letting the tool launch the benchmark:
+attaching is what keeps the benchmark our own direct child, so its exit status
+still tells a crash from a clean run and a timeout can still kill it.
+FreeBSD's `pmc stat` would have been a far easier parse and always returns 0
+(`cmd_pmc_stat.c:481`), so every SIGSEGV would have read as a good
+measurement.
+
+Backends normalise to `{event, counter-value}`, stored under `"perf"` for
+backward compatibility, with `counter_backend` recording which tool ran.
+`RUNNING_NG_COUNTER_BACKEND` forces one, which is how the FreeBSD path is
+exercised on Linux (see `tests/fixtures/fake_pmcstat.py`).
+
+### CPU pinning (`CpuPin`, `osinfo.partition_cpus`)
+
+The pinning MECHANISM is per-OS (`taskset -c`, `cpuset -l`, nothing on
+macOS). The CPU LIST cannot be: on one Ryzen 9 9950X, Linux enumerates SMT
+siblings as (0,16),(1,17)... so one-thread-per-core is `0-15`, while FreeBSD
+on the same silicon enumerates (0,1),(2,3)... so it is `0,2,...,30`. So the
+list is derived from the running machine, never written into a config.
+
+`CpuPin` options:
+
+- `val` (default `0`): whole physical cores handed to the observers instead
+  of the benchmark. Raising it takes cores from the benchmark and so changes
+  what is being measured. Not a mid-sweep decision.
+- `one_node` (default false): confine the benchmark to one NUMA node and give
+  the others to the observers. Exactly a no-op on a single-node machine, so it
+  is safe to leave on in a shared config. `pin_lavyek` sets it.
+
+**Observer placement.** olly and the counter tool are pinned to the complement
+of the benchmark's set. olly is the one that matters: `perf stat` in counting
+mode only reads counters at the ends, while olly continuously drains the
+runtime_events ring alongside the benchmark.
+
+Under `one_node` the benchmark's own SMT siblings are left IDLE rather than
+given to the observers. With a whole spare node available the siblings buy
+nothing and would contend for the same physical cores, so `one_node` genuinely
+means no SMT contention. Without it, the siblings are the only spare CPUs
+there are, so they go to the observers and the isolation is weaker than it
+looks. Decided 2026-09-09 after measuring on a 2-socket Xeon that every one of
+the benchmark's 10 cores had its sibling in the observer set.
+
+Note `cpuset -l` sets CPU affinity but not the NUMA memory domain, so observer
+allocations can still land on either node. `cpuset -n` is the knob if that
+ever matters.
+
+### FreeBSD specifics
+
+- **PMCs need no root**, but `hwpmc` must be loaded (`kldload hwpmc`).
+  `hwpmc(4)` requires root only for system-scope PMCs; process-scope ones need
+  `p_candebug(9)`, and `security.bsd.unprivileged_proc_debug` defaults to 1.
+- **Event names differ and are all-or-nothing.** `task-clock`, `page-faults`,
+  `cycles`, `branch-misses` and `cache-misses` do NOT resolve; one bad name
+  makes pmcstat exit 71 and write nothing, so the whole group yields no
+  counters. Use the `perf_grp*_freebsd` modifiers, never the Linux ones.
+  `pmc list-events` (not `pmc list`) enumerates what a CPU supports.
+- **Counter ceiling is 7**: 3 fixed-function plus 4 programmable (four, not
+  eight, because SMT is on). `perf_grp3_freebsd` is exactly at that ceiling.
+  hwpmc never multiplexes, so it hard-fails where perf would silently
+  time-slice and scale.
+- **pmcstat's intermediate rows are stale, not sampled.** hwpmc saves a
+  process-scope counter when the target is switched out, so only the final row
+  written at exit is the true total. This is why a killed or unready pmcstat
+  has its output discarded rather than parsed.
+- **`install_deps_freebsd.sh` assumes no root.** opam goes in as a user-local
+  static binary, sandboxing is off (bubblewrap is Linux-only), and `--check`
+  reports what needs an administrator instead of failing halfway.
+- No bash in the base system, so the FreeBSD script and the probe are POSIX
+  `sh`. `/bin/true` is `/usr/bin/true`; python3 is in `/usr/local/bin`.
+
+### macOS
+
+Runs on the `none` backend. There is no counter tool wired up: mperf
+(github.com/tmcgilchrist/mperf) is the candidate, but it requires root for
+every invocation (`kpc_force_all_ctrs_set` claims the PMU globally, which no
+entitlement or fork arrangement avoids) and it launches rather than attaches.
+macOS also has no API that binds a process to a core, so `pin_command` returns
+`[]` and `CpuPin` contributes nothing there by design.
+
 ## Gotchas (hard-won — don't rediscover)
 
 - **Config merge.** Including a base then redefining one of its **top-level
@@ -255,6 +357,16 @@ so unlike the olly/perf sidecars they are not appended to.
   declarations rather than leaving them in.
 - **olly JSON sidecars are JSONL** — one line per invocation; don't infer
   invocation count from filenames.
+- **Constructing an `OCaml` runtime provisions its opam switch.** `__init__`
+  calls `_ensure_switch` eagerly, so `Configuration.resolve_class()` on a
+  config that declares runtimes will create switches, and will WIPE and
+  rebuild an existing one of the same name unless `RUNNING_REUSE_SWITCHES` is
+  set. Parse YAML directly (`yaml.safe_load`) if you only want to inspect a
+  config.
+- **Don't add a FreeBSD PMC event name you have not run on FreeBSD.** pmcstat
+  allocates all-or-nothing, so one unresolvable name silently costs the whole
+  group its counters. `tests/test_freebsd_event_groups.py` pins the verified
+  set for this reason.
 - **Sidecars are per tool now** (`olly_*.json`, `perf_*.json`). The old single
   combined `<base>.json` is still *read* by `analysis/json_sidecars.py` for
   backward compat, but nothing writes it. The combined object is still embedded
