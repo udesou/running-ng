@@ -289,6 +289,46 @@ echo "  Installing: ${ALL_PKGS[*]}"
 ok "OCaml packages installed"
 
 # =============================================================================
+# opam compiler plugin
+# =============================================================================
+step "Registering the opam compiler plugin"
+# opam-compiler declares `flags: plugin`, so `opam compiler` resolves it from
+# $(opam var root)/plugins/bin, NOT from the switch we installed it into.
+# Without this link, `opam compiler create` (runtime.py) prompts to install the
+# plugin and, with no tty, answers no and dies with "unknown command
+# 'compiler'". That blocks provisioning every `type: OCaml` runtime, so every
+# real sweep.
+#
+# Do NOT "simplify" this to `opam install opam-compiler` with no --switch.
+# That does register the plugin, but installs into whichever switch opam
+# considers current, and since opam-compiler pins cmdliner < 2.0 it will
+# silently downgrade the olly switch, breaking the olly build with
+# "Unbound module Arg.Conv" -- the exact conflict the separate switch exists
+# to prevent.
+OPAM_ROOT_DIR="$("$OPAM_BIN" var root)"
+PLUGIN_BIN="$OPAM_ROOT_DIR/plugins/bin"
+mkdir -p "$PLUGIN_BIN"
+# Relative, matching the form opam writes itself. Falls back to absolute if the
+# switch does not live inside the opam root, as an external switch would not.
+ln -sf "../../$OPAM_SWITCH/bin/opam-compiler" "$PLUGIN_BIN/opam-compiler"
+if [ ! -x "$PLUGIN_BIN/opam-compiler" ]; then
+    SWITCH_BIN="$("$OPAM_BIN" var bin --switch="$OPAM_SWITCH")"
+    ln -sf "$SWITCH_BIN/opam-compiler" "$PLUGIN_BIN/opam-compiler"
+fi
+
+# Verify it resolves, rather than trusting the symlink. No --switch is passed,
+# so nothing can be created: a working plugin rejects the source in its own
+# argument parsing, while a missing one produces opam's "unknown command".
+if "$OPAM_BIN" compiler create "invalid/source#nope" </dev/null 2>&1 \
+        | grep -q "unknown command"; then
+    red "ERROR: the opam 'compiler' plugin does not resolve, so runtime"
+    red "switches cannot be provisioned and no sweep can run."
+    red "Expected an executable at $PLUGIN_BIN/opam-compiler"
+    exit 1
+fi
+ok "opam compiler plugin resolves"
+
+# =============================================================================
 # 7. Build runtime_events_tools (olly)
 # =============================================================================
 step "Building runtime_events_tools (olly)"
