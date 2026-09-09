@@ -370,6 +370,15 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   rebuild an existing one of the same name unless `RUNNING_REUSE_SWITCHES` is
   set. Parse YAML directly (`yaml.safe_load`) if you only want to inspect a
   config.
+- **`opam compiler create` rejects a bare version.** `opam compiler create
+  5.4.1` fails with `Invalid source: "5.4.1"`. It wants a source spec, which
+  is what `runtime.py`'s `_opam_compiler_source` builds: `ocaml/ocaml:5.4.1`.
+  The harness is right; only hand-written probe commands get this wrong.
+- **The sweep wrapper no longer provisions anything.** It verifies the
+  opam-compiler plugin and olly, then points at `install_deps_<os>.sh`. It
+  used to install both into whichever switch it picked, which since the
+  two-switch split could corrupt either one: opam-compiler downgrades the olly
+  switch's cmdliner, olly's deps evict opam-compiler from the tools switch.
 - **Don't add a FreeBSD PMC event name you have not run on FreeBSD.** pmcstat
   allocates all-or-nothing, so one unresolvable name silently costs the whole
   group its counters. `tests/test_freebsd_event_groups.py` pins the verified
