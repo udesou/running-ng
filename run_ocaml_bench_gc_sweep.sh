@@ -55,76 +55,77 @@ fi
 # Prefer opam 2.3+ (the opam root may require it).
 _OPAM=$(command -v opam 2>/dev/null || ([[ -x /usr/local/bin/opam ]] && echo /usr/local/bin/opam))
 
+# install_deps_{linux,macos,freebsd}.sh maintain TWO switches, and which is
+# which matters: olly needs cmdliner >= 2.0 while every published
+# opam-compiler pins cmdliner < 2.0, so they cannot share one.
 TOOLS_SWITCH="${TOOLS_SWITCH:-}"
+OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
 if [[ -z "$TOOLS_SWITCH" ]]; then
-  for _sw in $("$_OPAM" switch list --short 2>/dev/null); do
-    [[ "$_sw" == running-ng-oxcaml-build ]] && continue
-    [[ "$_sw" == ext-* ]] && continue
-    if [[ -x "$("$_OPAM" var prefix --switch="$_sw" 2>/dev/null)/bin/dune" ]]; then
-      TOOLS_SWITCH="$_sw"
-      break
-    fi
-  done
+  # By name first. Discovery is only a fallback for an environment predating
+  # install_deps, and it must skip the olly switch: that switch has dune, as
+  # one of olly's own dependencies, and sorts BEFORE running-ng-tools, so a
+  # first-match-wins scan picks exactly the switch that must never receive
+  # opam-compiler.
+  if "$_OPAM" switch list --short 2>/dev/null | grep -qFx "running-ng-tools"; then
+    TOOLS_SWITCH="running-ng-tools"
+  else
+    for _sw in $("$_OPAM" switch list --short 2>/dev/null); do
+      [[ "$_sw" == running-ng-oxcaml-build ]] && continue
+      [[ "$_sw" == "$OLLY_SWITCH" ]] && continue
+      [[ "$_sw" == ext-* ]] && continue
+      if [[ -x "$("$_OPAM" var prefix --switch="$_sw" 2>/dev/null)/bin/dune" ]]; then
+        TOOLS_SWITCH="$_sw"
+        break
+      fi
+    done
+  fi
 fi
 
 if [[ -z "$TOOLS_SWITCH" ]]; then
-  TOOLS_SWITCH="running-ng-tools"
-  if "$_OPAM" switch list --short 2>/dev/null | grep -qFx "$TOOLS_SWITCH"; then
-    echo "Reusing existing tools switch '$TOOLS_SWITCH'."
-  else
-    echo "No opam switch with dune found. Creating '$TOOLS_SWITCH'..."
-    _OCAML_VER=$("$_OPAM" show ocaml-base-compiler --field=all-versions 2>/dev/null \
-      | tr ' ' '\n' | grep -E '^5\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
-    : "${_OCAML_VER:=5.3.0}"
-    echo "Using OCaml ${_OCAML_VER} (compiles from source — may take a few minutes)..."
-    "$_OPAM" switch create "$TOOLS_SWITCH" "ocaml-base-compiler.${_OCAML_VER}" --yes
-  fi
-  # Ensure dune + ocamlfind are installed.
-  "$_OPAM" install --switch "$TOOLS_SWITCH" --yes dune ocamlfind
+  echo "ERROR: no opam switch with dune found, and no 'running-ng-tools'." >&2
+  echo "  Run install_deps_<os>.sh, which provisions the tools switch and" >&2
+  echo "  the separate olly switch, or set TOOLS_SWITCH to an existing one." >&2
+  exit 1
 fi
 
 TOOLS_BIN="$("$_OPAM" var prefix --switch="$TOOLS_SWITCH" 2>/dev/null)/bin"
 echo "Tools switch: $TOOLS_SWITCH ($TOOLS_BIN)"
 export PATH="$TOOLS_BIN:$PATH"
 
-# --- Ensure the opam-compiler plugin is available --------------------------
-# Every runtime that isn't in `executable:` mode is provisioned by
-# `opam compiler create`, so this is a hard dependency of almost any run — but
-# nothing installed it: not install_deps*.sh, not this script, not
-# macro-benches' setup. It worked only where someone had installed it by hand.
+# --- Verify the environment; provisioning belongs to install_deps ----------
+# This script used to install opam-compiler and olly's dependencies itself,
+# both into TOOLS_SWITCH. That predates the two-switch split and could corrupt
+# whichever switch it picked:
 #
-# opam exposes plugins as $(opam var root)/plugins/bin/<name>, symlinked into
-# the switch that installed it. So rebuilding the tools switch leaves a
-# *dangling* symlink behind, and the next run fails deep inside runtime.py with
-# `unknown command 'compiler'`. `-x` follows symlinks, so it is false for a
-# dangling one and we reinstall.
+#   into the olly switch : opam-compiler pins cmdliner < 2.0, so cmdliner is
+#                          DOWNGRADED and olly can no longer be rebuilt
+#                          ("Error: Unbound module Arg.Conv")
+#   into the tools switch: olly's deps pull cmdliner >= 2.0, which EVICTS
+#                          opam-compiler ("conflicts with cmdliner"), so
+#                          `opam compiler create` stops working
+#
+# Both were reachable only by luck, because the "already done" guards skipped
+# them on a machine that was already set up. So the script now checks and
+# points at install_deps_<os>.sh, which owns provisioning and knows about both
+# switches. Duplicating that job here is how the two drifted apart.
 _OPAM_PLUGIN_BIN="$("$_OPAM" var root 2>/dev/null)/plugins/bin/opam-compiler"
-if [[ ! -x "$_OPAM_PLUGIN_BIN" && ! -x "$TOOLS_BIN/opam-compiler" ]]; then
-  echo "opam-compiler plugin not found — installing into '$TOOLS_SWITCH'..."
-  "$_OPAM" install --switch "$TOOLS_SWITCH" --yes opam-compiler
+# `-x` follows symlinks, so it is false for a dangling one too, which is what
+# rebuilding the tools switch leaves behind.
+if [[ ! -x "$_OPAM_PLUGIN_BIN" ]]; then
+  echo "ERROR: the opam 'compiler' plugin is not registered at" >&2
+  echo "  $_OPAM_PLUGIN_BIN" >&2
+  echo "  Without it no runtime switch can be provisioned: runtime.py runs" >&2
+  echo "  'opam compiler create', which resolves opam-compiler as a plugin," >&2
+  echo "  and fails with \"unknown command 'compiler'\"." >&2
+  echo "  Run install_deps_<os>.sh, which registers it against the tools switch." >&2
+  exit 1
 fi
 
-# --- Build olly if it hasn't been built yet --------------------------------
 if [[ ! -x "$OLLY_BIN/olly" ]]; then
-  echo "olly not found at $OLLY_BIN/olly — building from $OLLY_DIR ..."
-  if [[ ! -d "$OLLY_DIR" ]]; then
-    echo "ERROR: runtime_events_tools directory not found at $OLLY_DIR" >&2
-    echo "  Set OLLY_DIR or OLLY_BIN to point to your runtime_events_tools checkout." >&2
-    exit 1
-  fi
-
-  echo "Installing runtime_events_tools opam dependencies..."
-  (cd "$OLLY_DIR" && "$_OPAM" install . --deps-only --switch "$TOOLS_SWITCH" --yes)
-
-  # Build olly using the tools switch environment.
-  eval "$("$_OPAM" env --switch="$TOOLS_SWITCH" --set-switch)"
-  (cd "$OLLY_DIR" && dune build @install)
-
-  if [[ ! -x "$OLLY_BIN/olly" ]]; then
-    echo "ERROR: dune build succeeded but olly binary not found at $OLLY_BIN/olly" >&2
-    exit 1
-  fi
-  echo "olly built successfully."
+  echo "ERROR: olly not found at $OLLY_BIN/olly." >&2
+  echo "  Run install_deps_<os>.sh, which builds it in its own switch" >&2
+  echo "  ('$OLLY_SWITCH'), or point OLLY_DIR/OLLY_BIN at an existing build." >&2
+  exit 1
 fi
 
 export PATH="$OLLY_BIN:$PATH"
