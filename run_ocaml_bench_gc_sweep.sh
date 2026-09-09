@@ -14,6 +14,12 @@ export RUNNING_MACRO_BENCH_DIR="${RUNNING_MACRO_BENCH_DIR:-$RUNNING_BENCH_DIR}"
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/gc-sweep-logs}"
 CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/src/running/config/examples/ocaml_gc_sweep_example.yml}"
 PYTHONPATH="$ROOT_DIR/src"
+# Honour an explicit interpreter. running-ng is commonly installed into a
+# virtualenv, in which case the system python3 has none of its dependencies,
+# so a hardcoded `python3` cannot run the harness at all. Deliberately not
+# auto-detected: guessing at .venv/, $VIRTUAL_ENV or a hardcoded path is more
+# surprising than an explicit variable plus the clear error below.
+PYTHON="${PYTHON:-python3}"
 OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"
 OLLY_BIN="${OLLY_BIN:-$OLLY_DIR/_build/install/default/bin}"
 
@@ -138,4 +144,14 @@ mkdir -p "$LOG_DIR"
 echo "Running GC sweep with config: $CONFIG_FILE"
 echo "Benchmark directory: $RUNNING_BENCH_DIR"
 echo "Logs root: $LOG_DIR"
-PYTHONPATH="$PYTHONPATH" python3 -m running runbms "$LOG_DIR" "$CONFIG_FILE" "$@"
+# --- Verify the interpreter can actually run the harness --------------------
+# Cheaper to fail here than after a switch has been provisioned.
+if ! PYTHONPATH="$PYTHONPATH" "$PYTHON" -c "import yaml, running" >/dev/null 2>&1; then
+  echo "ERROR: '$PYTHON' cannot import running-ng and its dependencies." >&2
+  echo "  running-ng is often installed in a virtualenv, whose interpreter" >&2
+  echo "  this is not. Either activate it, or point PYTHON at it:" >&2
+  echo "    PYTHON=/path/to/venv/bin/python $0" >&2
+  exit 1
+fi
+
+PYTHONPATH="$PYTHONPATH" "$PYTHON" -m running runbms "$LOG_DIR" "$CONFIG_FILE" "$@"
