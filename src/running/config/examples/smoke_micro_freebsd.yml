@@ -35,12 +35,20 @@
 # in the workload; a warning naming `pmc list-events` means an event failed to
 # allocate, and pmcstat allocates all-or-nothing so the group yields nothing.
 #
-# Usage:
+# Usage. `bash`, not `sh`: the wrapper is #!/usr/bin/env bash and uses
+# BASH_SOURCE, so `sh` fails immediately with "Bad substitution". FreeBSD has
+# no bash in base, but env finds it at /usr/local/bin/bash.
+#
+# PYTHON matters here too: running-ng is usually installed into a virtualenv,
+# and the wrapper otherwise uses the system python3, which has none of its
+# dependencies.
+#
 #   cd ~/running-ng
+#   PYTHON=/path/to/venv/bin/python \
 #   RUNNING_BENCH_DIR=~/benches \
 #   CONFIG_FILE=src/running/config/examples/smoke_micro_freebsd.yml \
 #   LOG_DIR=/tmp/smoke_micro_freebsd \
-#     sh run_ocaml_bench_gc_sweep.sh
+#     bash run_ocaml_bench_gc_sweep.sh
 # =============================================================================
 
 includes:
