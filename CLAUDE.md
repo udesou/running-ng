@@ -374,6 +374,14 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   5.4.1` fails with `Invalid source: "5.4.1"`. It wants a source spec, which
   is what `runtime.py`'s `_opam_compiler_source` builds: `ocaml/ocaml:5.4.1`.
   The harness is right; only hand-written probe commands get this wrong.
+- **running-ng's own opam switches are declared in `switches.py`**, not
+  discovered. `python3 -m running.switches status` says what exists and
+  whether it matches what it was built from; `ensure` creates or rebuilds and
+  puts the active switch back. Invalidation is by observed identity, which for
+  the olly switch includes the checkout's git SHA, so moving the checkout
+  rebuilds olly. The state file is machine-local (`~/.cache/running-ng/`),
+  deliberately not in the repo. Note the installers still create these
+  switches inline and should delegate here.
 - **The sweep wrapper no longer provisions anything.** It verifies the
   opam-compiler plugin and olly, then points at `install_deps_<os>.sh`. It
   used to install both into whichever switch it picked, which since the

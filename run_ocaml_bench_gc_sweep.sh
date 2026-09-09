@@ -20,6 +20,17 @@ PYTHONPATH="$ROOT_DIR/src"
 # auto-detected: guessing at .venv/, $VIRTUAL_ENV or a hardcoded path is more
 # surprising than an explicit variable plus the clear error below.
 PYTHON="${PYTHON:-python3}"
+
+# --- Verify the interpreter can actually run the harness --------------------
+# Cheaper to fail here than after a switch has been provisioned.
+if ! PYTHONPATH="$PYTHONPATH" "$PYTHON" -c "import yaml, running" >/dev/null 2>&1; then
+  echo "ERROR: '$PYTHON' cannot import running-ng and its dependencies." >&2
+  echo "  running-ng is often installed in a virtualenv, whose interpreter" >&2
+  echo "  this is not. Either activate it, or point PYTHON at it:" >&2
+  echo "    PYTHON=/path/to/venv/bin/python $0" >&2
+  exit 1
+fi
+
 OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"
 OLLY_BIN="${OLLY_BIN:-$OLLY_DIR/_build/install/default/bin}"
 
@@ -55,36 +66,22 @@ fi
 # Prefer opam 2.3+ (the opam root may require it).
 _OPAM=$(command -v opam 2>/dev/null || ([[ -x /usr/local/bin/opam ]] && echo /usr/local/bin/opam))
 
-# install_deps_{linux,macos,freebsd}.sh maintain TWO switches, and which is
-# which matters: olly needs cmdliner >= 2.0 while every published
-# opam-compiler pins cmdliner < 2.0, so they cannot share one.
-TOOLS_SWITCH="${TOOLS_SWITCH:-}"
+# running-ng declares its own switches; running.switches owns creating and
+# validating them. Never discovered by scanning: this used to take the first
+# switch in `opam switch list` containing dune, which picked a LOCAL switch on
+# one machine and the olly switch on another. A switch we did not build has
+# unknown contents.
+TOOLS_SWITCH="${TOOLS_SWITCH:-running-ng-tools}"
 OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
-if [[ -z "$TOOLS_SWITCH" ]]; then
-  # By name first. Discovery is only a fallback for an environment predating
-  # install_deps, and it must skip the olly switch: that switch has dune, as
-  # one of olly's own dependencies, and sorts BEFORE running-ng-tools, so a
-  # first-match-wins scan picks exactly the switch that must never receive
-  # opam-compiler.
-  if "$_OPAM" switch list --short 2>/dev/null | grep -qFx "running-ng-tools"; then
-    TOOLS_SWITCH="running-ng-tools"
-  else
-    for _sw in $("$_OPAM" switch list --short 2>/dev/null); do
-      [[ "$_sw" == running-ng-oxcaml-build ]] && continue
-      [[ "$_sw" == "$OLLY_SWITCH" ]] && continue
-      [[ "$_sw" == ext-* ]] && continue
-      if [[ -x "$("$_OPAM" var prefix --switch="$_sw" 2>/dev/null)/bin/dune" ]]; then
-        TOOLS_SWITCH="$_sw"
-        break
-      fi
-    done
-  fi
-fi
 
-if [[ -z "$TOOLS_SWITCH" ]]; then
-  echo "ERROR: no opam switch with dune found, and no 'running-ng-tools'." >&2
-  echo "  Run install_deps_<os>.sh, which provisions the tools switch and" >&2
-  echo "  the separate olly switch, or set TOOLS_SWITCH to an existing one." >&2
+# Reports 'ok', 'adopt', 'create' or 'rebuild' per switch, and rebuilds one
+# whose contents no longer match what it was built from (for the olly switch
+# that includes the checkout's git SHA, so moving it rebuilds olly). Restores
+# the active switch afterwards. Runs on stdlib only, so it works before
+# running-ng's dependencies are importable.
+if ! PYTHONPATH="$PYTHONPATH" "$PYTHON" -m running.switches ensure; then
+  echo "ERROR: could not provision running-ng's opam switches." >&2
+  echo "  See: $PYTHON -m running.switches status" >&2
   exit 1
 fi
 
@@ -145,14 +142,4 @@ mkdir -p "$LOG_DIR"
 echo "Running GC sweep with config: $CONFIG_FILE"
 echo "Benchmark directory: $RUNNING_BENCH_DIR"
 echo "Logs root: $LOG_DIR"
-# --- Verify the interpreter can actually run the harness --------------------
-# Cheaper to fail here than after a switch has been provisioned.
-if ! PYTHONPATH="$PYTHONPATH" "$PYTHON" -c "import yaml, running" >/dev/null 2>&1; then
-  echo "ERROR: '$PYTHON' cannot import running-ng and its dependencies." >&2
-  echo "  running-ng is often installed in a virtualenv, whose interpreter" >&2
-  echo "  this is not. Either activate it, or point PYTHON at it:" >&2
-  echo "    PYTHON=/path/to/venv/bin/python $0" >&2
-  exit 1
-fi
-
 PYTHONPATH="$PYTHONPATH" "$PYTHON" -m running runbms "$LOG_DIR" "$CONFIG_FILE" "$@"
