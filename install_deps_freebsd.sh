@@ -217,76 +217,50 @@ fi
 # =============================================================================
 # 4. Tools switch
 # =============================================================================
-step "Ensuring the $OPAM_SWITCH switch (OCaml $OCAML_VERSION)"
-if "$OPAM_BIN" switch list --short 2>/dev/null | grep -qx "$OPAM_SWITCH"; then
-    ok "switch $OPAM_SWITCH already exists"
-else
-    echo "  creating it; this compiles a compiler and takes a while"
-    "$OPAM_BIN" switch create "$OPAM_SWITCH" "ocaml-base-compiler.$OCAML_VERSION" --yes
-fi
-
-step "Installing the harness's OCaml dependencies"
-# olly's dependencies are deliberately NOT here: they go in their own switch
-# below, because olly and opam-compiler cannot coexist. Every published
-# opam-compiler pins cmdliner < 2.0.0 while olly needs >= 2.0.0, and opam's
-# only way to satisfy both is to remove opam-compiler -- which running-ng
-# needs for `opam compiler create`, so a run would die on
-# `unknown command 'compiler'`.
+step "Provisioning running-ng's opam switches"
+# Delegated to running.switches, the single declaration of what running-ng
+# needs: a tools switch (dune, ocamlfind, opam-compiler, plus the plugin link)
+# and a SEPARATE olly switch, because olly needs cmdliner >= 2.0 while every
+# published opam-compiler pins < 2.0. Duplicating that declaration here is how
+# this script and the sweep wrapper drifted apart.
 #
-# dune/ocamlfind: build tools most benchmark build scripts expect on PATH.
-# opam-compiler: provisions every runtime switch (runtime.py).
-PKGS_REQUIRED="dune ocamlfind opam-compiler"
-# Optional: ocaml-processor-dump, supplying P/E-core and socket topology for
-# CpuPin and the run manifest. running-ng falls back to the kernel's own view,
-# so a failure here must not stop the run. Installed separately because under
-# `set -e` one failing package used to abort before olly and the benchmarks.
-PKGS_OPTIONAL="processor"
+# It creates what is missing, rebuilds a switch whose contents no longer match
+# what it was built from (for olly that includes the checkout's git SHA), and
+# restores the active switch afterwards. Standard library only, so it runs
+# before running-ng's own dependencies exist.
+OPAM_BIN="$OPAM_BIN" OLLY_DIR="$OLLY_DIR" \
+    python3 -m running.switches ensure --compiler "$OCAML_VERSION"
 
-"$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes $PKGS_REQUIRED
-
-if "$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes $PKGS_OPTIONAL; then
-    :
+# Optional extra for the tools switch: ocaml-processor-dump, supplying
+# P/E-core and socket topology for CpuPin and the run manifest. Not part of
+# the declaration because running-ng falls back to the kernel's own view
+# without it, and under `set -e` a failure here must not abort the rest.
+step "Installing optional topology tooling"
+if "$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes processor; then
+    ok "processor installed"
 else
-    warn "optional packages failed: $PKGS_OPTIONAL"
+    warn "processor failed to install"
     warn "continuing; running-ng falls back to the kernel's own topology view."
 fi
 
 # =============================================================================
 # opam compiler plugin
 # =============================================================================
-step "Registering the opam compiler plugin"
-# opam-compiler declares `flags: plugin`, so `opam compiler` resolves it from
-# $(opam var root)/plugins/bin, NOT from the switch we installed it into.
-# Without this link, `opam compiler create` (runtime.py) prompts to install the
-# plugin and, with no tty, answers no and dies with "unknown command
-# 'compiler'". That blocks provisioning every `type: OCaml` runtime, so every
-# real sweep.
+step "Verifying the opam compiler plugin"
+# running.switches registers the link; this only checks that it resolves,
+# which is a different job and the one that catches a half-provisioned opam
+# root. Without a working plugin, `opam compiler create` (runtime.py) prompts
+# to install it and, with no tty, dies with "unknown command 'compiler'",
+# blocking every sweep.
 #
-# Do NOT "simplify" this to `opam install opam-compiler` with no --switch.
-# That does register the plugin, but installs into whichever switch opam
-# considers current, and since opam-compiler pins cmdliner < 2.0 it will
-# silently downgrade the olly switch, breaking the olly build with
-# "Unbound module Arg.Conv" -- the exact conflict the separate switch exists
-# to prevent.
-OPAM_ROOT_DIR="$("$OPAM_BIN" var root)"
-PLUGIN_BIN="$OPAM_ROOT_DIR/plugins/bin"
-mkdir -p "$PLUGIN_BIN"
-# Relative, matching the form opam writes itself. Falls back to absolute if the
-# switch does not live inside the opam root, as an external switch would not.
-ln -sf "../../$OPAM_SWITCH/bin/opam-compiler" "$PLUGIN_BIN/opam-compiler"
-if [ ! -x "$PLUGIN_BIN/opam-compiler" ]; then
-    SWITCH_BIN="$("$OPAM_BIN" var bin --switch="$OPAM_SWITCH")"
-    ln -sf "$SWITCH_BIN/opam-compiler" "$PLUGIN_BIN/opam-compiler"
-fi
-
-# Verify it resolves, rather than trusting the symlink. No --switch is passed,
-# so nothing can be created: a working plugin rejects the source in its own
-# argument parsing, while a missing one produces opam's "unknown command".
+# No --switch: the invalid source is rejected during opam-compiler's own
+# argument parsing, so nothing can be created even in principle, while a
+# missing plugin still produces opam's "unknown command".
 if "$OPAM_BIN" compiler create "invalid/source#nope" </dev/null 2>&1 \
         | grep -q "unknown command"; then
     red "ERROR: the opam 'compiler' plugin does not resolve, so runtime"
     red "switches cannot be provisioned and no sweep can run."
-    red "Expected an executable at $PLUGIN_BIN/opam-compiler"
+    red "Try: python3 -m running.switches status"
     exit 1
 fi
 ok "opam compiler plugin resolves"
@@ -308,18 +282,9 @@ else
     if [ ! -d "$OLLY_DIR" ]; then
         git clone https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
     fi
-    if "$OPAM_BIN" switch list --short 2>/dev/null | grep -qx "$OLLY_SWITCH"; then
-        ok "switch $OLLY_SWITCH already exists"
-    else
-        echo "  creating $OLLY_SWITCH; this compiles a second compiler"
-        "$OPAM_BIN" switch create "$OLLY_SWITCH" \
-            "ocaml-base-compiler.$OCAML_VERSION" --yes
-    fi
-    # --deps-only from olly's own opam file rather than a hand-written package
-    # list. The hand-written list is what let the cmdliner conflict through in
-    # the first place, and it silently goes stale every time olly changes.
-    ( cd "$OLLY_DIR" && \
-      "$OPAM_BIN" install --switch="$OLLY_SWITCH" --deps-only --yes . )
+    # The switch and olly's dependencies were provisioned above by
+    # running.switches, which resolves them --deps-only from olly's own opam
+    # file. Only the build itself is left here.
 
     NCPU=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
     BUILD_LOG="${TMPDIR:-/tmp}/running-ng-olly-build.log"

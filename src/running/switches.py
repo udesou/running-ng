@@ -97,10 +97,23 @@ def _run(cmd: List[str], check: bool = True) -> str:
     return p.stdout.strip()
 
 
+#: Explicit opam binary, for callers that installed their own. The FreeBSD
+#: installer puts a user-local opam in ~/.local/bin, which may not be on PATH
+#: yet at the point it calls us.
+OPAM_BIN_ENV_VAR = "OPAM_BIN"
+
+
 def find_opam() -> str:
+    explicit = os.environ.get(OPAM_BIN_ENV_VAR)
+    if explicit:
+        if not os.path.isfile(explicit):
+            raise RuntimeError("{}={} is not a file".format(
+                OPAM_BIN_ENV_VAR, explicit))
+        return explicit
     opam = shutil.which("opam") or os.path.expanduser("~/.local/bin/opam")
     if not os.path.isfile(opam):
-        raise RuntimeError("opam not found on PATH or at ~/.local/bin/opam")
+        raise RuntimeError("opam not found on PATH, at ~/.local/bin/opam, or "
+                           "via {}".format(OPAM_BIN_ENV_VAR))
     return opam
 
 
@@ -233,12 +246,18 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
     action = plan(opam, name)
     if action == "ok":
         logging.info("opam switch '%s' is up to date", name)
+        # Still check the plugin link: the switch being right says nothing
+        # about $(opam var root)/plugins/bin, and a missing link there blocks
+        # every sweep. Idempotent, so this is cheap.
+        if not dry_run:
+            _register_plugin(opam, name)
         return "ok"
 
     if action == "adopt":
         logging.info("adopting pre-existing opam switch '%s' (not built by us)",
                      name)
         if not dry_run:
+            _register_plugin(opam, name)
             _record(opam, name)
         return "adopt"
 
@@ -287,6 +306,11 @@ def _register_plugin(opam: str, name: str) -> None:
     """
     plugin = SWITCHES[name].get("registers_plugin")
     if not plugin:
+        return
+    if not _package_versions(opam, name, [plugin]).get(plugin):
+        logging.warning(
+            "'%s' is not installed in switch '%s'; not registering the plugin",
+            plugin, name)
         return
     root = _run([opam, "var", "root"])
     plugin_bin = os.path.join(root, "plugins", "bin")

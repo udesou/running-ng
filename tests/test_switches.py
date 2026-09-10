@@ -149,3 +149,61 @@ def test_a_switch_we_did_not_build_is_adopted_not_destroyed(monkeypatch, state):
     # time.
     _fake(monkeypatch, True, {"ocaml": "5.4.0"})
     assert switches.plan("opam", switches.TOOLS_SWITCH) == "adopt"
+
+
+# --- one place creates switches ------------------------------------------------
+
+# From the test file, not from switches.__file__: that lives in src/.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SHELL_SCRIPTS = ["install_deps_linux.sh", "install_deps_macos.sh",
+                 "install_deps_freebsd.sh", "run_ocaml_bench_gc_sweep.sh"]
+
+
+def _code_lines(path):
+    """Lines that are actually code, so a comment mentioning a command does
+    not read as one."""
+    out = []
+    for line in open(os.path.join(REPO, path)):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            out.append(stripped)
+    return out
+
+
+@pytest.mark.parametrize("script", SHELL_SCRIPTS)
+def test_no_shell_script_creates_an_opam_switch(script):
+    """switches.py is the only thing that provisions switches.
+
+    Three scripts and the wrapper each used to do it themselves, with
+    different names and different package sets, and that duplication is how
+    they drifted until the wrapper was installing opam-compiler into the olly
+    switch and corrupting it. If provisioning is needed somewhere new, call
+    `python3 -m running.switches ensure`.
+    """
+    offenders = [l for l in _code_lines(script)
+                 if "switch create" in l or "--deps-only" in l]
+    assert not offenders, (
+        "{} provisions switches itself: {}".format(script, offenders))
+
+
+@pytest.mark.parametrize("script", SHELL_SCRIPTS)
+def test_no_shell_script_installs_opam_compiler(script):
+    # Into the olly switch it downgrades cmdliner and breaks the olly build;
+    # with no --switch at all it installs into whichever switch opam considers
+    # current, which is the same failure by another route.
+    offenders = [l for l in _code_lines(script)
+                 if "opam-compiler" in l and "install" in l]
+    assert not offenders, (
+        "{} installs opam-compiler itself: {}".format(script, offenders))
+
+
+@pytest.mark.parametrize("script", ["install_deps_linux.sh",
+                                    "install_deps_macos.sh",
+                                    "install_deps_freebsd.sh"])
+def test_installers_agree_on_the_tools_switch_name(script):
+    # They disagreed: FreeBSD said running-ng-tools while Linux and macOS said
+    # "5.4.0", which is also indistinguishable from a user's own scratch
+    # switch made by `opam switch create 5.4.0`.
+    decls = [l for l in _code_lines(script) if l.startswith("OPAM_SWITCH=")]
+    assert decls, script
+    assert switches.TOOLS_SWITCH in decls[0], decls
