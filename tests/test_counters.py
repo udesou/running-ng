@@ -400,3 +400,35 @@ def test_unready_handle_discards_its_totals(tmp_path, caplog):
     h.ready = False
     assert counters.PmcStatBackend().collect(h) == []
     assert "never confirmed to be counting" in caplog.text
+
+
+# --- unreliable GC stats -------------------------------------------------------
+
+def test_unreliable_gc_stats_are_warned_about(caplog):
+    """olly marks its own output when the ring overflowed; nothing surfaced it.
+
+    The invocation still exits zero and is recorded as passed, so the bad
+    numbers went into a sweep looking exactly like good ones. Four benchmarks
+    did this on the first full FreeBSD run.
+    """
+    from running.benchmark import _warn_if_gc_stats_unreliable
+    _warn_if_gc_stats_unreliable("globroots_mp", {
+        "stats_reliable": False, "lost_words": 7698197, "gc_time": 1.0})
+    assert "stats_reliable=false" in caplog.text
+    assert "globroots_mp" in caplog.text
+    assert "re-25" in caplog.text, "the message should say how to fix it"
+
+
+def test_reliable_gc_stats_are_silent(caplog):
+    from running.benchmark import _warn_if_gc_stats_unreliable
+    _warn_if_gc_stats_unreliable("almabench", {"stats_reliable": True})
+    _warn_if_gc_stats_unreliable("almabench", {})
+    assert caplog.text == ""
+
+
+def test_unreliable_check_tolerates_a_non_dict():
+    # olly_raw fallback, or a schema change upstream: must not raise on the
+    # measurement path.
+    from running.benchmark import _warn_if_gc_stats_unreliable
+    _warn_if_gc_stats_unreliable("x", None)
+    _warn_if_gc_stats_unreliable("x", "not a dict")

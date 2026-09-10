@@ -252,6 +252,10 @@ so unlike the olly/perf sidecars they are not appended to.
 
 ## Platform support (Linux, FreeBSD, macOS)
 
+Full FreeBSD status, and every discrepancy from Linux, is in
+`docs/freebsd-support.md`. Read that before debugging anything
+platform-specific; the summary below is the mechanism, that is the state.
+
 The goal is "the same harness runs everywhere and emits contract-conformant
 data", NOT numbers comparable across operating systems. Allocators, page
 policy and schedulers differ too much for the latter to mean anything.

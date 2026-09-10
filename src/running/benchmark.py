@@ -49,6 +49,36 @@ BUILD_TOOLS = {"ocamlfind", "ocamlc", "ocamlc.opt", "ocamlopt",
                "bash", "sh"}
 
 
+def _warn_if_gc_stats_unreliable(benchmark_name: str, olly: Any) -> None:
+    """Warn when olly says its own GC numbers cannot be trusted.
+
+    olly sets `stats_reliable: false` when the runtime_events ring overflowed
+    and events were dropped, which makes every GC figure in that record an
+    undercount. The invocation still exits zero and is recorded as passed, so
+    without this the numbers go into a sweep looking exactly like good ones.
+
+    Observed on four GC-event-dense benchmarks (the globroots trio, which
+    force majors explicitly, and pidigits5 at ~13.7k major collections) when
+    run with the DEFAULT ring. The fix is a bigger ring: `re-25`, which the
+    established micro configs already carry. So this is a loud symptom of a
+    config that is missing it, not a defect to work around.
+
+    Warning rather than failing: the counters and rusage in the same record
+    are unaffected, so the invocation still carries usable data.
+    """
+    if not isinstance(olly, dict):
+        return
+    if olly.get("stats_reliable") is False:
+        lost = olly.get("lost_events") or olly.get("lost_words")
+        logging.warning(
+            "olly reports stats_reliable=false for %s: the runtime_events ring "
+            "overflowed%s, so its GC metrics are an undercount. Add a larger "
+            "ring (e.g. `re-25`) to this config. Hardware counters and rusage "
+            "in this record are unaffected.",
+            benchmark_name,
+            " (lost {})".format(lost) if lost else "")
+
+
 def pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -519,6 +549,8 @@ class Benchmark(object):
             except (json.JSONDecodeError, ValueError) as e:
                 logging.warning("Failed to parse olly JSON output: %s", e)
                 structured["olly_raw"] = olly_text
+            else:
+                _warn_if_gc_stats_unreliable(self.name, structured["olly"])
 
         # Counter records, normalised by the backend to {event, counter-value}.
         # Still keyed "perf" so existing logs, the contract adapter and

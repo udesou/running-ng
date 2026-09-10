@@ -18,9 +18,22 @@
 # resolves on FreeBSD, and pmcstat allocates all-or-nothing, so perf_grp1
 # would yield no counters at all.
 #
+# `re-25|md-2` matches what every established micro config uses
+# (config/experiments/micro_5.5.0*.yml). Without it four GC-event-dense
+# benchmarks overflow the default runtime_events ring and olly marks its own
+# output `stats_reliable: false`: the globroots trio, which force majors
+# explicitly, and pidigits5 at ~13.7k major collections. `md-2` is safe across
+# the multicore suites because those benchmarks declare their own `d=` and a
+# per-benchmark ocamlrunparam wins over the modifier.
+#
 # No CpuPin. Pinning is verified separately and confining a coverage run to
 # one NUMA node would only make it slower; add `|pin_bench` to the config
 # string if you want it exercised here too.
+#
+# oxcaml-prefetch is excluded: it needs a `type: OxCaml` runtime and would
+# otherwise fail its build check on every run as pure noise. Exercising OxCaml
+# provisioning on FreeBSD is worthwhile but deserves its own config, not a
+# side effect of a coverage run.
 #
 # Usage. `bash`, not `sh`: the wrapper is #!/usr/bin/env bash. PYTHON matters
 # because running-ng is usually in a virtualenv.
@@ -50,7 +63,16 @@ minheap_multiplier: 1.0
 heap_range: 6
 spread_factor: 1
 
-# No `overrides.benchmarks` block: the base's full set is exactly what we want.
+# A top-level `benchmarks:` dict UPDATES the base's, key by key, so naming one
+# suite with an empty list disables just that suite and leaves every other one
+# tracking micro_base. (`overrides:` would replace the whole block, which would
+# mean listing all 195 remaining entries and going stale the moment micro_base
+# gains a benchmark.)
+benchmarks:
+  # Needs a `type: OxCaml` runtime, so under an OCaml runtime it fails its
+  # build check every run. The harness rejects it correctly and carries on,
+  # but for a coverage config that is pure noise.
+  oxcaml-prefetch: []
 
 runtimes:
   ocaml-5.4.1:
@@ -58,4 +80,4 @@ runtimes:
     version: "5.4.1"
 
 configs:
-  - "ocaml-5.4.1|perf_grp1_freebsd"
+  - "ocaml-5.4.1|perf_grp1_freebsd|re-25|md-2"

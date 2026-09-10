@@ -285,10 +285,48 @@ def test_freebsd_configs_use_freebsd_groups(config):
 
 
 def test_coverage_config_runs_every_micro_benchmark_once():
-    # Its purpose is to find what fails to build or run, so it must not
-    # narrow the suite, and one invocation answers the question.
+    # Its purpose is to find what fails to build or run, so one invocation
+    # answers the question and it must not narrow the set beyond the single
+    # suite that needs a different runtime type (asserted separately below).
     d = yaml.safe_load((EXAMPLES / "all_micro_freebsd.yml").read_text())
     assert d["invocations"] == 1
     assert "benchmarks" not in d.get("overrides", {}), \
-        "narrowing the suite defeats the point of a coverage run"
-    assert "benchmarks" not in d
+        "overrides would REPLACE the base's set, defeating the coverage point"
+
+
+# --- coverage config: ring size and the OxCaml suite ---------------------------
+
+def test_coverage_config_carries_a_larger_runtime_events_ring():
+    """Without it, four GC-dense benchmarks silently produce bad GC numbers.
+
+    The globroots trio force majors explicitly and pidigits5 does ~13.7k major
+    collections; the default runtime_events ring overflows and olly marks its
+    own output stats_reliable: false, while the invocation still passes. Every
+    established micro config carries re-25|md-2, and this one omitted it.
+    """
+    d = yaml.safe_load((EXAMPLES / "all_micro_freebsd.yml").read_text())
+    entry = d["configs"][0]
+    assert "re-25" in entry, entry
+    assert "md-2" in entry, entry
+
+
+def test_coverage_config_disables_the_oxcaml_suite_without_listing_the_rest():
+    # A top-level `benchmarks:` updates the base's dict key by key, so naming
+    # one suite empty disables just that one. Using `overrides:` instead would
+    # replace the whole block, and go stale whenever micro_base changes.
+    d = yaml.safe_load((EXAMPLES / "all_micro_freebsd.yml").read_text())
+    assert d["benchmarks"] == {"oxcaml-prefetch": []}
+    assert "benchmarks" not in d.get("overrides", {})
+
+
+def test_coverage_config_still_tracks_every_other_suite():
+    base = yaml.safe_load(
+        (EXAMPLES.parent / "base" / "ocaml" / "micro_base.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "all_micro_freebsd.yml").read_text())
+    merged = dict(base["benchmarks"])
+    merged.update(d["benchmarks"])
+    disabled = [s for s, b in merged.items() if not b]
+    assert disabled == ["oxcaml-prefetch"], disabled
+    for suite, benches in base["benchmarks"].items():
+        if suite != "oxcaml-prefetch":
+            assert merged[suite] == benches, suite
