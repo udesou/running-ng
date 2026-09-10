@@ -1,0 +1,84 @@
+# =============================================================================
+# Macro benchmarks needing no system library — FreeBSD coverage run
+# =============================================================================
+# COVERAGE, not measurement: one invocation each, so the numbers are not
+# comparable. The question is which macro benchmarks build and run on FreeBSD.
+#
+# "Tier 1" is the 57 benchmarks across 15 suites that need nothing beyond what
+# OCaml itself needs, so they can be attempted on a host where nobody can run
+# `pkg install`. The seven suites disabled below need system libraries, which
+# on an unprivileged host is somebody else's decision:
+#
+#   alt-ergo    zlib
+#   coq         (rocq build)
+#   devkit      libcurl, libev, libevent, pcre, pcre2, zlib
+#   frama-c     libyaml, zlib
+#   goblint     apron, camlidl, mpfr, perl        <- historically painful even on Linux
+#   infer       sqlite3, zlib
+#   owl         openblas
+#   pplacer     gsl, sqlite3
+#
+# gmp is needed by zarith and is assumed present; it already is on the
+# validation host. Without it, macro-zarith is where failures would appear.
+#
+# lavyek and merlin are empty in the base config already (lavyek is in a
+# private repo), so they contribute nothing here and are left alone.
+#
+# Expectation: the vendored OCaml code should be portable, so failures are
+# most likely in C stubs and configure scripts inside duniverse/ rather than
+# in anything running-ng does. Report per suite.
+#
+# No CpuPin, so no cpuset appears. Pinning is verified separately, and
+# confining a coverage run to one NUMA node would only make it slower.
+#
+# Prerequisites: ~/macro-benches built via `make setup`, which needs the
+# BSD-portable vendoring scripts (macro-benches scripts/lib-portable.sh).
+#
+# Usage. `bash`, not `sh`. RUNNING_REUSE_SWITCHES=1 avoids wiping and
+# rebuilding the 5.4.1 switch on each attempt while iterating.
+#
+#   cd ~/running-ng
+#   PYTHON=/path/to/venv/bin/python \
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/examples/all_macro_freebsd_tier1.yml \
+#   LOG_DIR=/tmp/all_macro_freebsd_tier1 \
+#   RUNNING_REUSE_SWITCHES=1 \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+invocations: 1
+remote_host: null
+compress_logs: false
+minheap_multiplier: 1.0
+heap_range: 6
+spread_factor: 1
+
+# A top-level `benchmarks:` dict UPDATES the base's, key by key, so naming a
+# suite with an empty list disables just that suite and leaves every other one
+# tracking macro_base. (`overrides:` would replace the whole block, meaning all
+# 57 remaining entries listed by hand and stale the moment macro_base changes.)
+#
+# TRAP: a key that does not exist in the base is silently ADDED as an empty
+# suite rather than rejected, so a misspelling disables nothing and looks
+# fine. `macro-infer` instead of `macro-infer-monorepo` did exactly that here.
+# tests/test_freebsd_event_groups.py now checks every key against the base.
+benchmarks:
+  macro-alt-ergo-monorepo: []
+  macro-coq-monorepo: []
+  macro-devkit: []
+  macro-frama-c-monorepo: []
+  macro-goblint-monorepo: []
+  macro-infer-monorepo: []
+  macro-owl: []
+  macro-pplacer: []
+
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+
+configs:
+  - "ocaml-5.4.1|perf_grp1_freebsd"

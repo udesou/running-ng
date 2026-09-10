@@ -132,9 +132,21 @@ published. perf has no equivalent hazard.
 
 ## Known gaps
 
-- **Macro benchmarks are untested.** All coverage is the micro suite.
-  `smoke_macro.yml` needs `~/macro-benches` built via `make setup`, and lavyek
-  is in a private repo.
+- **Macro benchmarks are set up but not yet run.** `~/macro-benches`'s
+  vendoring scripts were GNU-only (20 `sed -i`, six of them GNU-only sed
+  constructs, five `md5sum`, one `nproc`) and are now portable via
+  `scripts/lib-portable.sh` there. `smoke_macro_freebsd.yml` and
+  `all_macro_freebsd_tier1.yml` are ready. Tier 1 is the 57 benchmarks across
+  13 suites needing no system library; the other eight suites need
+  `pkg install` (`apron`/`camlidl` for goblint, `openblas` for owl, `gsl` and
+  `sqlite3` for pplacer, `libevent` and friends for devkit, `zlib` for
+  several), which needs root. Nothing has run on FreeBSD yet, and the likely
+  failures are C stubs and configure scripts inside `duniverse/` rather than
+  anything in running-ng.
+- **lavyek cannot be covered anywhere.** It is in a private repo and disabled
+  in the base config for everyone, so the parallel macro path and the
+  `re_par`/`md_par`/`pin_lavyek` routing are untested on FreeBSD by
+  construction, not by omission.
 - **Multi-invocation runs are unmeasured.** Everything so far is
   `invocations: 1`, i.e. coverage rather than measurement. Run-to-run variance
   on this host is unknown, though 0.11% dispersion was seen on a fixed workload.

@@ -330,3 +330,61 @@ def test_coverage_config_still_tracks_every_other_suite():
     for suite, benches in base["benchmarks"].items():
         if suite != "oxcaml-prefetch":
             assert merged[suite] == benches, suite
+
+
+# --- macro configs -------------------------------------------------------------
+
+BASE_DIR = EXAMPLES.parent / "base" / "ocaml"
+MACRO_CONFIGS = ["smoke_macro_freebsd.yml", "all_macro_freebsd_tier1.yml"]
+
+
+@pytest.mark.parametrize("config", MACRO_CONFIGS)
+def test_macro_freebsd_configs_use_freebsd_groups(config):
+    d = yaml.safe_load((EXAMPLES / config).read_text())
+    for entry in d["configs"]:
+        groups = [t for t in entry.split("|") if t.startswith("perf_grp")]
+        assert groups, config
+        for g in groups:
+            assert g.endswith("_freebsd"), (
+                "{} uses {}, whose events do not resolve on FreeBSD".format(
+                    config, g))
+
+
+@pytest.mark.parametrize("config", MACRO_CONFIGS + FREEBSD_CONFIGS)
+def test_every_named_suite_exists_in_the_base(config):
+    """A misspelled suite key is silently ADDED, not rejected.
+
+    Both `benchmarks:` (which updates the base key by key) and `overrides.
+    benchmarks:` take arbitrary keys, so `macro-infer` instead of
+    `macro-infer-monorepo` creates a new empty suite and disables nothing,
+    while looking entirely correct. That happened while writing the tier-1
+    config and only showed up in a benchmark count.
+    """
+    d = yaml.safe_load((EXAMPLES / config).read_text())
+    base_name = d["includes"][0].split("/")[-1]
+    base = yaml.safe_load((BASE_DIR / base_name).read_text())["benchmarks"]
+    named = dict(d.get("benchmarks", {}))
+    named.update(d.get("overrides", {}).get("benchmarks", {}))
+    unknown = sorted(set(named) - set(base))
+    assert not unknown, (
+        "{} names suite(s) absent from {}: {}. A typo here disables nothing "
+        "and reports no error.".format(config, base_name, unknown))
+
+
+def test_macro_tier1_keeps_only_suites_needing_no_system_library():
+    # The point of tier 1: runnable on a host where nobody can pkg install.
+    d = yaml.safe_load((EXAMPLES / "all_macro_freebsd_tier1.yml").read_text())
+    base = yaml.safe_load((BASE_DIR / "macro_base.yml").read_text())["benchmarks"]
+    merged = dict(base)
+    merged.update(d["benchmarks"])
+    needs_system_libs = {
+        "macro-alt-ergo-monorepo", "macro-coq-monorepo", "macro-devkit",
+        "macro-frama-c-monorepo", "macro-goblint-monorepo",
+        "macro-infer-monorepo", "macro-owl", "macro-pplacer",
+    }
+    for suite in needs_system_libs:
+        assert suite in base, "{} vanished from macro_base".format(suite)
+        assert not merged[suite], "{} needs a system library and must be off".format(suite)
+    live = {s for s, v in merged.items() if v}
+    assert not (live & needs_system_libs)
+    assert sum(len(v) for v in merged.values() if v) == 57
