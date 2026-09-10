@@ -81,7 +81,7 @@ OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
 # running-ng's dependencies are importable.
 if ! PYTHONPATH="$PYTHONPATH" "$PYTHON" -m running.switches ensure; then
   echo "ERROR: could not provision running-ng's opam switches." >&2
-  echo "  See: $PYTHON -m running.switches status" >&2
+  echo "  See: PYTHONPATH=$PYTHONPATH $PYTHON -m running.switches status" >&2
   exit 1
 fi
 

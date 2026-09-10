@@ -6,6 +6,8 @@ file, drift detection, and the command plan.
 """
 import json
 import os
+import sys
+import subprocess
 
 import pytest
 
@@ -207,3 +209,80 @@ def test_installers_agree_on_the_tools_switch_name(script):
     decls = [l for l in _code_lines(script) if l.startswith("OPAM_SWITCH=")]
     assert decls, script
     assert switches.TOOLS_SWITCH in decls[0], decls
+
+
+# --- the invocation actually works ---------------------------------------------
+#
+# The static tests above check what the scripts must NOT do. These check the
+# one thing they must do, which is the gap that let a broken invocation ship:
+# `python3 -m running.switches` with no PYTHONPATH fails with
+# ModuleNotFoundError on any machine where running-ng is not importable
+# system-wide, which is every machine using a virtualenv.
+
+INVOKERS = ["install_deps_linux.sh", "install_deps_macos.sh",
+            "install_deps_freebsd.sh", "run_ocaml_bench_gc_sweep.sh"]
+
+
+@pytest.mark.parametrize("script", INVOKERS)
+def test_every_invocation_sets_a_python_path(script):
+    for line in _code_lines(script):
+        if "-m running.switches" not in line:
+            continue
+        assert "PYTHONPATH" in line, (
+            "{}: `{}` has no PYTHONPATH, so it fails with ModuleNotFoundError "
+            "wherever running-ng is not importable system-wide".format(
+                script, line))
+
+
+@pytest.mark.parametrize("script", INVOKERS)
+def test_advice_strings_are_runnable_too(script):
+    # An error message recommending a command that fails the same way is worse
+    # than no message: it sends the reader down the same hole.
+    for line in _code_lines(script):
+        if "running.switches status" in line:
+            assert "PYTHONPATH" in line, (
+                "{}: advice `{}` would fail the same way".format(script, line))
+
+
+def test_installers_do_not_require_a_virtualenv():
+    # The wrapper may insist on $PYTHON, because by then running-ng is
+    # installed. An installer runs BEFORE that, so depending on a virtualenv
+    # would make bootstrapping a fresh machine impossible.
+    for script in ["install_deps_linux.sh", "install_deps_macos.sh",
+                   "install_deps_freebsd.sh"]:
+        for line in _code_lines(script):
+            if "-m running.switches" in line:
+                assert '"$PYTHON"' not in line, script
+
+
+def test_switches_module_runs_on_a_bare_interpreter(tmp_path):
+    """Executes it the way an installer does, which is what was never tested.
+
+    Run from a directory that is not the repo, with PYTHONPATH pointing at
+    src, and with the environment stripped of anything that might make
+    `running` importable by accident.
+    """
+    env = {"PATH": os.environ.get("PATH", ""),
+           "HOME": os.environ.get("HOME", ""),
+           "PYTHONPATH": os.path.join(REPO, "src")}
+    p = subprocess.run([sys.executable, "-m", "running.switches", "--help"],
+                       cwd=str(tmp_path), env=env,
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    assert "ensure" in p.stdout
+
+
+def test_switches_module_is_not_importable_without_the_path(tmp_path):
+    # The negative half: proves the test above is actually testing something,
+    # and reproduces exactly what rosemary saw.
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
+    p = subprocess.run([sys.executable, "-m", "running.switches", "--help"],
+                       cwd=str(tmp_path), env=env,
+                       capture_output=True, text=True)
+    if p.returncode == 0:
+        pytest.skip("running-ng is importable system-wide here, so the failure "
+                    "this guards against cannot be reproduced on this machine")
+    # Wording varies: a plain interpreter says "No module named 'running'",
+    # while one whose editable install predates this module says
+    # "No module named running.switches".
+    assert "No module named" in p.stderr

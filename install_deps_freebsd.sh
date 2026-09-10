@@ -226,10 +226,15 @@ step "Provisioning running-ng's opam switches"
 #
 # It creates what is missing, rebuilds a switch whose contents no longer match
 # what it was built from (for olly that includes the checkout's git SHA), and
-# restores the active switch afterwards. Standard library only, so it runs
-# before running-ng's own dependencies exist.
+# restores the active switch afterwards.
+#
+# PYTHONPATH, but NOT the sweep wrapper's $PYTHON indirection. running.switches
+# imports only the standard library, so any python3 can run it; an installer
+# runs before running-ng is installed anywhere, so depending on a virtualenv
+# here would make bootstrapping a fresh machine impossible.
 OPAM_BIN="$OPAM_BIN" OLLY_DIR="$OLLY_DIR" \
-    python3 -m running.switches ensure --compiler "$OCAML_VERSION"
+    PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches ensure \
+        --compiler "$OCAML_VERSION"
 
 # Optional extra for the tools switch: ocaml-processor-dump, supplying
 # P/E-core and socket topology for CpuPin and the run manifest. Not part of
@@ -260,7 +265,7 @@ if "$OPAM_BIN" compiler create "invalid/source#nope" </dev/null 2>&1 \
         | grep -q "unknown command"; then
     red "ERROR: the opam 'compiler' plugin does not resolve, so runtime"
     red "switches cannot be provisioned and no sweep can run."
-    red "Try: python3 -m running.switches status"
+    red "Try: PYTHONPATH=$ROOT_DIR/src python3 -m running.switches status"
     exit 1
 fi
 ok "opam compiler plugin resolves"

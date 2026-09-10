@@ -238,7 +238,8 @@ step "Provisioning running-ng's opam switches"
 # published opam-compiler pins < 2.0. Duplicating that declaration here is how
 # this script and the sweep wrapper drifted apart.
 OPAM_BIN="$OPAM_BIN" OLLY_DIR="$OLLY_DIR" \
-    python3 -m running.switches ensure --compiler "$OCAML_VERSION"
+    PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches ensure \
+        --compiler "$OCAML_VERSION"
 
 step "Pre-installing benchmark packages in $OPAM_SWITCH"
 
@@ -307,7 +308,7 @@ if "$OPAM_BIN" compiler create "invalid/source#nope" </dev/null 2>&1 \
         | grep -q "unknown command"; then
     red "ERROR: the opam 'compiler' plugin does not resolve, so runtime"
     red "switches cannot be provisioned and no sweep can run."
-    red "Try: python3 -m running.switches status"
+    red "Try: PYTHONPATH=$ROOT_DIR/src python3 -m running.switches status"
     exit 1
 fi
 ok "opam compiler plugin resolves"
