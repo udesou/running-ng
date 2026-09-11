@@ -432,3 +432,68 @@ def test_unreliable_check_tolerates_a_non_dict():
     from running.benchmark import _warn_if_gc_stats_unreliable
     _warn_if_gc_stats_unreliable("x", None)
     _warn_if_gc_stats_unreliable("x", "not a dict")
+
+
+# --- task-clock unit handling ---------------------------------------------------
+
+from running.benchmark import counter_seconds  # noqa: E402
+
+
+#: A real task-clock entry, from an alt_ergo_chain_default invocation whose
+#: rusage said 36.908s of CPU.  Read as nanoseconds it is 0.0000368s, which is
+#: what made the cross-check below fire on every benchmark of every run.
+REAL_TASK_CLOCK = {
+    "counter-value": "36769.670031",
+    "unit": "msec",
+    "event": "task-clock",
+    "event-runtime": 36769670031,
+    "pcnt-running": 100.0,
+    "metric-value": "0.992784",
+    "metric-unit": "CPUs utilized",
+}
+
+
+def test_task_clock_is_read_in_its_stated_unit():
+    assert counter_seconds(REAL_TASK_CLOCK) == pytest.approx(36.7696, rel=1e-4)
+
+
+def test_a_faithful_counter_agrees_with_rusage():
+    # The check downstream is task_clock < 0.8 * cpu_time; this pair must not
+    # trip it, or every correctly-counted invocation is flagged.
+    cpu_time = 36.065 + 0.843
+    assert counter_seconds(REAL_TASK_CLOCK) > 0.8 * cpu_time
+
+
+def test_a_genuine_undercount_is_still_detectable():
+    # The case the check exists for: perf attached late and saw one thread of
+    # many.  owl_gc measured 10.5s against 322s actual.
+    entry = dict(REAL_TASK_CLOCK, **{"counter-value": "10500.0",
+                                     "event-runtime": 10500000000})
+    assert counter_seconds(entry) < 0.8 * 322.0
+
+
+@pytest.mark.parametrize("unit,value,expected", [
+    ("msec", "1500", 1.5),
+    ("ms", "1500", 1.5),
+    ("sec", "1.5", 1.5),
+    ("usec", "1500000", 1.5),
+    ("nsec", "1500000000", 1.5),
+])
+def test_known_units(unit, value, expected):
+    assert counter_seconds({"counter-value": value, "unit": unit}) == pytest.approx(expected)
+
+
+def test_unknown_unit_falls_back_to_event_runtime_nanoseconds():
+    e = {"counter-value": "1500", "unit": "furlongs", "event-runtime": 1500000000}
+    assert counter_seconds(e) == pytest.approx(1.5)
+
+
+def test_missing_unit_falls_back_to_event_runtime():
+    assert counter_seconds({"counter-value": "1500",
+                            "event-runtime": 1500000000}) == pytest.approx(1.5)
+
+
+def test_unreadable_entry_is_none():
+    assert counter_seconds({"unit": "msec"}) is None
+    assert counter_seconds({"counter-value": "n/a", "unit": "msec"}) is None
+    assert counter_seconds({"counter-value": "1500", "unit": "furlongs"}) is None

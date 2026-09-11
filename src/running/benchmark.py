@@ -49,6 +49,38 @@ BUILD_TOOLS = {"ocamlfind", "ocamlc", "ocamlc.opt", "ocamlopt",
                "bash", "sh"}
 
 
+#: perf names the unit of each counter-value in a sibling field.  task-clock
+#: has come back as "msec" on every perf we have seen, but the value is only
+#: meaningful together with its unit, so it is read rather than assumed.
+_COUNTER_UNIT_SECONDS = {
+    "sec": 1.0, "s": 1.0, "msec": 1e-3, "ms": 1e-3,
+    "usec": 1e-6, "us": 1e-6, "nsec": 1e-9, "ns": 1e-9,
+}
+
+
+def counter_seconds(entry: Dict[str, Any]) -> Optional[float]:
+    """A time-valued perf counter in seconds, or None if it cannot be read.
+
+    `counter-value` is in the unit named by `unit`; the sibling `event-runtime`
+    is nanoseconds.  Reading the first as if it were the second is a factor of
+    a million, which is how the task-clock cross-check below came to fire on
+    every invocation of every benchmark -- 36769.670031 msec, a faithful 36.8s,
+    read as 0.0000368s and duly reported as perf having missed threads.
+    """
+    try:
+        value = float(entry["counter-value"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    scale = _COUNTER_UNIT_SECONDS.get((entry.get("unit") or "").strip().lower())
+    if scale is not None:
+        return value * scale
+    # No unit, or one not in the table: event-runtime is documented nanoseconds.
+    try:
+        return float(entry["event-runtime"]) / 1e9
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _warn_if_gc_stats_unreliable(benchmark_name: str, olly: Any) -> None:
     """Warn when olly says its own GC numbers cannot be trusted.
 
@@ -598,10 +630,7 @@ class Benchmark(object):
         task_clock_s = None
         for entry in structured.get("perf", []):
             if entry.get("event") == "task-clock":
-                try:
-                    task_clock_s = float(entry["counter-value"]) / 1e9
-                except (KeyError, TypeError, ValueError):
-                    pass
+                task_clock_s = counter_seconds(entry)
         if task_clock_s is not None and cpu_time > 1.0 and task_clock_s < 0.8 * cpu_time:
             structured["perf_incomplete"] = True
             logging.warning(
