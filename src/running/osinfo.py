@@ -364,6 +364,50 @@ def isolated_cpus() -> List[int]:
     return _sysfs_cpu_list("isolated")
 
 
+def _parse_cpu_mask(text: str) -> List[int]:
+    """Parse a procfs hex CPU mask: "0005", or "00000000,0000000f" past 32."""
+    bits = text.strip().replace(",", "")
+    if not bits:
+        return []
+    try:
+        value = int(bits, 16)
+    except ValueError:
+        return []
+    return [i for i in range(value.bit_length()) if (value >> i) & 1]
+
+
+def irq_cpus() -> List[int]:
+    """CPUs the kernel routes device interrupts to, where that is a subset.
+
+    /proc/irq/default_smp_affinity is what an `irqaffinity=` boot line sets,
+    and it is the administrator saying "the OS belongs here".  Untuned it
+    covers every CPU, which says nothing, so that case returns empty.
+
+    Interrupt work is not visible in the benchmark's own CPU time but competes
+    with it for the core.  On an 8-core Xeon with `irqaffinity=0,2`, the two
+    housekeeping cores had taken 522M and 425M interrupts against 0.23M on each
+    of the others -- three orders of magnitude, and the reason an unpinned
+    benchmark there showed a 25.8s spread over six runs against 0.33s pinned.
+
+    Linux only: FreeBSD routes interrupts with its own mechanism and macOS
+    cannot pin, so both return empty and the topology policy applies.
+    """
+    if SYSTEM != "Linux":
+        return []
+    try:
+        with open("/proc/irq/default_smp_affinity") as f:
+            cpus = _parse_cpu_mask(f.read())
+    except OSError:
+        return []
+    online = set(online_cpus())
+    if online:
+        cpus = [c for c in cpus if c in online]
+        # A mask covering everything is the default, not a decision.
+        if len(cpus) >= len(online):
+            return []
+    return sorted(cpus)
+
+
 def sibling_groups() -> List[List[int]]:
     """One sorted list of logical CPUs per physical core, cores in order.
 
@@ -457,6 +501,12 @@ def partition_cpus(reserved_cores: int = 0,
     with `reserved_cores` and `one_node` then applying within the isolated set.
     See isolated_cpus() for the load-balancing caveat that comes with it.
 
+    Failing that, a restricted interrupt affinity (`irqaffinity=`) is the same
+    statement in a weaker form and is used the same way: the cores serving
+    interrupts go to the observers and the rest to the benchmark.  Only the
+    isolated case stops the scheduler moving other work in, but both keep the
+    benchmark off the cores the OS was told to use.
+
     Returns ([], []) where topology is unavailable.
     """
     groups = refine_groups(sibling_groups())
@@ -486,6 +536,17 @@ def partition_cpus(reserved_cores: int = 0,
                 "every core is isolated (%s); ignoring the isolation split, "
                 "as it would leave the OS and the observers nowhere to run",
                 format_cpu_list(sorted(isolated)))
+    if not housekeeping:
+        # No isolation, but an `irqaffinity=` line says the same thing in a
+        # weaker form: these cores serve the interrupts, so the benchmark
+        # belongs on the others.  Without this the benchmark can be pinned to
+        # CPU 0, which is the busiest core on most machines.
+        irq = set(irq_cpus())
+        if irq:
+            irq_groups = [g for g in groups if any(c in irq for c in g)]
+            free_groups = [g for g in groups if not any(c in irq for c in g)]
+            if irq_groups and free_groups:
+                groups, housekeeping = free_groups, irq_groups
     off_node: List[List[int]] = []
     if one_node:
         groups, off_node = split_groups_by_node(groups)

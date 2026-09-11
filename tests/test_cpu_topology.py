@@ -67,6 +67,7 @@ def _no_kernel_cpu_lists(request, monkeypatch):
         return
     monkeypatch.setattr(osinfo, "isolated_cpus", lambda: [])
     monkeypatch.setattr(osinfo, "online_cpus", lambda: [])
+    monkeypatch.setattr(osinfo, "irq_cpus", lambda: [])
 
 
 @pytest.fixture
@@ -819,6 +820,8 @@ def test_missing_kernel_cpu_lists_are_empty(monkeypatch, tmp_path):
 def _cpupin(monkeypatch, groups, isolated=(), **kwargs):
     monkeypatch.setattr(osinfo, "sibling_groups", lambda: groups)
     monkeypatch.setattr(osinfo, "isolated_cpus", lambda: list(isolated))
+    # irq_cpus is stubbed empty by the autouse fixture; a test that wants it
+    # sets it before calling this.
     monkeypatch.setattr(osinfo, "IS_LINUX", True)
     monkeypatch.setattr(osinfo, "IS_FREEBSD", False)
     return CpuPin(name="pin_bench", type="CpuPin", **kwargs)
@@ -829,7 +832,7 @@ def test_bench_cores_one_gives_a_single_deterministic_core(monkeypatch):
     # is what makes the placement the same every run.
     m = _cpupin(monkeypatch, [[c] for c in (0, 2, 4, 6, 8, 10, 12, 14)],
                 isolated=(4, 6, 8, 10, 12, 14), bench_cores="1")
-    assert m.val == ["taskset", "-c", "4"]
+    assert m.val == ["taskset", "-c", "14"]
 
 
 def test_bench_cores_defaults_to_the_whole_set(monkeypatch):
@@ -849,7 +852,7 @@ def test_unused_benchmark_cores_are_not_given_to_the_observers(monkeypatch):
     # separation the pinning exists to create.  Left idle instead.
     m = _cpupin(monkeypatch, [[c] for c in (0, 2, 4, 6, 8, 10, 12, 14)],
                 isolated=(4, 6, 8, 10, 12, 14), bench_cores="1")
-    assert m.benchmark_cpus == [4]
+    assert m.benchmark_cpus == [14]
     assert m.observer_cpus == [0, 2]
 
 
@@ -863,3 +866,47 @@ def test_bench_cores_beyond_the_set_uses_what_there_is(monkeypatch):
 def test_bench_cores_rejects_nonsense(monkeypatch, bad):
     with pytest.raises(ValueError):
         _cpupin(monkeypatch, [[0], [2]], bench_cores=bad)
+
+
+def test_bench_cores_avoids_cpu0_where_nothing_is_declared(monkeypatch):
+    # No isolcpus and no irqaffinity: the whole list is the benchmark's, and
+    # its front is CPU 0, which is the busiest core on most machines.
+    m = _cpupin(monkeypatch, [[0], [2], [4], [6]], bench_cores="1")
+    assert m.val == ["taskset", "-c", "6"]
+
+
+def test_irq_affinity_splits_when_nothing_is_isolated(monkeypatch):
+    monkeypatch.setattr(osinfo, "irq_cpus", lambda: [0, 2])
+    m = _cpupin(monkeypatch, [[c] for c in (0, 2, 4, 6, 8, 10, 12, 14)])
+    assert m.benchmark_cpus == [4, 6, 8, 10, 12, 14]
+    assert m.observer_cpus == [0, 2]
+
+
+def test_isolation_wins_over_irq_affinity(monkeypatch):
+    # Both declared and disagreeing: isolation is the stronger statement.
+    monkeypatch.setattr(osinfo, "irq_cpus", lambda: [0])
+    m = _cpupin(monkeypatch, [[c] for c in (0, 2, 4, 6)], isolated=(4, 6))
+    assert m.benchmark_cpus == [4, 6]
+    assert m.observer_cpus == [0, 2]
+
+
+@pytest.mark.cpu_lists
+def test_irq_mask_covering_everything_says_nothing(monkeypatch, tmp_path):
+    monkeypatch.setattr(osinfo, "SYSTEM", "Linux")
+    monkeypatch.setattr(osinfo, "online_cpus", lambda: [0, 1, 2, 3])
+    irq = tmp_path / "default_smp_affinity"
+    irq.write_text("f\n")
+    import builtins
+    real_open = builtins.open
+    monkeypatch.setattr(builtins, "open",
+                        lambda p, *a, **k: real_open(str(irq), *a, **k)
+                        if str(p) == "/proc/irq/default_smp_affinity"
+                        else real_open(p, *a, **k))
+    assert osinfo.irq_cpus() == []
+
+
+def test_parse_cpu_mask_handles_wide_masks():
+    assert osinfo._parse_cpu_mask("0005") == [0, 2]
+    assert osinfo._parse_cpu_mask("00000000,0000000f") == [0, 1, 2, 3]
+    assert osinfo._parse_cpu_mask("") == []
+    assert osinfo._parse_cpu_mask("zz") == []

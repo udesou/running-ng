@@ -306,7 +306,14 @@ class CpuPin(Modifier):
             # work -- on a machine using isolcpus they are the isolated ones --
             # and putting olly on them would undo the separation the pinning
             # exists to create.
-            self.benchmark_cpus = self.benchmark_cpus[:self.bench_cores]
+            #
+            # Taken from the far end of the set: where the machine declares
+            # nothing (no isolcpus, no irqaffinity) the whole list is handed to
+            # the benchmark and the front of it is CPU 0, which is the busiest
+            # core on most machines.  Where it does declare a split this makes
+            # no difference to quality, and it keeps the benchmark as far from
+            # the housekeeping cores as the machine allows.
+            self.benchmark_cpus = self.benchmark_cpus[-self.bench_cores:]
         self.val = osinfo.pin_command(self.benchmark_cpus)
         if not self.val:
             logging.warning(
