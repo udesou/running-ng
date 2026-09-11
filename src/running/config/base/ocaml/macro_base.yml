@@ -61,6 +61,7 @@
 # own.  Naming one explicitly is not an error and does not apply it twice.
 default_modifiers:
   - pin_bench
+  - pin_bench_mc
 
 invocations: 3
 remote_host: null
@@ -1158,6 +1159,30 @@ modifiers:
         - lavyek_kv_2d
         - lavyek_kv_4d
         - lavyek_kv_8d
+      macro-infer-monorepo:
+        - infer_small
+        - infer_default
+        - infer_large
+  # The multi-domain counterpart of pin_bench: the whole benchmark core set
+  # rather than one core of it.  Scoped with `includes` because it belongs to a
+  # named handful of benchmarks; the same thing said as an exclude list would
+  # mean naming every other benchmark and keeping that list current (see
+  # non_lavyek_excludes, which is 19 suites and 29 programs and already stale).
+  #
+  # ONLY for a benchmark that places its own domains.  The scheduler does not
+  # balance among isolated CPUs, so handing this set to one that does not pin
+  # confines every domain to a single CPU -- infer measured 100% CPU that way
+  # against 168% on two shared cores.  infer pins its domains from the
+  # inherited mask (macro-benches scripts/vendor-infer.sh patches
+  # DomainPool.child), which is what makes this set usable: 5.5-5.8 cores of 6
+  # through its analysis phase.
+  #
+  # lavyek is NOT here: it pins its own domains too, but from the machine
+  # topology rather than the inherited mask, so it takes its cores through
+  # pin_lavyek and ignores whatever mask it is given.
+  pin_bench_mc:
+    type: CpuPin
+    includes:
       macro-infer-monorepo:
         - infer_small
         - infer_default

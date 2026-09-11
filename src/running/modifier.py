@@ -20,6 +20,16 @@ class Modifier(object):
         self.__original_kwargs = kwargs
         self._kwargs = copy.deepcopy(kwargs)
         self.excludes = kwargs.get("excludes", {})
+        # Narrows the scope: when non-empty the modifier applies ONLY to the
+        # programs listed.  Use one or the other -- naming a suite in excludes
+        # drops the modifier for every program of it, so combining them removes
+        # more than the names suggest (tests/test_modifier.py).  For a modifier that
+        # belongs to one or two benchmarks, listing those is the whole scope;
+        # spelling the same thing as an exclude list means naming every other
+        # benchmark and keeping that list current forever.  macro_base.yml's
+        # non_lavyek_excludes shows how that ends: 19 suites, 29 programs, and
+        # 18 of those suites are missing programs added since.
+        self.includes = kwargs.get("includes", {})
         if self.value_opts:  # Neither None nor empty
             # Expand value opts
             for k, v in kwargs.items():

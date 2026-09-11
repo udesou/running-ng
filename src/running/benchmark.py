@@ -195,9 +195,24 @@ class Benchmark(object):
             return True
         return returncode == self.expected_exit
 
+    def in_modifier_scope(self, m: Modifier) -> bool:
+        """False when `m` carries an `includes` list this benchmark is not on.
+
+        Only `includes` is decided here; `excludes` keeps its existing handling
+        in the callers, and still subtracts from whatever `includes` allowed.
+        That handling is left alone deliberately: it drops a modifier for every
+        program of a partially-excluded suite, and several stale exclude lists
+        in macro_base.yml are only lavyek-only because of it.
+        """
+        if not m.includes:
+            return True
+        return self.name in m.includes.get(self.suite_name, ())
+
     def attach_modifiers(self, modifiers: List[Modifier]) -> Any:
         b = deepcopy(self)
         for m in modifiers:
+            if not self.in_modifier_scope(m):
+                continue
             if self.suite_name in m.excludes:
                 if self.name in m.excludes[self.suite_name]:
                     continue
@@ -680,6 +695,8 @@ class BinaryBenchmark(Benchmark):
     def attach_modifiers(self, modifiers: List[Modifier]) -> 'BinaryBenchmark':
         bb = super().attach_modifiers(modifiers)
         for m in modifiers:
+            if not self.in_modifier_scope(m):
+                continue
             if self.suite_name in m.excludes:
                 if self.name in m.excludes[self.suite_name]:
                     continue
@@ -718,6 +735,8 @@ class JavaBenchmark(Benchmark):
     def attach_modifiers(self, modifiers: List[Modifier]) -> 'JavaBenchmark':
         jb = super().attach_modifiers(modifiers)
         for m in modifiers:
+            if not self.in_modifier_scope(m):
+                continue
             if self.suite_name in m.excludes:
                 if self.name in m.excludes[self.suite_name]:
                     continue
@@ -762,6 +781,8 @@ class JavaScriptBenchmark(Benchmark):
     def attach_modifiers(self, modifiers: List[Modifier]) -> 'JavaScriptBenchmark':
         jb = super().attach_modifiers(modifiers)
         for m in modifiers:
+            if not self.in_modifier_scope(m):
+                continue
             if self.suite_name in m.excludes:
                 if self.name in m.excludes[self.suite_name]:
                     continue
