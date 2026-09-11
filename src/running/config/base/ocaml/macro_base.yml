@@ -29,7 +29,15 @@
 # Canonical full-suite config-string template:
 #
 #   configs:
-#     - "<runtime>|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+#     - "<runtime>|perf_grp1|pin_bench|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+#
+# Include `pin_bench` in every macro config.  It confines each single-threaded
+# benchmark to one core of the set reserved for benchmark work, and puts olly
+# and the counter tool on the cores that are not.  Without it the benchmark
+# inherits the process default mask, which on a machine using `isolcpus=` is
+# the housekeeping cores -- the ones also taking every interrupt.  Leaving it
+# out does not fail, it just measures a noisier machine, so a sweep meant to be
+# compared with another must make the same choice.
 #
 # Note: `re_par` and `md_par` REQUIRE explicit values (`-22`, `-8`). The bare
 # tokens `re_par|md_par` render to the literal string `e={0}` / `d={0}` and
@@ -1112,6 +1120,45 @@ modifiers:
     val: "0"
     one_node: true
     excludes: *non_lavyek_excludes
+  # Pin a single-threaded benchmark to one core of the set reserved for
+  # benchmark work.  Where the machine isolates cores (Linux `isolcpus=`, with
+  # a matching `irqaffinity=` putting the interrupts elsewhere) that is the
+  # isolated set, and the observers go to the housekeeping cores; otherwise it
+  # is the topology policy CpuPin already applied.  Either way the CPU numbers
+  # come from the running machine, so this is correct on a different core
+  # count, on FreeBSD, and on ARM.
+  #
+  # Why one core and not the whole set: a single-threaded benchmark only ever
+  # uses one, and naming it makes the placement identical across runs.  On an
+  # 8-core Xeon booted `nosmt isolcpus=4,6,8,10,12,14 irqaffinity=0,2`,
+  # sedlex_tokenize_default over six alternating runs:
+  #
+  #     unpinned (housekeeping cores 0,2)   51.46s mean, 25.84s spread
+  #     pinned to one isolated core         46.47s mean,  0.33s spread
+  #
+  # The unpinned runs sat at ~46.5s four times and then hit 50.19s and 72.29s:
+  # the noise is occasional and large, not gaussian, which is the shape most
+  # likely to read as a regression in a single cell.
+  #
+  # NOT applied to multi-domain benchmarks.  The scheduler does not balance
+  # among isolated CPUs, so an unpinned multi-domain benchmark handed that set
+  # puts every domain on one of them: infer measured 168% CPU on the two
+  # housekeeping cores and 100% on the six isolated ones, 72% slower.  lavyek
+  # is exempt because it pins its own domains (pin_lavyek gives it the set);
+  # infer is exempt until it does the same.
+  pin_bench:
+    type: CpuPin
+    bench_cores: "1"
+    excludes: &unpinnable_excludes
+      macro-lavyek-monorepo:
+        - lavyek_kv_1d
+        - lavyek_kv_2d
+        - lavyek_kv_4d
+        - lavyek_kv_8d
+      macro-infer-monorepo:
+        - infer_small
+        - infer_default
+        - infer_large
   perf_grp1:
     type: PerfAndOllyAttach
     val: "task-clock,page-faults,cycles,instructions"

@@ -812,3 +812,54 @@ def test_missing_kernel_cpu_lists_are_empty(monkeypatch, tmp_path):
     monkeypatch.setattr(osinfo, "SYSTEM", "Linux")
     assert osinfo.isolated_cpus() == []
     assert osinfo.online_cpus() == []
+
+
+# --- bench_cores ----------------------------------------------------------------
+
+def _cpupin(monkeypatch, groups, isolated=(), **kwargs):
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: groups)
+    monkeypatch.setattr(osinfo, "isolated_cpus", lambda: list(isolated))
+    monkeypatch.setattr(osinfo, "IS_LINUX", True)
+    monkeypatch.setattr(osinfo, "IS_FREEBSD", False)
+    return CpuPin(name="pin_bench", type="CpuPin", **kwargs)
+
+
+def test_bench_cores_one_gives_a_single_deterministic_core(monkeypatch):
+    # A single-threaded benchmark needs one core, and pinning it to exactly one
+    # is what makes the placement the same every run.
+    m = _cpupin(monkeypatch, [[c] for c in (0, 2, 4, 6, 8, 10, 12, 14)],
+                isolated=(4, 6, 8, 10, 12, 14), bench_cores="1")
+    assert m.val == ["taskset", "-c", "4"]
+
+
+def test_bench_cores_defaults_to_the_whole_set(monkeypatch):
+    m = _cpupin(monkeypatch, [[c] for c in (0, 2, 4, 6, 8, 10, 12, 14)],
+                isolated=(4, 6, 8, 10, 12, 14))
+    assert m.val == ["taskset", "-c", "4,6,8,10,12,14"]
+
+
+def test_bench_cores_all_is_the_default_spelled_out(monkeypatch):
+    m = _cpupin(monkeypatch, [[c] for c in (0, 2, 4, 6)], isolated=(4, 6),
+                bench_cores="all")
+    assert m.val == ["taskset", "-c", "4,6"]
+
+
+def test_unused_benchmark_cores_are_not_given_to_the_observers(monkeypatch):
+    # They are reserved for benchmark work; putting olly there would undo the
+    # separation the pinning exists to create.  Left idle instead.
+    m = _cpupin(monkeypatch, [[c] for c in (0, 2, 4, 6, 8, 10, 12, 14)],
+                isolated=(4, 6, 8, 10, 12, 14), bench_cores="1")
+    assert m.benchmark_cpus == [4]
+    assert m.observer_cpus == [0, 2]
+
+
+def test_bench_cores_beyond_the_set_uses_what_there_is(monkeypatch):
+    m = _cpupin(monkeypatch, [[0], [2], [4], [6]], isolated=(4, 6),
+                bench_cores="8")
+    assert m.val == ["taskset", "-c", "4,6"]
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "two", "1.5"])
+def test_bench_cores_rejects_nonsense(monkeypatch, bad):
+    with pytest.raises(ValueError):
+        _cpupin(monkeypatch, [[0], [2]], bench_cores=bad)

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from running.util import register, smart_quote, split_quoted, parse_modifier_strs
 import copy
 import logging
@@ -237,6 +237,23 @@ class CpuPin(Modifier):
     memory traffic stops crossing the interconnect.  Exactly a no-op on a
     single-node machine, so it is safe to leave on in a shared config.
 
+    Optional `bench_cores`: how many of the benchmark's CPUs this benchmark may
+    actually use, default all of them.  Set it to 1 for a single-threaded
+    benchmark: it only ever needs one core, and confining it to one makes which
+    core deterministic across runs.  That matters most where the reserved set
+    is isolated (Linux `isolcpus=`), because the scheduler does not balance
+    among isolated CPUs -- a single-threaded benchmark handed six of them lands
+    on whichever one it is first placed on, so the extra five buy nothing and
+    only make the placement vary.  Measured on an 8-core Xeon, sedlex_tokenize
+    over six runs: unpinned on the housekeeping cores 51.46s mean with a 25.8s
+    spread, pinned to one isolated core 46.47s mean with a 0.33s spread.
+
+    A multi-domain benchmark wants the whole set, but only if it pins its own
+    domains the way lavyek_bench.ml does.  Handing an unpinned multi-domain
+    benchmark an isolated set confines every domain to one CPU: infer went from
+    168% CPU on two housekeeping cores to 100% on six isolated ones, 72%
+    slower.  Leave such benchmarks out of the modifier until they self-pin.
+
     Contributes nothing where the OS cannot pin (macOS), so a config carrying
     it stays portable rather than failing.
     """
@@ -262,8 +279,34 @@ class CpuPin(Modifier):
             self.one_node = node_raw in ("true", "yes", "1")
         else:
             self.one_node = bool(node_raw)
+        cores_raw = self._kwargs.get("bench_cores", None)
+        if cores_raw in (None, "", "all"):
+            self.bench_cores: Optional[int] = None
+        else:
+            try:
+                self.bench_cores = int(cores_raw)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "CpuPin modifier {}: bench_cores must be a whole number "
+                    "of cores or \"all\", got {!r}".format(self.name, cores_raw))
+            if self.bench_cores < 1:
+                raise ValueError(
+                    "CpuPin modifier {}: bench_cores must be >= 1, got "
+                    "{!r}".format(self.name, cores_raw))
         self.benchmark_cpus, self.observer_cpus = osinfo.partition_cpus(
             self.reserved_cores, one_node=self.one_node)
+        if self.bench_cores is not None and self.benchmark_cpus:
+            if self.bench_cores > len(self.benchmark_cpus):
+                logging.warning(
+                    "CpuPin modifier %s asks for %d cores but only %d are "
+                    "available for the benchmark; using all of them",
+                    self.name, self.bench_cores, len(self.benchmark_cpus))
+            # The cores this benchmark does not take are left IDLE rather than
+            # given to the observers.  They are the set reserved for benchmark
+            # work -- on a machine using isolcpus they are the isolated ones --
+            # and putting olly on them would undo the separation the pinning
+            # exists to create.
+            self.benchmark_cpus = self.benchmark_cpus[:self.bench_cores]
         self.val = osinfo.pin_command(self.benchmark_cpus)
         if not self.val:
             logging.warning(
@@ -271,7 +314,9 @@ class CpuPin(Modifier):
                 "unpinned", self.name, osinfo.SYSTEM)
 
     def __str__(self) -> str:
-        return "{} CpuPin cpus={} reserved_cores={} one_node={}".format(
+        return ("{} CpuPin cpus={} reserved_cores={} one_node={} "
+                "bench_cores={}").format(
             super().__str__(),
             osinfo.format_cpu_list(self.benchmark_cpus) or "none",
-            self.reserved_cores, self.one_node)
+            self.reserved_cores, self.one_node,
+            "all" if self.bench_cores is None else self.bench_cores)
