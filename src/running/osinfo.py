@@ -220,15 +220,22 @@ def process_snapshot_cmd() -> str:
 def _linux_sibling_groups() -> List[List[int]]:
     """SMT sibling sets from sysfs, one list per physical core."""
     groups, seen = [], set()
-    base = "/sys/devices/system/cpu"
+    base = SYSFS_CPU_BASE
     try:
         entries = sorted(
             (int(n[3:]) for n in os.listdir(base)
              if n.startswith("cpu") and n[3:].isdigit()))
     except OSError:
         return []
+    # Offline CPUs have no readable topology, and the fallback below would
+    # turn each into a phantom single-thread "core" that the benchmark could
+    # then be pinned to.  Seen on an 8-core box with SMT off: all 16 present
+    # CPUs came back as 16 physical cores.
+    online = set(online_cpus())
     for cpu in entries:
         if cpu in seen:
+            continue
+        if online and cpu not in online:
             continue
         path = "{}/cpu{}/topology/thread_siblings_list".format(base, cpu)
         try:
@@ -239,6 +246,8 @@ def _linux_sibling_groups() -> List[List[int]]:
             # own core rather than dropping it.
             raw = str(cpu)
         siblings = sorted(_parse_cpu_list(raw)) or [cpu]
+        if online:
+            siblings = [c for c in siblings if c in online] or [cpu]
         seen.update(siblings)
         groups.append(siblings)
     return groups
@@ -305,6 +314,54 @@ def _parse_cpu_list(text: str) -> List[int]:
             except ValueError:
                 continue
     return out
+
+
+#: sysfs root for CPU topology and the kernel's CPU lists.  A module constant
+#: so tests can point it at a fixture tree instead of the running machine.
+SYSFS_CPU_BASE = "/sys/devices/system/cpu"
+
+
+def _sysfs_cpu_list(name: str) -> List[int]:
+    """Read <SYSFS_CPU_BASE>/<name>, which holds a list like "0,2-6"."""
+    if SYSTEM != "Linux":
+        return []
+    try:
+        with open("{}/{}".format(SYSFS_CPU_BASE, name)) as f:
+            return sorted(_parse_cpu_list(f.read().strip()))
+    except OSError:
+        return []
+
+
+def online_cpus() -> List[int]:
+    """Logical CPUs the kernel will schedule on at all.
+
+    Empty where the list is unavailable (non-Linux, or a kernel without the
+    sysfs file), which callers read as "no information, assume every CPU".
+    """
+    return _sysfs_cpu_list("online")
+
+
+def isolated_cpus() -> List[int]:
+    """Logical CPUs the kernel has removed from scheduler load balancing.
+
+    Populated by `isolcpus=` on the Linux cmdline (and on some kernels by
+    `nohz_full=`).  Such a CPU still runs work pinned to it, but the scheduler
+    will neither migrate anything onto it nor balance among the isolated set:
+    a mask spanning several of them puts every thread on ONE and leaves it
+    there.  Measured on an 8-core Xeon with isolcpus=4,6,8,10,12,14: six
+    spinners sharing that mask reached 99% CPU, the same six pinned one per
+    CPU reached 599%.
+
+    So an isolated set suits a single-threaded benchmark, or one that pins its
+    own threads (as lavyek_bench.ml does), and nothing else.  partition_cpus
+    hands it to the benchmark; deciding how many of those CPUs a given
+    benchmark may span is the caller's job.
+
+    FreeBSD has no boot-time equivalent -- partitioning there is done at
+    runtime with cpuset(1) -- and macOS cannot pin at all, so this is empty on
+    both, and the topology policy applies unchanged.
+    """
+    return _sysfs_cpu_list("isolated")
 
 
 def sibling_groups() -> List[List[int]]:
@@ -395,6 +452,11 @@ def partition_cpus(reserved_cores: int = 0,
     `reserved_cores` still applies within the chosen node if both are given,
     which is what you want when there is only one node to give.
 
+    Where the kernel reports isolated CPUs (Linux `isolcpus=`), that split
+    wins: the benchmark gets the isolated cores and the observers get the rest,
+    with `reserved_cores` and `one_node` then applying within the isolated set.
+    See isolated_cpus() for the load-balancing caveat that comes with it.
+
     Returns ([], []) where topology is unavailable.
     """
     groups = refine_groups(sibling_groups())
@@ -402,6 +464,28 @@ def partition_cpus(reserved_cores: int = 0,
         return [], []
     if reserved_cores < 0:
         raise ValueError("reserved_cores must be >= 0")
+    # An `isolcpus=` boot line is the administrator having already drawn this
+    # exact split: those cores are for the workload, the rest run the OS and
+    # the interrupts (usually with a matching `irqaffinity=`).  Honour it in
+    # preference to the topology policy, which knows about SMT but not about
+    # which cores were set aside.
+    #
+    # Note what this does NOT fix: the scheduler does not balance among
+    # isolated CPUs, so handing a multi-threaded benchmark this set confines
+    # it to one of them unless it pins its own threads.  Choosing how many of
+    # these CPUs to give a particular benchmark is the caller's decision.
+    housekeeping: List[List[int]] = []
+    isolated = set(isolated_cpus())
+    if isolated:
+        iso_groups = [g for g in groups if any(c in isolated for c in g)]
+        other_groups = [g for g in groups if not any(c in isolated for c in g)]
+        if iso_groups and other_groups:
+            groups, housekeeping = iso_groups, other_groups
+        elif iso_groups:
+            logging.warning(
+                "every core is isolated (%s); ignoring the isolation split, "
+                "as it would leave the OS and the observers nowhere to run",
+                format_cpu_list(sorted(isolated)))
     off_node: List[List[int]] = []
     if one_node:
         groups, off_node = split_groups_by_node(groups)
@@ -423,11 +507,15 @@ def partition_cpus(reserved_cores: int = 0,
     # on a 2-socket Xeon before this: every one of the benchmark's 10 cores
     # had its sibling in the observer set, which is precisely the interference
     # the physical-core split exists to avoid.
-    if not off_node:
+    if not off_node and not housekeeping:
         observers += [c for g in bench_groups for c in g[1:]]
     observers += [c for g in observer_groups for c in g]
     # Whole nodes the benchmark gave up go to the observers.
     observers += [c for g in off_node for c in g]
+    # Non-isolated cores are where the OS already is, so the observers belong
+    # there too.  They are also strictly better than the benchmark's own SMT
+    # siblings, which is why the donation above is skipped when we have them.
+    observers += [c for g in housekeeping for c in g]
     return sorted(bench), sorted(observers)
 
 

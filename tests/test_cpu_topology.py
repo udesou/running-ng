@@ -52,6 +52,23 @@ FREEBSD_NO_SMT = """<groups>
 """
 
 
+@pytest.fixture(autouse=True)
+def _no_kernel_cpu_lists(request, monkeypatch):
+    """Describe a machine where the kernel has isolated nothing.
+
+    Both of these read the *running* machine's sysfs, so without stubbing them
+    the host's own `isolcpus=` line would reach into every test that drives
+    partition_cpus with a fake topology.  The tests that are about isolation
+    override this fixture.  Empty online list means "no information", which is
+    how sibling_groups reads it.
+    """
+    if request.node.get_closest_marker("host") or \
+            request.node.get_closest_marker("cpu_lists"):
+        return
+    monkeypatch.setattr(osinfo, "isolated_cpus", lambda: [])
+    monkeypatch.setattr(osinfo, "online_cpus", lambda: [])
+
+
 @pytest.fixture
 def as_freebsd(monkeypatch):
     monkeypatch.setattr(osinfo, "IS_LINUX", False)
@@ -201,13 +218,18 @@ def test_pin_command_empty_for_empty_cpu_set():
 
 # --- this host -----------------------------------------------------------------
 
+@pytest.mark.host
 @pytest.mark.skipif(not osinfo.IS_LINUX, reason="sysfs topology is Linux-only")
 def test_linux_topology_is_self_consistent():
     groups = osinfo.sibling_groups()
     assert groups
     flat = [c for g in groups for c in g]
     assert len(flat) == len(set(flat)), "a CPU appears in two sibling groups"
-    assert len(flat) == osinfo.core_count()
+    # Offline CPUs are left out, so this is the online count -- which is also
+    # what os.cpu_count() reports.  A box with SMT disabled at boot has half
+    # its CPUs offline and would fail an assertion against `present`.
+    online = osinfo.online_cpus()
+    assert len(flat) == (len(online) if online else osinfo.core_count())
 
 
 # --- CpuPin modifier -----------------------------------------------------------
@@ -680,3 +702,113 @@ def test_single_node_machine_leaves_nothing_idle(monkeypatch):
     for kwargs in ({}, {"one_node": True}):
         bench, observers = osinfo.partition_cpus(**kwargs)
         assert set(bench) | set(observers) == set(range(32))
+
+
+# --- isolated CPUs (Linux isolcpus=) --------------------------------------------
+
+@pytest.fixture
+def obelisk(monkeypatch):
+    """An 8-core Xeon booted `nosmt isolcpus=4,6,8,10,12,14 irqaffinity=0,2`.
+
+    SMT off takes the odd CPUs offline, so sibling_groups sees eight
+    single-thread cores, six of which the administrator set aside.
+    """
+    monkeypatch.setattr(osinfo, "sibling_groups",
+                        lambda: [[c] for c in (0, 2, 4, 6, 8, 10, 12, 14)])
+    monkeypatch.setattr(osinfo, "isolated_cpus",
+                        lambda: [4, 6, 8, 10, 12, 14])
+    monkeypatch.setattr(osinfo, "IS_LINUX", True)
+    monkeypatch.setattr(osinfo, "IS_FREEBSD", False)
+
+
+def test_isolated_cores_go_to_the_benchmark(obelisk):
+    bench, observers = osinfo.partition_cpus()
+    assert bench == [4, 6, 8, 10, 12, 14]
+    assert observers == [0, 2]
+
+
+def test_isolation_split_survives_the_modifier(obelisk):
+    m = CpuPin(name="pin_bench", type="CpuPin")
+    assert m.val == ["taskset", "-c", "4,6,8,10,12,14"]
+    assert m.observer_cpus == [0, 2]
+
+
+def test_no_isolation_falls_back_to_the_topology_policy(monkeypatch):
+    # Same machine, no isolcpus: every core is the benchmark's, as before.
+    monkeypatch.setattr(osinfo, "sibling_groups",
+                        lambda: [[c] for c in (0, 2, 4, 6, 8, 10, 12, 14)])
+    monkeypatch.setattr(osinfo, "isolated_cpus", lambda: [])
+    bench, observers = osinfo.partition_cpus()
+    assert bench == [0, 2, 4, 6, 8, 10, 12, 14]
+    assert observers == []
+
+
+def test_every_core_isolated_is_ignored(monkeypatch):
+    # Leaving the OS and the observers nowhere to run is worse than ignoring
+    # the split, so the topology policy applies and a warning is logged.
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: [[0], [1], [2], [3]])
+    monkeypatch.setattr(osinfo, "isolated_cpus", lambda: [0, 1, 2, 3])
+    bench, observers = osinfo.partition_cpus()
+    assert bench == [0, 1, 2, 3]
+    assert observers == []
+
+
+def test_isolation_does_not_hand_observers_the_benchmarks_siblings(monkeypatch):
+    # SMT on, isolcpus naming both threads of four cores. The housekeeping
+    # cores are strictly better for the observers than the benchmark's own
+    # siblings, which share execution resources with it.
+    monkeypatch.setattr(osinfo, "sibling_groups",
+                        lambda: [[i, i + 8] for i in range(8)])
+    monkeypatch.setattr(osinfo, "isolated_cpus",
+                        lambda: [4, 5, 6, 7, 12, 13, 14, 15])
+    bench, observers = osinfo.partition_cpus()
+    assert bench == [4, 5, 6, 7]
+    assert not ({c + 8 for c in bench} & set(observers)), "sibling given away"
+    assert observers == [0, 1, 2, 3, 8, 9, 10, 11]
+
+
+def test_reserved_cores_applies_within_the_isolated_set(obelisk):
+    bench, observers = osinfo.partition_cpus(reserved_cores=2)
+    assert bench == [4, 6, 8, 10]
+    assert set(observers) == {0, 2, 12, 14}
+
+
+# --- offline CPUs ---------------------------------------------------------------
+
+@pytest.mark.cpu_lists
+def test_offline_cpus_are_not_phantom_cores(monkeypatch, tmp_path):
+    # An offline CPU has no readable thread_siblings_list, and the fallback
+    # for that turned each one into its own single-thread "core".  A box with
+    # SMT disabled at boot then reported twice the cores it has, and the
+    # benchmark could be pinned to a CPU that will never run it.
+    base = tmp_path / "cpu"
+    for c in range(4):
+        d = base / "cpu{}".format(c) / "topology"
+        d.mkdir(parents=True)
+        if c % 2 == 0:  # only the even CPUs are online
+            (d / "thread_siblings_list").write_text("{}\n".format(c))
+    (base / "online").write_text("0,2\n")
+    monkeypatch.setattr(osinfo, "SYSFS_CPU_BASE", str(base))
+    monkeypatch.setattr(osinfo, "IS_LINUX", True)
+    monkeypatch.setattr(osinfo, "SYSTEM", "Linux")
+    assert osinfo.online_cpus() == [0, 2]
+    assert osinfo._linux_sibling_groups() == [[0], [2]]
+
+
+@pytest.mark.cpu_lists
+def test_isolated_cpus_read_from_sysfs(monkeypatch, tmp_path):
+    base = tmp_path / "cpu"
+    base.mkdir(parents=True)
+    (base / "isolated").write_text("4,6,8-10\n")
+    monkeypatch.setattr(osinfo, "SYSFS_CPU_BASE", str(base))
+    monkeypatch.setattr(osinfo, "SYSTEM", "Linux")
+    assert osinfo.isolated_cpus() == [4, 6, 8, 9, 10]
+
+
+@pytest.mark.cpu_lists
+def test_missing_kernel_cpu_lists_are_empty(monkeypatch, tmp_path):
+    # A kernel without these files, which callers read as "no information".
+    monkeypatch.setattr(osinfo, "SYSFS_CPU_BASE", str(tmp_path / "absent"))
+    monkeypatch.setattr(osinfo, "SYSTEM", "Linux")
+    assert osinfo.isolated_cpus() == []
+    assert osinfo.online_cpus() == []
