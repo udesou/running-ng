@@ -29,15 +29,13 @@
 # Canonical full-suite config-string template:
 #
 #   configs:
-#     - "<runtime>|perf_grp1|pin_bench|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+#     - "<runtime>|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
 #
-# Include `pin_bench` in every macro config.  It confines each single-threaded
-# benchmark to one core of the set reserved for benchmark work, and puts olly
-# and the counter tool on the cores that are not.  Without it the benchmark
-# inherits the process default mask, which on a machine using `isolcpus=` is
-# the housekeeping cores -- the ones also taking every interrupt.  Leaving it
-# out does not fail, it just measures a noisier machine, so a sweep meant to be
-# compared with another must make the same choice.
+# CPU pinning is NOT in that list: `pin_bench` is applied to every config
+# automatically via `default_modifiers:` below, because a sweep that silently
+# ran unpinned is not comparable with one that did not, and per-config spelling
+# makes forgetting it the easy mistake.  Exempt a benchmark with the modifier's
+# `excludes`, not by leaving it out of a config string.
 #
 # Note: `re_par` and `md_par` REQUIRE explicit values (`-22`, `-8`). The bare
 # tokens `re_par|md_par` render to the literal string `e={0}` / `d={0}` and
@@ -58,6 +56,11 @@
 # `macro-lavyek-monorepo` below). running-ng silently accepts the field today;
 # it's a documented contract for config authors and a future validation hook.
 # =============================================================================
+
+# Modifiers applied to every config in every run, before the config string's
+# own.  Naming one explicitly is not an error and does not apply it twice.
+default_modifiers:
+  - pin_bench
 
 invocations: 3
 remote_host: null

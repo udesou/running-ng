@@ -207,6 +207,16 @@ class Benchmark(object):
                 # Same effect as a Wrapper, but its command is derived from
                 # this machine's topology rather than written in the config.
                 # Empty where the OS cannot pin, which contributes nothing.
+                if b.cpu_pin is not None and m.val:
+                    # Two taskset prefixes nest, and the inner one silently
+                    # wins, so the benchmark runs on a set nobody chose.  The
+                    # usual cause is naming a second CpuPin in a config string
+                    # when one already arrives via default_modifiers; scope
+                    # them apart with `excludes` instead.
+                    logging.warning(
+                        "%s: CpuPin %s applies on top of %s; the innermost "
+                        "pin wins. Scope them apart with excludes.",
+                        self.name, m.name, b.cpu_pin.name)
                 b.wrapper.extend(m.val)
                 b.cpu_pin = m
             elif type(m) == Companion:

@@ -54,7 +54,38 @@ def parse_modifier_strs(configuration: 'Configuration', mod_strs: List[str]) -> 
 def parse_config_str(configuration: 'Configuration', c: str) -> Tuple['Runtime', List['Modifier']]:
     runtime = configuration.get("runtimes")[c.split('|')[0].strip()]
     mods = parse_modifier_strs(configuration, c.split('|')[1:])
-    return runtime, mods
+    return runtime, default_modifiers(configuration, mods) + mods
+
+
+def default_modifiers(configuration: 'Configuration',
+                      named: List['Modifier']) -> List['Modifier']:
+    """Modifiers applied to every config, from the `default_modifiers:` key.
+
+    For policy that should hold for a whole run rather than be remembered in
+    each config string -- CPU pinning above all.  A sweep that silently ran
+    unpinned is not comparable with one that did not, and spelling it out per
+    config makes forgetting it the easy mistake.  Scope it per benchmark with
+    the modifier's own `excludes`, the way pin_bench exempts the multi-domain
+    benchmarks, rather than by leaving it out here.
+
+    Applied before the config string's own modifiers, so those can layer on
+    top.  Naming one explicitly is not an error and does not apply it twice.
+    """
+    wanted = configuration.get("default_modifiers")
+    if not wanted:
+        return []
+    available = configuration.get("modifiers")
+    already = {m.name for m in named}
+    out: List['Modifier'] = []
+    for name in wanted:
+        if name in already:
+            continue
+        if name not in available:
+            raise KeyError(
+                "default_modifiers names {}, which is not in modifiers"
+                .format(name))
+        out.append(available[name])
+    return out
 
 
 def config_str_encode(c: str) -> str:
