@@ -31,10 +31,17 @@
 #   configs:
 #     - "<runtime>|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
 #
+# CPU pinning is NOT in that list: `pin_bench` is applied to every config
+# automatically via `default_modifiers:` below, because a sweep that silently
+# ran unpinned is not comparable with one that did not, and per-config spelling
+# makes forgetting it the easy mistake.  Exempt a benchmark with the modifier's
+# `excludes`, not by leaving it out of a config string.
+#
 # Note: `re_par` and `md_par` REQUIRE explicit values (`-22`, `-8`). The bare
 # tokens `re_par|md_par` render to the literal string `e={0}` / `d={0}` and
-# break OCAMLRUNPARAM at runtime. `pin_lavyek` takes no value (Wrapper-type
-# modifier with a fixed `taskset -c 0-15` payload).
+# break OCAMLRUNPARAM at runtime. `pin_lavyek` takes no value: it is a CpuPin
+# modifier, which derives its CPU list from the running machine and emits
+# `taskset -c` on Linux or `cpuset -l` on FreeBSD.
 #
 # Reason: `re`/`md` are scoped to non-lavyek programs via `excludes`, and `re_par`/
 # `md_par`/`pin_lavyek` are scoped to lavyek-only. Omitting the parallel triple
@@ -49,6 +56,12 @@
 # `macro-lavyek-monorepo` below). running-ng silently accepts the field today;
 # it's a documented contract for config authors and a future validation hook.
 # =============================================================================
+
+# Modifiers applied to every config in every run, before the config string's
+# own.  Naming one explicitly is not an error and does not apply it twice.
+default_modifiers:
+  - pin_bench
+  - pin_bench_mc
 
 invocations: 3
 remote_host: null
@@ -941,9 +954,12 @@ suites:
   # → pthread_setaffinity_np), keyed off id_domain.  This is what
   # makes the 1d/2d/4d/8d wall times comparable run-to-run — without
   # it the kernel migrates domains within whatever mask was inherited.
-  # The pin_lavyek modifier wraps the process in `taskset -c 0-15` to
-  # also fence the few helper threads (first iou-wrk + Eio setup) that
-  # spawn before pinning runs.  See benchmarks/lavyek/lavyek_bench.ml.
+  # The pin_lavyek modifier confines the process to one hardware thread
+  # per physical core to also fence the few helper threads (first
+  # iou-wrk + Eio setup) that spawn before pinning runs.  The CPU list is
+  # derived per machine, not hardcoded, and the command is `taskset -c`
+  # on Linux and `cpuset -l` on FreeBSD, which has no taskset at all.
+  # See benchmarks/lavyek/lavyek_bench.ml.
   #
   # Requires md=8 and a smaller per-domain ring (re=22).  Wired via
   # the re_par / md_par modifiers — see the modifiers section below.
@@ -1077,15 +1093,100 @@ modifiers:
   # inherit the process default mask (every logical CPU); this wrapper
   # confines them to the same physical-core set the workers use.
   #
-  # Assumption: cores 0-15 are physical (smt=0).  This holds on the
-  # AMD Ryzen 9 9950X box where the suite is calibrated; on Intel
-  # SMT-enabled hardware where logical CPUs alternate physical/sibling,
-  # adjust the mask per-machine in the experiment file.  Lavyek-only
-  # via the shared anchor; sequential macros stay unmasked.
+  # CpuPin derives the CPU list from the running machine instead of
+  # hardcoding it.  The policy is unchanged (one hardware thread per
+  # physical core), and on the AMD Ryzen 9 9950X box this suite is
+  # calibrated on it still resolves on Linux to exactly the
+  # "taskset -c 0-15" that used to be written out by hand, so
+  # existing lavyek numbers stay comparable.  It is now also correct on
+  # a box with a different core count, on Intel parts where logical CPUs
+  # alternate physical/sibling, and on FreeBSD (cpuset -l, and a
+  # different sibling enumeration for the same policy).
+  #
+  # `val` is the number of whole physical cores handed to olly and the
+  # counter tool instead of the benchmark.  0 keeps the historical
+  # behaviour: the benchmark gets every physical core.  What does change
+  # at 0 is that olly and the counter tool are now confined to the SMT
+  # siblings rather than floating across every CPU, so they can no
+  # longer preempt a worker.  Raise it to give the observers whole cores
+  # of their own, but only between sweeps: it takes cores away from the
+  # benchmark and so changes what is being measured.
+  #
+  # Lavyek-only via the shared anchor; sequential macros stay unmasked.
+  # `one_node` confines the benchmark to one NUMA node and hands the others
+  # to olly and the counter tool.  Exactly a no-op on a single-socket box
+  # (monolith), so it changes nothing here; on a 2-socket box it keeps the
+  # benchmark's memory traffic off the interconnect, which for GC work is a
+  # large source of run-to-run variance, and gives the observers a whole
+  # socket instead of the benchmark's own SMT siblings.
   pin_lavyek:
-    type: Wrapper
-    val: "taskset -c 0-15"
+    type: CpuPin
+    val: "0"
+    one_node: true
     excludes: *non_lavyek_excludes
+  # Pin a single-threaded benchmark to one core of the set reserved for
+  # benchmark work.  Where the machine isolates cores (Linux `isolcpus=`, with
+  # a matching `irqaffinity=` putting the interrupts elsewhere) that is the
+  # isolated set, and the observers go to the housekeeping cores; otherwise it
+  # is the topology policy CpuPin already applied.  Either way the CPU numbers
+  # come from the running machine, so this is correct on a different core
+  # count, on FreeBSD, and on ARM.
+  #
+  # Why one core and not the whole set: a single-threaded benchmark only ever
+  # uses one, and naming it makes the placement identical across runs.  On an
+  # 8-core Xeon booted `nosmt isolcpus=4,6,8,10,12,14 irqaffinity=0,2`,
+  # sedlex_tokenize_default over six alternating runs:
+  #
+  #     unpinned (housekeeping cores 0,2)   51.46s mean, 25.84s spread
+  #     pinned to one isolated core         46.47s mean,  0.33s spread
+  #
+  # The unpinned runs sat at ~46.5s four times and then hit 50.19s and 72.29s:
+  # the noise is occasional and large, not gaussian, which is the shape most
+  # likely to read as a regression in a single cell.
+  #
+  # NOT applied to multi-domain benchmarks.  The scheduler does not balance
+  # among isolated CPUs, so an unpinned multi-domain benchmark handed that set
+  # puts every domain on one of them: infer measured 168% CPU on the two
+  # housekeeping cores and 100% on the six isolated ones, 72% slower.  lavyek
+  # is exempt because it pins its own domains (pin_lavyek gives it the set);
+  # infer is exempt until it does the same.
+  pin_bench:
+    type: CpuPin
+    bench_cores: "1"
+    excludes: &unpinnable_excludes
+      macro-lavyek-monorepo:
+        - lavyek_kv_1d
+        - lavyek_kv_2d
+        - lavyek_kv_4d
+        - lavyek_kv_8d
+      macro-infer-monorepo:
+        - infer_small
+        - infer_default
+        - infer_large
+  # The multi-domain counterpart of pin_bench: the whole benchmark core set
+  # rather than one core of it.  Scoped with `includes` because it belongs to a
+  # named handful of benchmarks; the same thing said as an exclude list would
+  # mean naming every other benchmark and keeping that list current (see
+  # non_lavyek_excludes, which is 19 suites and 29 programs and already stale).
+  #
+  # ONLY for a benchmark that places its own domains.  The scheduler does not
+  # balance among isolated CPUs, so handing this set to one that does not pin
+  # confines every domain to a single CPU -- infer measured 100% CPU that way
+  # against 168% on two shared cores.  infer pins its domains from the
+  # inherited mask (macro-benches scripts/vendor-infer.sh patches
+  # DomainPool.child), which is what makes this set usable: 5.5-5.8 cores of 6
+  # through its analysis phase.
+  #
+  # lavyek is NOT here: it pins its own domains too, but from the machine
+  # topology rather than the inherited mask, so it takes its cores through
+  # pin_lavyek and ignores whatever mask it is given.
+  pin_bench_mc:
+    type: CpuPin
+    includes:
+      macro-infer-monorepo:
+        - infer_small
+        - infer_default
+        - infer_large
   perf_grp1:
     type: PerfAndOllyAttach
     val: "task-clock,page-faults,cycles,instructions"
@@ -1095,6 +1196,116 @@ modifiers:
   perf_grp3:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,cache-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses"
+  # --- FreeBSD event groups (hwpmc via pmcstat) ---
+  #
+  # The groups above cannot allocate on FreeBSD: of their event names only
+  # `instructions` resolves as a PMC. `task-clock`, `page-faults`, `cycles`,
+  # `branch-misses` and `cache-misses` do not. And pmcstat is all-or-nothing:
+  # one unresolvable name makes it exit 71 and write nothing, so the whole
+  # group yields no counters rather than a partial set. Hence separate groups
+  # rather than per-OS substitution inside the modifier: the config string is
+  # the provenance for a set of numbers, so it should say which events ran.
+  #
+  # Verified as complete groups (not merely event by event) on a Xeon E5-2640
+  # v4 (Broadwell-EP) under FreeBSD 15.1, against a real GC-heavy OCaml
+  # workload: 2/2, 4/4 and 6/6 counters non-zero respectively.
+  #
+  # Hard ceiling: 7 events, being 3 fixed-function plus 4 programmable. Four,
+  # not eight, because SMT is enabled. An 8th event fails `Invalid argument`.
+  # `instructions` and `unhalted-cycles` land on fixed-function counters, so
+  # grp3's four dotted events fill every programmable slot: it is AT the
+  # ceiling. The only event addable to grp3 is the remaining fixed-function
+  # counter, `cpu_clk_unhalted.ref_tsc`; anything else needs a grp4.
+  #
+  # Unlike perf, hwpmc never multiplexes. Over-subscribe and it hard-fails
+  # instead of time-slicing and scaling, so a FreeBSD count is always an
+  # unscaled true count. Both platforms' groups fit within the programmable
+  # counters SMT leaves, so neither is scaling today, but a future addition
+  # will be refused here where Linux would quietly start estimating.
+  #
+  # These are counting PMCs, not sampling ones: `pmcstat -p` allocates a
+  # process-mode counting PMC, and the harness passes none of the sampling
+  # flags (-P/-S/-n/-D/-g). `-C` makes the running total cumulative and `-w`
+  # only sets how often it is printed, so the final row is the exact total
+  # rather than an extrapolation. (This is also why `inst_retired.prec_dist`
+  # is not used even though it resolves: its purpose is PEBS sampling.)
+  #
+  # `page-faults` IS available, as the soft PMC PAGE_FAULT.ALL (see grp1).
+  # `task-clock` is not, and is dropped rather than substituted: CLOCK.STAT is
+  # the nearest soft event but counts stat-clock ticks at ~127 Hz, so it would
+  # be a coarse estimate wearing the name of a Linux exact one, and olly's
+  # `cpu_time` already covers what task-clock was wanted for. So a FreeBSD run
+  # is missing the `task_clock` contract metric and nothing else. The
+  # per-invocation record still carries user_time, system_time, minor_faults,
+  # major_faults and context-switch counts from getrusage, but rusage is not a
+  # contract source, so those do not appear as contract metrics.
+  #
+  # Alias spellings are deliberate: `instructions` and `unhalted-cycles`
+  # rather than `inst_retired.any` / `cpu_clk_unhalted.thread`, though all
+  # four resolve. PmcStatBackend.EVENT_ALIASES canonicalises
+  # `unhalted-cycles` to `cycles`, so the recorded names come out as
+  # `instructions` / `cycles`, identical to Linux perf's, keeping the two
+  # platforms in one result schema. Only these two reach the contract
+  # vocabulary on either platform; every dotted event below is archival in
+  # the raw sidecar, exactly as Linux's stalled-cycles-* and *-misses are.
+  #
+  # Group 1: baseline IPC plus page faults. Direct equivalent of perf_grp1
+  # apart from task-clock.
+  #
+  # PAGE_FAULT.ALL is a SOFT PMC (pmc.soft(3)), not a hardware one. hwpmc
+  # defines page_fault all/read/write in sys/amd64/amd64/trap.c and fires them
+  # from the page-fault handler; hwpmc_soft.c increments a readable counter
+  # whenever the allocated PMC is not in sampling mode, which is our case.
+  # Soft PMCs live in their own class with their own 16 rows, so this costs NO
+  # programmable hardware counter. It is aliased onto perf's `page-faults`, so
+  # it reaches the `page_faults` contract metric with no vocabulary change.
+  #
+  # PAGE_FAULT.READ and PAGE_FAULT.WRITE also exist and have no Linux
+  # equivalent. Worth a look for GC work, since write faults are where
+  # copy-on-write and first-touch of freshly-mapped major-heap pages show up.
+  #
+  # Verified on a Xeon E5-2640 v4 under FreeBSD 15.1: allocates alongside
+  # hardware PMCs in one group, and read 60,636 against rusage's 62,357,
+  # within 2.8%. READ and WRITE sum exactly to ALL (20 + 60,616), and on GC
+  # workloads write faults are ~99.97% of the total, which is the first-touch
+  # signature of a growing major heap.
+  perf_grp1_freebsd:
+    type: PerfAndOllyAttach
+    val: "instructions,unhalted-cycles,PAGE_FAULT.ALL"
+  # Group 2: pipeline stalls. APPROXIMATIONS, not equivalents: perf's
+  # stalled-cycles-frontend/backend are derived events with specific umasks,
+  # so these numbers are NOT comparable with Linux's. Directionally useful
+  # within FreeBSD.
+  perf_grp2_freebsd:
+    type: PerfAndOllyAttach
+    val: "instructions,unhalted-cycles,idq_uops_not_delivered.core,resource_stalls.any"
+  # Group 3: cache and TLB hierarchy.
+  #
+  #   cache-misses     -> longest_lat_cache.miss
+  #       Linux's cache-misses is PERF_COUNT_HW_CACHE_MISSES, all-request LLC
+  #       misses (loads, stores and prefetches), which is exactly this event.
+  #   LLC-load-misses  -> mem_load_uops_retired.l3_miss
+  #       Closest available, but it counts RETIRED LOAD UOPS where Linux
+  #       counts requests, so speculative loads that never retire and
+  #       prefetches are excluded. NOT numerically comparable with a Linux
+  #       figure. The measured split corroborates the shape: 12.27M load
+  #       misses within 77.61M total LLC misses on an allocation-heavy run.
+  #   dTLB/iTLB-load-misses -> *.walk_completed
+  #       Completed page walks, the conventional perf mapping. Alternatives if
+  #       a different flavour is ever wanted: *.miss_causes_a_walk (walks
+  #       started), *.walk_duration, *.stlb_hit, page_walker_loads.itlb_l*.
+  #
+  # DO NOT add `llc-misses`: it is the SAME counter as longest_lat_cache.miss
+  # (measured 77,610,381 against 77,610,362 in one run, and 48,445,804
+  # against 48,445,767 in another). Adding both would burn one of only four
+  # programmable slots on a duplicate.
+  #
+  # `instructions` here is a deliberate addition that Linux's grp3 lacks. It
+  # costs no programmable slot, being fixed-function, and makes
+  # per-instruction normalisation possible.
+  perf_grp3_freebsd:
+    type: PerfAndOllyAttach
+    val: "instructions,unhalted-cycles,longest_lat_cache.miss,mem_load_uops_retired.l3_miss,dtlb_load_misses.walk_completed,itlb_misses.walk_completed"
   # memtrace: unlike perf/olly, this requires the traced binary to call
   # Memtrace.trace_if_requested () at startup — macro-benches only patches
   # this in for test_decompress today (see macro-benches commit adding

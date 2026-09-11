@@ -1,0 +1,57 @@
+# =============================================================================
+# Smoke test — macro benchmarks, FreeBSD
+# =============================================================================
+# The FreeBSD counterpart of smoke_macro.yml. Two quick sequential benchmarks
+# under OCaml 5.4.1, one invocation each, to check the macro path works at all
+# on FreeBSD before attempting the wider tier-1 run.
+#
+# Differs from smoke_macro.yml in two ways, both necessary:
+#
+#   * perf_grp1_freebsd, not perf_grp1. Of the latter's events only
+#     `instructions` resolves on FreeBSD, and pmcstat allocates
+#     all-or-nothing, so perf_grp1 would yield no counters at all.
+#   * No lavyek, so no re_par/md_par/pin_lavyek. lavyek is in a private repo
+#     and disabled in the base config for everyone, so the parallel path
+#     cannot be smoke-tested here. That also means this config does NOT
+#     exercise CpuPin; pinning is verified separately.
+#
+# The two benchmarks are chosen to need no system library beyond what OCaml
+# itself needs: cpdf and sedlex are pure OCaml against the vendored tree.
+#
+# Prerequisites: ~/macro-benches built via `make setup`. That needed
+# BSD-portable vendoring scripts, which is a separate change in the
+# macro-benches repo (scripts/lib-portable.sh).
+#
+# Usage. `bash`, not `sh`: the wrapper is #!/usr/bin/env bash. PYTHON matters
+# because running-ng is usually in a virtualenv on FreeBSD.
+#
+#   cd ~/running-ng
+#   PYTHON=/path/to/venv/bin/python \
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/examples/smoke_macro_freebsd.yml \
+#   LOG_DIR=/tmp/smoke_macro_freebsd \
+#   RUNNING_REUSE_SWITCHES=1 \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-cpdf-monorepo:
+      - cpdf_merge
+    macro-sedlex:
+      - sedlex_tokenize
+    macro-lavyek-monorepo: []
+
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+
+# Sequential macros carry no re/md: each suite declares its own
+# runtime_events ring via `ocamlrunparam:` in macro_base.yml.
+configs:
+  - "ocaml-5.4.1|perf_grp1_freebsd"

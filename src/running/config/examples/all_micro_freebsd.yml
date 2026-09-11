@@ -1,0 +1,83 @@
+# =============================================================================
+# All micro benchmarks, once each — FreeBSD coverage run
+# =============================================================================
+# Purpose is COVERAGE, not measurement: build and run every micro benchmark
+# once, to find which ones fail to build or run on FreeBSD. One invocation
+# each, so the numbers are not worth comparing; do not read them as results.
+#
+# Prior FreeBSD coverage was the `simple` suite only (39/39 built). The suites
+# below are untested there, and the interesting ones are `with-deps` and
+# `with-packages`: they pull opam packages, so they surface a different
+# failure class from the GNU/BSD divergence checked so far. gmp is installed
+# on rosemary, so zarith should build.
+#
+# 196 benchmarks across 13 suites, so this is long. Expect build failures
+# rather than run failures, and expect them to cluster by suite.
+#
+# perf_grp1_freebsd, not perf_grp1: of the latter's events only `instructions`
+# resolves on FreeBSD, and pmcstat allocates all-or-nothing, so perf_grp1
+# would yield no counters at all.
+#
+# `re-25|md-2` matches what every established micro config uses
+# (config/experiments/micro_5.5.0*.yml). Without it four GC-event-dense
+# benchmarks overflow the default runtime_events ring and olly marks its own
+# output `stats_reliable: false`: the globroots trio, which force majors
+# explicitly, and pidigits5 at ~13.7k major collections. `md-2` is safe across
+# the multicore suites because those benchmarks declare their own `d=` and a
+# per-benchmark ocamlrunparam wins over the modifier.
+#
+# No CpuPin. Pinning is verified separately and confining a coverage run to
+# one NUMA node would only make it slower; add `|pin_bench` to the config
+# string if you want it exercised here too.
+#
+# oxcaml-prefetch is excluded: it needs a `type: OxCaml` runtime and would
+# otherwise fail its build check on every run as pure noise. Exercising OxCaml
+# provisioning on FreeBSD is worthwhile but deserves its own config, not a
+# side effect of a coverage run.
+#
+# Usage. `bash`, not `sh`: the wrapper is #!/usr/bin/env bash. PYTHON matters
+# because running-ng is usually in a virtualenv.
+#
+#   cd ~/running-ng
+#   PYTHON=/path/to/venv/bin/python \
+#   RUNNING_BENCH_DIR=~/benches \
+#   CONFIG_FILE=src/running/config/examples/all_micro_freebsd.yml \
+#   LOG_DIR=/tmp/all_micro_freebsd \
+#   RUNNING_REUSE_SWITCHES=1 \
+#     bash run_ocaml_bench_gc_sweep.sh
+#
+# RUNNING_REUSE_SWITCHES=1 is worth setting here: without it, constructing the
+# runtime WIPES and rebuilds running-ng-ocaml-5.4.1, costing a ~7 minute
+# compile before any benchmark runs.
+# =============================================================================
+
+includes:
+  - "../base/ocaml/micro_base.yml"
+
+# Coverage, not measurement: one invocation is enough to answer "does it build
+# and run at all", which is the whole question here.
+invocations: 1
+remote_host: null
+compress_logs: false
+minheap_multiplier: 1.0
+heap_range: 6
+spread_factor: 1
+
+# A top-level `benchmarks:` dict UPDATES the base's, key by key, so naming one
+# suite with an empty list disables just that suite and leaves every other one
+# tracking micro_base. (`overrides:` would replace the whole block, which would
+# mean listing all 195 remaining entries and going stale the moment micro_base
+# gains a benchmark.)
+benchmarks:
+  # Needs a `type: OxCaml` runtime, so under an OCaml runtime it fails its
+  # build check every run. The harness rejects it correctly and carries on,
+  # but for a coverage config that is pure noise.
+  oxcaml-prefetch: []
+
+runtimes:
+  ocaml-5.4.1:
+    type: OCaml
+    version: "5.4.1"
+
+configs:
+  - "ocaml-5.4.1|perf_grp1_freebsd|re-25|md-2"

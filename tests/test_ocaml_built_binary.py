@@ -1,9 +1,20 @@
 from pathlib import Path
 
+import pytest
+
 from running.benchmark import OCamlBuiltBinaryBenchmark
 from running.runtime import OCaml
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "Tests an `existing_binary` / `existing_program_args` feature that has "
+    "never existed in this repo: `git log -S existing_binary` over "
+    "src/running/benchmark.py finds nothing on any branch, and "
+    "OCamlBuiltBinaryBenchmark.__init__ swallows both into **kwargs, so "
+    "prepare() falls through to a build and fails on the absent build script. "
+    "Kept rather than deleted because what it describes (use a prebuilt "
+    "binary, never resolve the runtime's executable) is a reasonable thing to "
+    "want. strict=True so it flags itself the day someone implements it."))
 def test_ocaml_built_binary_uses_existing_binary_without_runtime_resolution(tmp_path):
     bench_dir = tmp_path / "infer"
     bench_dir.mkdir()
@@ -15,7 +26,15 @@ def test_ocaml_built_binary_uses_existing_binary_without_runtime_resolution(tmp_
         def get_executable(self) -> Path:
             raise AssertionError("Runtime executable must not be resolved")
 
-    runtime = NoRuntimeResolutionOCaml(name="ocaml-v5.3", version="5.3.0")
+    # Passing `executable` puts OCaml.__init__ in legacy mode, so it does not
+    # provision an opam switch. It does that eagerly for a version-pinned
+    # runtime, which is the intended contract but not what these tests are
+    # about. `version` is still recorded, and is what get_cache_key reads.
+    placeholder = tmp_path / "unused-ocaml"
+    placeholder.write_text("#!/usr/bin/env bash\nexit 0\n")
+    placeholder.chmod(0o755)
+    runtime = NoRuntimeResolutionOCaml(
+        name="ocaml-v5.3", version="5.3.0", executable=str(placeholder))
     bm = OCamlBuiltBinaryBenchmark(
         benchmark_name="infer",
         benchmark_dir=bench_dir,
@@ -102,7 +121,15 @@ def test_ocaml_built_binary_can_skip_runtime_executable_resolution(tmp_path):
         def get_executable(self) -> Path:
             raise AssertionError("Runtime executable must not be resolved")
 
-    runtime = NoRuntimeResolutionOCaml(name="ocaml-v5.3", version="5.3.0")
+    # Passing `executable` puts OCaml.__init__ in legacy mode, so it does not
+    # provision an opam switch. It does that eagerly for a version-pinned
+    # runtime, which is the intended contract but not what these tests are
+    # about. `version` is still recorded, and is what get_cache_key reads.
+    placeholder = tmp_path / "unused-ocaml"
+    placeholder.write_text("#!/usr/bin/env bash\nexit 0\n")
+    placeholder.chmod(0o755)
+    runtime = NoRuntimeResolutionOCaml(
+        name="ocaml-v5.3", version="5.3.0", executable=str(placeholder))
     bm = OCamlBuiltBinaryBenchmark(
         benchmark_name="infer",
         benchmark_dir=bench_dir,

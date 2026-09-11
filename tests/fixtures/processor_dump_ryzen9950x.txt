@@ -1,0 +1,38 @@
+cpu_count: 32
+core_count: 16
+socket_count: 1
+cpus-per-core: 2
+cpus-per-socket: 32
+cores-per-socket: 16
+cpu0: smt=0 core=0 socket=0 kind=P_core
+cpu1: smt=0 core=1 socket=0 kind=P_core
+cpu2: smt=0 core=2 socket=0 kind=P_core
+cpu3: smt=0 core=3 socket=0 kind=P_core
+cpu4: smt=0 core=4 socket=0 kind=P_core
+cpu5: smt=0 core=5 socket=0 kind=P_core
+cpu6: smt=0 core=6 socket=0 kind=P_core
+cpu7: smt=0 core=7 socket=0 kind=P_core
+cpu8: smt=0 core=8 socket=0 kind=P_core
+cpu9: smt=0 core=9 socket=0 kind=P_core
+cpu10: smt=0 core=10 socket=0 kind=P_core
+cpu11: smt=0 core=11 socket=0 kind=P_core
+cpu12: smt=0 core=12 socket=0 kind=P_core
+cpu13: smt=0 core=13 socket=0 kind=P_core
+cpu14: smt=0 core=14 socket=0 kind=P_core
+cpu15: smt=0 core=15 socket=0 kind=P_core
+cpu16: smt=1 core=0 socket=0 kind=P_core
+cpu17: smt=1 core=1 socket=0 kind=P_core
+cpu18: smt=1 core=2 socket=0 kind=P_core
+cpu19: smt=1 core=3 socket=0 kind=P_core
+cpu20: smt=1 core=4 socket=0 kind=P_core
+cpu21: smt=1 core=5 socket=0 kind=P_core
+cpu22: smt=1 core=6 socket=0 kind=P_core
+cpu23: smt=1 core=7 socket=0 kind=P_core
+cpu24: smt=1 core=8 socket=0 kind=P_core
+cpu25: smt=1 core=9 socket=0 kind=P_core
+cpu26: smt=1 core=10 socket=0 kind=P_core
+cpu27: smt=1 core=11 socket=0 kind=P_core
+cpu28: smt=1 core=12 socket=0 kind=P_core
+cpu29: smt=1 core=13 socket=0 kind=P_core
+cpu30: smt=1 core=14 socket=0 kind=P_core
+cpu31: smt=1 core=15 socket=0 kind=P_core

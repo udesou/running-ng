@@ -21,7 +21,7 @@
 #      - dune, ocamlfind (build tools used by most benchmarks)
 #      - domainslib (multicore benchmarks)
 #      - zarith, lwt, decompress, yojson, etc. (with_packages benchmarks)
-#      - hdr_histogram, trace, trace-fuchsia, cmdliner (for olly)
+#      (olly's own dependencies go in a separate switch; see below)
 #   5. Builds runtime_events_tools (olly) from source
 #   6. Installs Python dependencies (pyyaml)
 #   7. Clones the benches repo if not present
@@ -35,7 +35,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCHES_DIR="${BENCHES_DIR:-$(cd "$ROOT_DIR/.." && pwd)/benches}"
 OLLY_DIR="${OLLY_DIR:-$HOME/runtime_events_tools}"
-OPAM_SWITCH="5.4.0"
+# Named, not "5.4.0": a switch named after a compiler version is
+# indistinguishable from a plain `opam switch create 5.4.0`, and this
+# name is the one running.switches and the FreeBSD installer declare.
+OPAM_SWITCH="${OPAM_SWITCH:-running-ng-tools}"
+OCAML_VERSION="${OCAML_VERSION:-5.4.0}"
+# olly needs cmdliner >= 2.0.0; opam-compiler in the switch above
+# pins it < 2.0.0, so olly gets a switch of its own.
+OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
 
 # Minimum opam version required (the ~/.opam directory format requires >= 2.2).
 OPAM_MIN_VERSION="2.2.0"
@@ -183,21 +190,17 @@ ok "opam ready"
 # benchmarks) are built separately by running-ng from source.  This switch
 # provides the *build tools* and libraries the benchmark build scripts need.
 
-step "Ensuring opam switch $OPAM_SWITCH"
+step "Provisioning running-ng's opam switches"
+# Delegated to running.switches, the single declaration of what running-ng
+# needs: a tools switch (dune, ocamlfind, opam-compiler, plus the plugin link)
+# and a SEPARATE olly switch, because olly needs cmdliner >= 2.0 while every
+# published opam-compiler pins < 2.0. Duplicating that declaration here is how
+# this script and the sweep wrapper drifted apart.
+OPAM_BIN="$OPAM_BIN" OLLY_DIR="$OLLY_DIR" \
+    PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches ensure \
+        --compiler "$OCAML_VERSION"
 
-if ! "$OPAM_BIN" switch list --short 2>/dev/null | grep -qx "$OPAM_SWITCH"; then
-    echo "  Creating switch $OPAM_SWITCH (this will take a few minutes)..."
-    "$OPAM_BIN" switch create "$OPAM_SWITCH" "ocaml-base-compiler.$OPAM_SWITCH" --yes
-else
-    ok "Switch $OPAM_SWITCH already exists"
-fi
-
-eval "$("$OPAM_BIN" env --switch="$OPAM_SWITCH" --set-switch)"
-
-# =============================================================================
-# 4. opam packages
-# =============================================================================
-step "Installing OCaml packages in switch $OPAM_SWITCH"
+step "Pre-installing benchmark packages in $OPAM_SWITCH"
 
 # Essential build tools (many benchmark build scripts expect these on PATH).
 BUILD_TOOLS=(
@@ -206,15 +209,20 @@ BUILD_TOOLS=(
     opam-compiler           # `opam compiler create` provisions every runtime
                             # switch (runtime.py); without it a run dies with
                             # `unknown command 'compiler'`
+    processor               # ocaml-processor-dump: P-core/E-core and socket
+                            # topology, used to narrow the CPU set that CpuPin
+                            # pins to, and recorded in the run manifest.
+                            # Optional: without it running-ng falls back to the
+                            # kernel's own topology view.
 )
 
-# Packages needed to build olly (runtime_events_tools).
-OLLY_PKGS=(
-    cmdliner                # CLI framework
-    hdr_histogram           # GC stats histograms
-    trace                   # tracing library
-    trace-fuchsia           # fuchsia trace format
-)
+# olly's dependencies are deliberately NOT installed here. olly and
+# opam-compiler cannot share a switch: every published opam-compiler pins
+# cmdliner < 2.0.0 while olly needs >= 2.0.0, and opam's only way to satisfy
+# both is to remove opam-compiler. running-ng needs it for `opam compiler
+# create`, so a run would then die on `unknown command 'compiler'`.
+# olly gets its own switch below, with its dependencies resolved from its own
+# opam file rather than from a list here that goes stale whenever olly changes.
 
 # Benchmark-specific opam packages.
 # The build scripts in ~/benches auto-install their own opam deps at build time
@@ -232,12 +240,37 @@ BENCH_PKGS=(
     str                     # benchmarksgame (fasta, spectralnorm)
 )
 
-ALL_PKGS=("${BUILD_TOOLS[@]}" "${OLLY_PKGS[@]}" "${BENCH_PKGS[@]}")
+# BUILD_TOOLS are provisioned above by running.switches; only the
+# benchmark pre-warm is left here, which is an optimisation rather
+# than a requirement (build scripts install their own deps).
+ALL_PKGS=("${BENCH_PKGS[@]}")
 
 echo "  Installing: ${ALL_PKGS[*]}"
 "$OPAM_BIN" install --switch="$OPAM_SWITCH" --yes "${ALL_PKGS[@]}"
 
 ok "OCaml packages installed"
+
+# =============================================================================
+# opam compiler plugin
+# =============================================================================
+step "Verifying the opam compiler plugin"
+# running.switches registers the link when it provisions the tools switch;
+# this only checks that it resolves, which is a different job and the one that
+# catches a half-provisioned opam root. Without a working plugin,
+# `opam compiler create` (runtime.py) prompts to install it and, with no tty,
+# dies with "unknown command 'compiler'", blocking every sweep.
+#
+# No --switch: the invalid source is rejected during opam-compiler's own
+# argument parsing, so nothing can be created even in principle, while a
+# missing plugin still produces opam's "unknown command".
+if "$OPAM_BIN" compiler create "invalid/source#nope" </dev/null 2>&1 \
+        | grep -q "unknown command"; then
+    red "ERROR: the opam 'compiler' plugin does not resolve, so runtime"
+    red "switches cannot be provisioned and no sweep can run."
+    red "Try: PYTHONPATH=$ROOT_DIR/src python3 -m running.switches status"
+    exit 1
+fi
+ok "opam compiler plugin resolves"
 
 # =============================================================================
 # 5. Build runtime_events_tools (olly)
@@ -251,8 +284,21 @@ fi
 
 pushd "$OLLY_DIR" >/dev/null
 
-eval "$("$OPAM_BIN" env --switch="$OPAM_SWITCH" --set-switch)"
-dune build -p runtime_events_tools -j "$(nproc)" @install 2>&1 | tail -5
+# The switch and olly's dependencies were provisioned above by
+# running.switches, which resolves them --deps-only from olly's own opam file.
+# Only the build itself is left here.
+
+# No --set-switch: this only needs to affect the build below, not
+# change the user's global switch, which an early exit would leave set.
+eval "$("$OPAM_BIN" env --switch="$OLLY_SWITCH")"
+# Not piped to `tail`, which would report tail's exit status rather than dune's.
+BUILD_LOG="${TMPDIR:-/tmp}/running-ng-olly-build.log"
+if ! dune build -p runtime_events_tools -j "$(nproc)" @install > "$BUILD_LOG" 2>&1; then
+    red "ERROR: the olly build failed. Last 30 lines of $BUILD_LOG:"
+    tail -30 "$BUILD_LOG"
+    popd >/dev/null
+    exit 1
+fi
 
 OLLY_EXE="$OLLY_DIR/_build/install/default/bin/olly"
 if [[ -x "$OLLY_EXE" ]]; then

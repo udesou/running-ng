@@ -1,0 +1,532 @@
+"""Hardware counter backends.
+
+running-ng attaches a counter tool to a benchmark process that is held blocked
+until the tool is running.  Which tool that is depends on the OS:
+
+  * ``linux-perf``   -- ``perf stat --json --inherit -p PID``
+  * ``freebsd-pmc``  -- ``pmcstat -C -d -t PID -p EVENT``
+  * ``none``         -- no counters; olly and rusage still run
+
+All three attach to a PID we already own, so the harness keeps the benchmark as
+its own direct child: its exit status stays meaningful (crash detection), its
+stderr stays separate, and a timeout can still kill it.  A launcher-style tool
+(macOS mperf, ``pmc stat``) would take that ownership away, which is why
+neither is used here.
+
+Backends normalise to one record shape, ``{"event": str, "counter-value":
+float}``, matching what ``contract.emit.perf_metrics`` already consumes.  That
+is not an attempt to imitate perf: it is the minimal (name, value) pair, and
+reusing it means a new backend needs no contract change for events the
+vocabulary already knows.  Raw tool spellings are mapped onto the canonical
+name by each backend's ``EVENT_ALIASES``.
+"""
+import logging
+import os
+import re
+import select
+import subprocess
+import time
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from running import osinfo
+
+#: Env var forcing a specific backend, mostly for testing a degraded path on a
+#: host that could run a richer one.  Accepts any registered backend name.
+BACKEND_ENV_VAR = "RUNNING_NG_COUNTER_BACKEND"
+
+
+class CounterHandle:
+    """A running counter tool attached to one benchmark process."""
+
+    def __init__(self, proc: subprocess.Popen, output_path: str,
+                 ctl_fds: Sequence[Optional[int]] = ()):
+        self.proc = proc
+        self.output_path = output_path
+        self.ctl_fds = tuple(ctl_fds)
+        #: Set by stop() when the tool had to be killed rather than exiting on
+        #: its own.  Backends whose output is only complete at exit must treat
+        #: that as no result at all; see PmcStatBackend.collect.
+        self.killed = False
+        #: Cleared by wait_ready when the tool could not be confirmed to be
+        #: counting before the benchmark was released.  Whatever it then
+        #: reports covers an unknown part of the run.
+        self.ready = True
+
+
+class CounterBackend:
+    """No counters.  Also the base class, and the documented degraded mode.
+
+    A platform with no usable counter tool is a first-class configuration:
+    olly still gives GC metrics and rusage still gives CPU time and faults,
+    which is most of what a GC sweep actually reads.
+    """
+
+    name = "none"
+    #: Raw tool event name -> canonical name used by the contract vocabulary.
+    EVENT_ALIASES: Dict[str, str] = {}
+
+    def available(self) -> bool:
+        return True
+
+    def attach(self, pid: int, tmpdir: str, events: Sequence[str],
+               tag: str = "main",
+               pin_prefix: Sequence[str] = ()) -> Optional[CounterHandle]:
+        return None
+
+    def wait_ready(self, handle: Optional[CounterHandle],
+                   timeout: float = 5.0) -> bool:
+        """Block until the tool is actually counting, before the benchmark runs.
+
+        Nothing to wait for by default: perf arms itself through its --control
+        handshake inside attach(), and the `none` backend has nothing to arm.
+        """
+        return True
+
+    def stop(self, handle: Optional[CounterHandle], timeout: float = 10.0) -> None:
+        """Release the tool.  Both real backends exit on their own when the
+        target does, so this only bounds the wait and cleans up control fds."""
+        if handle is None:
+            return
+        for fd in handle.ctl_fds:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        try:
+            handle.proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            logging.warning(
+                "counter tool did not exit within %ss of the benchmark; killing it. "
+                "Its output may be incomplete.", timeout)
+            handle.killed = True
+            handle.proc.kill()
+            handle.proc.wait()
+
+    def kill(self, handle: Optional[CounterHandle]) -> None:
+        """Tear down without collecting, for a re-attach to a different PID."""
+        if handle is None:
+            return
+        handle.proc.kill()
+        handle.proc.wait()
+        for fd in handle.ctl_fds:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    def collect(self, handle: Optional[CounterHandle]) -> List[Dict]:
+        return []
+
+    def _canonical(self, raw: str) -> str:
+        return self.EVENT_ALIASES.get(raw, raw)
+
+
+# --- Linux: perf ---------------------------------------------------------------
+
+# Seconds to wait for `perf stat --control` to acknowledge `enable`.
+PERF_ARM_TIMEOUT = 10.0
+
+def _start_perf_armed(perf_cmd: List[str], tmpdir: str, tag: str,
+                      skip: int = 0) -> Tuple[subprocess.Popen, Optional[int], Optional[int]]:
+    """Start `perf stat` and return only once its counters are armed.
+
+    `Popen` returning means perf was forked, not that it has called
+    perf_event_open.  Releasing the benchmark at that point is a race: if perf
+    finishes its own startup after the target has spawned threads, those
+    threads are counted by nobody — they were absent from perf's thread map and
+    `inherit` only follows tasks created after the event exists.  The symptom is
+    a whole-process measurement that reports one thread's worth of task-clock
+    (owl_gc: 10.5s instead of 322s, and 90k page faults instead of 197k), which
+    silently under-reports every counter for any threaded benchmark.
+
+    So start perf with events disabled (`--delay -1`) and drive its control
+    protocol: write `enable` and block until perf answers `ack`.  Only then may
+    the caller let the benchmark run.  Both fifos are opened O_RDWR here so
+    neither side blocks on the other's open(), as in perf-stat(1)'s own example.
+
+    Returns (process, ctl_fd, ack_fd); the fds are the caller's to close.  If
+    the handshake fails (perf too old for --control, perf died on a bad event
+    list), perf is restarted without it and (process, None, None) is returned —
+    degraded to the old racy behaviour rather than failing the run.
+    """
+    ctl_path = os.path.join(tmpdir, "perf_ctl_{}.fifo".format(tag))
+    ack_path = os.path.join(tmpdir, "perf_ack_{}.fifo".format(tag))
+    ctl_fd = ack_fd = None
+    try:
+        os.mkfifo(ctl_path)
+        os.mkfifo(ack_path)
+        # O_RDWR on a fifo never blocks, and holding both ends keeps perf's own
+        # open() from blocking whichever order it opens them in.
+        ctl_fd = os.open(ctl_path, os.O_RDWR)
+        ack_fd = os.open(ack_path, os.O_RDWR)
+        # Options go after the `stat` subcommand, so splice at index 2 --
+        # past any pin prefix (`taskset -c ...`) prepended by the caller.
+        armed_cmd = perf_cmd[:skip + 2] + ["--delay", "-1",
+                                    "--control", "fifo:{},{}".format(ctl_path, ack_path)] + perf_cmd[skip + 2:]
+        p = subprocess.Popen(armed_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        os.write(ctl_fd, b"enable\n")
+        # perf answers "ack\n" once the events are enabled.  Bound the wait: a
+        # perf that never acks must not hang the whole run.
+        deadline = time.time() + PERF_ARM_TIMEOUT
+        buf = b""
+        while time.time() < deadline:
+            if p.poll() is not None:
+                raise RuntimeError("perf exited with {} before acking".format(p.returncode))
+            r, _, _ = select.select([ack_fd], [], [], 0.05)
+            if r:
+                buf += os.read(ack_fd, 64)
+                if b"ack" in buf:
+                    return p, ctl_fd, ack_fd
+        raise RuntimeError("perf did not ack within {}s".format(PERF_ARM_TIMEOUT))
+    except (OSError, RuntimeError) as e:
+        logging.warning(
+            "perf --control handshake failed (%s); falling back to an unsynchronised "
+            "attach. Counters for threaded benchmarks may under-report.", e)
+        for fd in (ctl_fd, ack_fd):
+            if fd is not None:
+                os.close(fd)
+        try:
+            p.kill()
+            p.wait()
+        except (NameError, UnboundLocalError, OSError):
+            pass
+        return subprocess.Popen(perf_cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT), None, None
+
+
+class PerfBackend(CounterBackend):
+    name = "linux-perf"
+
+    def available(self) -> bool:
+        return osinfo.IS_LINUX and _tool_on_path("perf")
+
+    def attach(self, pid: int, tmpdir: str, events: Sequence[str],
+               tag: str = "main",
+               pin_prefix: Sequence[str] = ()) -> Optional[CounterHandle]:
+        output = os.path.join(tmpdir, "perf.json")
+        cmd = ["perf", "stat", "--json", "--inherit", "-p", str(pid), "-o", output]
+        if events:
+            cmd.extend(["-e", ",".join(events)])
+        # _start_perf_armed splices its own options in after the subcommand, so
+        # it needs to know how many leading tokens are the pin prefix.
+        proc, ctl_fd, ack_fd = _start_perf_armed(
+            list(pin_prefix) + cmd, tmpdir, tag, skip=len(pin_prefix))
+        return CounterHandle(proc, output, (ctl_fd, ack_fd))
+
+    def collect(self, handle: Optional[CounterHandle]) -> List[Dict]:
+        if handle is None:
+            return []
+        try:
+            with open(handle.output_path, "r") as f:
+                return parse_perf_ndjson(f.read())
+        except FileNotFoundError:
+            logging.warning("perf output file %s not found", handle.output_path)
+            return []
+
+
+def parse_perf_ndjson(text: str) -> List[Dict]:
+    """`perf stat --json` emits one JSON object per counter, not one document."""
+    import json
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
+    return out
+
+
+# --- FreeBSD: pmcstat ----------------------------------------------------------
+
+#: Matches one column label in a pmcstat header: "p/instructions" for a
+#: process-scope PMC, "s/03/instructions" for a system-scope one on cpu 3.
+_PMCSTAT_COLUMN = re.compile(r"^[ps]/(?:\d+/)?(?P<name>.+)$")
+
+
+def parse_pmcstat_table(text: str) -> Dict[str, int]:
+    """Return the final cumulative counter values from pmcstat's output.
+
+    pmcstat prints a `# p/<event>` header followed by right-aligned columns,
+    one row per `-w` interval plus a final row written when the target exits,
+    with the header reprinted every 256 rows.
+
+    Only that final row is trustworthy.  The intermediate rows look like a
+    time series but are not one: hwpmc saves a process-scope counter when the
+    target is switched out, so `pmc_read` against a running process returns
+    whatever was last saved.  On a spinning benchmark that means the same
+    stale value repeats for the whole run and then jumps to the true total at
+    exit.  Measured on FreeBSD 15.1, a 6 s workload reported 8,077,883,251
+    five times in a row and 37,037,553,393 at the end.
+
+    So taking the last complete row is not merely convenient, it is the only
+    safe reading, and a run whose final row is missing has no usable counters
+    at all rather than an approximate answer.  See PmcStatBackend.collect.
+
+    Returns {} when there is no usable row, which is what a failed PMC
+    allocation looks like from here.
+    """
+    names: List[str] = []
+    last: Dict[str, int] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            parsed = []
+            for token in stripped.lstrip("#").split():
+                m = _PMCSTAT_COLUMN.match(token)
+                if m:
+                    parsed.append(m.group("name"))
+            # A header we cannot parse must not be silently paired with the
+            # rows beneath it: that would mislabel every counter.
+            names = parsed if parsed else []
+            continue
+        if not names:
+            continue
+        tokens = stripped.split()
+        if len(tokens) != len(names):
+            continue
+        try:
+            values = [int(t) for t in tokens]
+        except ValueError:
+            continue
+        last = dict(zip(names, values))
+    return last
+
+
+def split_event_list(events: Sequence[str]) -> List[str]:
+    """Flatten an event list into one name per element.
+
+    Configs write events the way perf takes them, as a single comma-separated
+    string ("task-clock,cycles,instructions"), and the modifier splits only on
+    whitespace, so one element can hold several events.  perf does not care
+    because we join with commas again; pmcstat needs a separate -p per event,
+    so it has to be flattened first.
+    """
+    out: List[str] = []
+    for chunk in events:
+        for name in str(chunk).split(","):
+            name = name.strip()
+            if name:
+                out.append(name)
+    return out
+
+
+class PmcStatBackend(CounterBackend):
+    """FreeBSD hwpmc(4) via pmcstat(8).
+
+    Needs no privileges: hwpmc requires root only for system-scope PMCs, while
+    process-scope ones just need p_candebug(9) on the target (same uid, with
+    security.bsd.unprivileged_proc_debug at its default of 1).  It does need
+    the module loaded: `kldload hwpmc`, or hwpmc_load="YES" in loader.conf.
+
+    Event names are partly portable, and the failures are not where reading
+    libpmc's static alias table (lib/libpmc.c around 1560-1610) suggests.
+    Modern libpmc also resolves through the pmu-events tables, so on FreeBSD
+    15.1 / Broadwell "instructions" and "unhalted-cycles" both resolve and
+    count correctly.  Coverage is incomplete though, and the gaps are exactly
+    the spellings a config carried over from Linux reaches for first:
+    "cycles", "task-clock", "branch-misses" and "cache-misses" do NOT resolve,
+    while "unhalted-cycles" does.  So a name is never silently substituted: a
+    bad event list makes pmcstat exit immediately, which is reported loudly
+    and costs the invocation its counters rather than failing the sweep.
+
+    `pmc list-events` lists what this CPU actually supports.  Naming
+    instructions and cycles by their fixed-function events
+    ("inst_retired.any", "cpu_clk_unhalted.thread") leaves all the
+    programmable counters free for other events.
+    """
+
+    name = "freebsd-pmc"
+
+    #: pmcstat spellings that mean the same thing as a perf event we already
+    #: map in the contract vocabulary.  Extend as real hardware is tested.
+    EVENT_ALIASES = {
+        "unhalted-cycles": "cycles",
+        "tsc": "cycles",
+        # A soft PMC (pmc.soft(3)), not a hardware one: hwpmc defines
+        # page_fault all/read/write in sys/amd64/amd64/trap.c and fires them
+        # from the page-fault handler. Aliased onto perf's spelling so it maps
+        # through PERF_EVENT_MAP to the `page_faults` contract metric with no
+        # vocabulary change.
+        "PAGE_FAULT.ALL": "page-faults",
+    }
+
+    #: Print interval.  Does not affect the result: the final row is written
+    #: when the target exits whatever `-w` says, and the intermediate rows are
+    #: stale (see parse_pmcstat_table), so nothing is gained or lost by tuning
+    #: this.  Kept short only so a stalled run shows signs of life in the
+    #: output file.
+    INTERVAL_SECONDS = 1.0
+
+    #: Verified to resolve and count on FreeBSD 15.1 / Xeon E5-2640 v4.  Never
+    #: silently substituted elsewhere: a wrong event is worse than a missing
+    #: one, so let pmcstat reject an unknown name and say so.
+    DEFAULT_EVENTS = ("instructions", "unhalted-cycles")
+
+    def available(self) -> bool:
+        return osinfo.IS_FREEBSD and _tool_on_path("pmcstat")
+
+    def attach(self, pid: int, tmpdir: str, events: Sequence[str],
+               tag: str = "main",
+               pin_prefix: Sequence[str] = ()) -> Optional[CounterHandle]:
+        output = os.path.join(tmpdir, "pmcstat_{}.txt".format(tag))
+        chosen = split_event_list(events) or list(self.DEFAULT_EVENTS)
+        # -C (cumulative) and -d (count descendants, the --inherit equivalent)
+        # are toggles that must precede the -p they apply to.
+        cmd = list(pin_prefix) + ["pmcstat", "-C", "-d",
+                                  "-w", str(self.INTERVAL_SECONDS), "-o", output]
+        for ev in chosen:
+            cmd.extend(["-p", ev])
+        cmd.extend(["-t", str(pid)])
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE)
+        return CounterHandle(proc, output)
+
+    def wait_ready(self, handle: Optional[CounterHandle],
+                   timeout: float = 5.0) -> bool:
+        """Wait until pmcstat has written its header, meaning it is counting.
+
+        pmcstat emits the header only after allocating the PMC and attaching to
+        the target, so the header appearing is a real readiness signal, and the
+        direct analogue of perf's --control handshake.  Popen returning tells
+        us only that fork+exec happened, which on this path is several steps
+        too early: pmcstat has still to exec through `cpuset`, open its log,
+        allocate the PMC and issue PMC_OP_PMCATTACH.
+
+        Without this the benchmark is released into that gap.  Measured on a
+        20-core Broadwell running the real harness, roughly half of all
+        invocations recorded zero, and one that did report a number reported
+        6.13e9 against a true 9.7e9 -- so the race under-counts as well as
+        zeroing, which is the more dangerous half.
+        """
+        if handle is None:
+            return True
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if handle.proc.poll() is not None:
+                # pmcstat died on its own; collect() reports its stderr, which
+                # says more than a readiness failure would.
+                return False
+            try:
+                with open(handle.output_path, "r") as f:
+                    if f.read(1) == "#":
+                        return True
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.01)
+        handle.ready = False
+        logging.warning(
+            "pmcstat did not start counting within %.1fs; releasing the "
+            "benchmark anyway, but this invocation's counters will be "
+            "discarded as untrustworthy", timeout)
+        return False
+
+    def collect(self, handle: Optional[CounterHandle]) -> List[Dict]:
+        if handle is None:
+            return []
+        if handle.killed:
+            # Refusing the result rather than parsing it. pmcstat's totals are
+            # only correct in the row it writes at exit; every earlier row is a
+            # stale mid-run snapshot (see parse_pmcstat_table). A killed
+            # pmcstat therefore leaves a last-complete-row that is wrong by an
+            # arbitrary factor -- 8.07e9 against a true 37.0e9 in one measured
+            # case -- and entirely plausible-looking, with nothing downstream
+            # able to tell. Losing the counters for one invocation is recoverable;
+            # silently publishing a number that is wrong by 4.6x is not.
+            logging.warning(
+                "pmcstat was killed before it could write its final row, so its "
+                "totals for this invocation are a stale mid-run snapshot. "
+                "Discarding them; this invocation has no counter data.")
+            return []
+        if handle.proc.returncode not in (0, None):
+            stderr = b""
+            try:
+                stderr = handle.proc.stderr.read() if handle.proc.stderr else b""
+            except (OSError, ValueError):
+                pass
+            logging.warning(
+                "pmcstat exited %s; no counters for this invocation. Check the "
+                "event names against `pmc list-events` (not every portable alias "
+                "resolves: `cycles` does not, `unhalted-cycles` does) and that "
+                "hwpmc is loaded. stderr: %s",
+                handle.proc.returncode,
+                stderr.decode("utf-8", "replace").strip()[:400])
+            return []
+        if not handle.ready:
+            # We released the benchmark without confirming pmcstat was
+            # counting, so whatever it reports covers an unknown part of the
+            # run. Same reasoning as the killed case: a plausible-looking
+            # under-count is worse than a gap.
+            logging.warning(
+                "pmcstat was never confirmed to be counting for this "
+                "invocation; discarding its totals rather than publishing a "
+                "partial count.")
+            return []
+        try:
+            with open(handle.output_path, "r") as f:
+                table = parse_pmcstat_table(f.read())
+        except FileNotFoundError:
+            logging.warning("pmcstat output file %s not found", handle.output_path)
+            return []
+        if table and not any(table.values()):
+            # A benchmark cannot execute zero instructions. All-zero means the
+            # PMC never counted (see wait_ready), which is missing data rather
+            # than a measurement of zero, and pmcstat exits 0 in this case so
+            # neither the returncode nor the killed guard catches it.
+            #
+            # In principle a group of only rare events could read all-zero
+            # legitimately. In practice every group carries instructions or
+            # cycles, so this is safe; if that ever stops being true, this is
+            # the check to revisit.
+            logging.warning(
+                "pmcstat reported zero for every counter in %s; treating as no "
+                "data rather than publishing zeros", handle.output_path)
+            return []
+        if not table:
+            logging.warning(
+                "pmcstat produced no complete counter row in %s; the benchmark "
+                "may have finished inside the first %.1fs interval",
+                handle.output_path, self.INTERVAL_SECONDS)
+        return [{"event": self._canonical(name), "counter-value": float(value)}
+                for name, value in table.items()]
+
+
+# --- selection -----------------------------------------------------------------
+
+def _tool_on_path(name: str) -> bool:
+    import shutil
+    return shutil.which(name) is not None
+
+
+_BACKENDS = (PerfBackend, PmcStatBackend, CounterBackend)
+
+
+def select_backend() -> CounterBackend:
+    """The richest backend this host can actually run.
+
+    Falls back to `none` rather than raising: a host without a counter tool
+    should still produce olly and rusage data, not fail its sweep.
+    """
+    forced = os.environ.get(BACKEND_ENV_VAR, "").strip()
+    if forced:
+        for cls in _BACKENDS:
+            if cls.name == forced:
+                backend = cls()
+                if not backend.available():
+                    logging.warning(
+                        "%s forced to %r, which reports itself unavailable on this "
+                        "host; using it anyway", BACKEND_ENV_VAR, forced)
+                return backend
+        raise ValueError("Unknown {}={!r}; known backends: {}".format(
+            BACKEND_ENV_VAR, forced, ", ".join(c.name for c in _BACKENDS)))
+    for cls in _BACKENDS:
+        backend = cls()
+        if backend.available():
+            return backend
+    return CounterBackend()

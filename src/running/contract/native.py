@@ -15,26 +15,35 @@ import shutil
 import socket
 import subprocess
 from pathlib import Path
+from typing import Any, Dict
 
+from running import osinfo
 from running.contract import emit, vocab
 
 
 def _machine():
-    m = {"hostname": socket.gethostname()}
+    # Annotated: the values are a mix of str and int, and an unannotated literal
+    # would be inferred as dict[str, str].
+    m = {"hostname": socket.gethostname()}  # type: Dict[str, Any]
     try:
         m["kernel"] = os.uname().release
     except Exception:
         pass
-    c = os.cpu_count()
+    c = osinfo.core_count()
     if c:
         m["cores"] = c
-    try:
-        for line in open("/proc/cpuinfo"):
-            if line.startswith("model name"):
-                m["cpu_model"] = line.split(":", 1)[1].strip()
-                break
-    except Exception:
-        pass
+    # Via osinfo so the manifest carries a CPU model on macOS and FreeBSD too;
+    # the /proc/cpuinfo read this used to do inline left the field absent there.
+    model = osinfo.cpu_model()
+    if model:
+        m["cpu_model"] = model
+    # Topology provenance: physical cores and threads/core from the kernel,
+    # sockets and P/E core counts from ocaml-processor-dump when installed.
+    # Two results from the same cpu_model are not comparable if one ran on a
+    # hybrid part's E-cores or spanned sockets, and nothing else in the
+    # manifest would show it. Recorded even on macOS, where we can describe
+    # the machine but cannot pin on it.
+    m.update(osinfo.machine_topology_summary())
     return m
 
 

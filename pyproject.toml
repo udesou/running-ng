@@ -57,3 +57,9 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 running = ["config/**/*.yml"]
+
+[tool.pytest.ini_options]
+markers = [
+    "host: reads the running machine's real topology instead of a fixture",
+    "cpu_lists: drives the kernel CPU-list readers, so they are not stubbed",
+]
