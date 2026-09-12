@@ -677,15 +677,21 @@ suites:
         # wall_time.
         # See ~/macro-benches/README.md §"Iteration counts".
         args: "6"
+      # Rung walls below are from the Ryzen 9 9950X calibration box.  owl is far
+      # slower on obelisk than that ratio suggests and not by a constant factor:
+      # measured there, owl_gc_default takes 122.6s against ~11s here (11x) and
+      # owl_gc_large 2874.5s against ~124s (23x).  Size a timeout from a
+      # measurement on the machine you are running on, not by scaling these.
+      # owl_gc_small and owl_gc_huge have not been measured on obelisk.
       owl_gc_small:      # dim 300: ~4s, 95MB off-heap live set
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
         args: "1 300"
-      owl_gc_default:    # dim 500: ~11s, 230MB
+      owl_gc_default:    # dim 500: ~11s, 230MB   (obelisk: 122.6s)
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
         args: "1 500"
-      owl_gc_large:      # dim 1500: ~124s, 1.9GB
+      owl_gc_large:      # dim 1500: ~124s, 1.9GB (obelisk: 2874.5s, 1.88GB max RSS)
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
         args: "1 1500"
@@ -1473,7 +1479,7 @@ benchmarks:
     - owl_gc
     - owl_gc_small
     - owl_gc_default
-    - owl_gc_large
+    - {name: owl_gc_large, bm_name: owl_gc_large, timeout: 7200}   # measured 2875s on obelisk (stock 5.5.0, one core)
     - owl_gc_huge
 
   macro-ocamlc-self-compile:
