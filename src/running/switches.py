@@ -235,6 +235,29 @@ def build_commands(name: str, compiler: str = DEFAULT_COMPILER) -> List[List[str
     return cmds
 
 
+def _ensure_cmake_depext_bypass(opam: str) -> None:
+    """Stop opam prompting for a system ``cmake`` when a usable cmake is already
+    on PATH but invisible to opam's package-manager depext check.
+
+    olly's ``hdr_histogram`` dependency declares ``conf-cmake``, whose depext is
+    the distro ``cmake`` package. On a no-sudo box cmake is often installed
+    user-local (e.g. ``~/.local/bin/cmake``), which dpkg/pkg cannot see, so opam
+    stops to ask whether to install it — which hangs a headless sweep. When
+    cmake is on PATH we tell opam it is satisfied. Global, so it survives the
+    switch rebuilds this module does, and covers every caller (the sweep wrapper
+    and all install_deps_*.sh delegate here). Guarded on cmake actually being
+    present, so a genuine absence (e.g. FreeBSD without ``pkg install cmake``) is
+    still reported rather than masked. Idempotent."""
+    if not shutil.which("cmake"):
+        return
+    current = _run([opam, "option", "--global", "depext-bypass"], check=False)
+    if '"cmake"' in current:
+        return
+    logging.info("registering cmake as an already-satisfied opam depext "
+                 "(usable cmake on PATH, invisible to the package-manager check)")
+    _run([opam, "option", "--global", 'depext-bypass+=["cmake"]'], check=False)
+
+
 def ensure(name: str, compiler: str = DEFAULT_COMPILER,
            dry_run: bool = False) -> str:
     """Make `name` exist and match its declaration. Returns the action taken.
@@ -275,6 +298,10 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
         cwd = None
         spec = SWITCHES[name]
         if spec["source"]:
+            # olly's hdr_histogram dep needs cmake; keep opam's depext check
+            # from hanging on a user-local cmake it cannot see. See the helper.
+            if not dry_run:
+                _ensure_cmake_depext_bypass(opam)
             cwd = os.environ.get(spec["source"]) or os.path.expanduser(
                 "~/runtime_events_tools")
         for cmd in build_commands(name, compiler):
