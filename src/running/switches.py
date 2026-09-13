@@ -164,12 +164,42 @@ def _package_versions(opam: str, switch: str, packages: List[str]) -> Dict[str, 
     return versions
 
 
-def _source_sha(spec: Dict) -> Optional[str]:
-    """git SHA of the checkout a switch is built from, if it has one."""
+def source_dir(spec: Dict) -> Optional[str]:
+    """The checkout a switch is built from, or None if it has no source.
+
+    Resolved in ONE place because the two callers must agree: _source_sha
+    decides whether a rebuild is due, ensure() builds there, and a machine
+    where they disagree rebuilds the switch on every alternate run.
+
+    That is not hypothetical. The sweep wrapper resolves OLLY_DIR itself and
+    used not to export it, so this module fell back to ~/runtime_events_tools
+    -- a SECOND checkout, at a different revision. A manual sweep then observed
+    one SHA and the bench agent (which does pass OLLY_DIR) observed the other,
+    so each run tore down and recompiled the olly switch the other had just
+    built. The fallback is kept for a machine with a single checkout in the
+    default location, but it is now announced rather than silent, because a
+    silent one is indistinguishable from the thrash it causes.
+    """
     env_var = spec.get("source")
     if not env_var:
         return None
-    path = os.environ.get(env_var) or os.path.expanduser("~/runtime_events_tools")
+    path = os.environ.get(env_var)
+    if path:
+        return path
+    fallback = os.path.expanduser("~/runtime_events_tools")
+    logging.warning(
+        "$%s is not set; falling back to %s. If that is not the checkout you "
+        "build from, set %s -- otherwise this switch is keyed on the wrong "
+        "revision and will be rebuilt on every other run.",
+        env_var, fallback, env_var)
+    return fallback
+
+
+def _source_sha(spec: Dict) -> Optional[str]:
+    """git SHA of the checkout a switch is built from, if it has one."""
+    path = source_dir(spec)
+    if path is None:
+        return None
     try:
         return _run(["git", "-C", path, "rev-parse", "HEAD"])
     except RuntimeError:
@@ -194,16 +224,52 @@ def observe(opam: str, name: str) -> Optional[Dict]:
     return identity
 
 
+def missing_packages(opam: str, name: str) -> List[str]:
+    """Declared packages of `name` that are not installed in it.
+
+    Asked of opam directly rather than inferred from the recorded identity,
+    because the recorded identity is exactly what cannot be trusted here: it
+    says what was there when we last looked, not what we declared.
+    """
+    declared = SWITCHES[name].get("packages") or []
+    if not declared:
+        # olly's switch declares none: its dependencies come --deps-only from
+        # the project's own opam file, so there is no list to check against.
+        return []
+    installed = _package_versions(opam, name, declared)
+    return [p for p in declared if not installed.get(p)]
+
+
 def plan(opam: str, name: str) -> str:
-    """One of 'create', 'rebuild', 'ok'."""
+    """One of 'create', 'rebuild', 'repair', 'adopt' or 'ok'."""
     observed = observe(opam, name)
     if observed is None:
         return "create"
     recorded = load_state().get("switches", {}).get(name, {}).get("identity")
+
+    # Ask opam what the switch actually contains, not just whether it still
+    # matches what we recorded. Comparing against the recorded identity cannot
+    # answer that: `adopt` records whatever it finds, damage included, and from
+    # then on recorded == observed forever, so a switch missing a declared
+    # package reports 'ok' for the rest of its life. Not hypothetical --
+    # obelisk ran for months with opam-compiler evicted from the tools switch
+    # (olly's deps pulled cmdliner >= 2.0 into it), reporting 'ok' every run,
+    # while sweeps worked only because a stale plugin symlink pointed into an
+    # unrelated switch. Nothing louder than a warning was ever printed.
+    missing = missing_packages(opam, name)
+    if missing:
+        # Installing what is missing is the whole fix, so prefer it to a
+        # rebuild -- which costs a compiler -- unless something OTHER than
+        # those packages also drifted. That exception matters: repair re-records
+        # afterwards, so repairing a switch whose ocaml or source_sha had also
+        # moved would quietly adopt that drift as the new baseline.
+        others = [k for k in set(recorded or {}) | set(observed)
+                  if k not in missing and (recorded or {}).get(k) != observed.get(k)]
+        return "rebuild" if (recorded is not None and others) else "repair"
+
     if recorded is None:
-        # The switch exists but we did not build it, or the state was lost.
-        # Adopt it rather than destroying someone's work: record what is there
-        # and move on. A genuine drift is caught on the next run.
+        # The switch exists, we did not build it, and it does have what it
+        # declares. Adopt rather than destroying someone's work.
         return "adopt"
     return "ok" if recorded == observed else "rebuild"
 
@@ -284,12 +350,60 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
             _record(opam, name)
         return "adopt"
 
+    if action == "repair":
+        # Install what is missing rather than rebuilding: the switch is
+        # otherwise fine, and a rebuild costs a compiler. Note this can
+        # DOWNGRADE a package -- putting opam-compiler back pins cmdliner
+        # < 2.0 -- which is correct for this switch and is why olly has its
+        # own. Re-records afterwards, so the baseline is the repaired switch
+        # rather than the damage.
+        missing = missing_packages(opam, name)
+        logging.warning(
+            "opam switch '%s' is missing packages it declares: %s. Installing "
+            "them; this may change the versions of packages that depend on "
+            "them.", name, ", ".join(missing))
+        cmd = [opam, "install", "--switch", name, "--yes"] + missing
+        if dry_run:
+            logging.info("DRY RUN: %s", " ".join(cmd))
+            return "repair"
+        previous = _active_switch(opam)
+        try:
+            subprocess.run(cmd, check=True)
+            _register_plugin(opam, name)
+            _record(opam, name)
+        finally:
+            if previous and _active_switch(opam) != previous:
+                _run([opam, "switch", "set", previous], check=False)
+        return "repair"
+
     previous = _active_switch(opam)
     try:
         if action == "rebuild":
+            # Name the keys that moved. A rebuild costs minutes (it recompiles
+            # a compiler), and the usual cause is source_sha -- two checkouts
+            # at different revisions, with $OLLY_DIR pointing at a different
+            # one than last run. Saying only "no longer matches" left that
+            # looking like routine progress output, so a machine could alternate
+            # between two checkouts and pay for a full rebuild every run
+            # without anything ever saying why.
+            recorded = (load_state().get("switches", {})
+                        .get(name, {}).get("identity") or {})
+            observed = observe(opam, name) or {}
+            changed = ["{}: {} -> {}".format(k, recorded.get(k, "absent"),
+                                             observed.get(k, "absent"))
+                       for k in sorted(set(recorded) | set(observed))
+                       if recorded.get(k) != observed.get(k)]
             logging.warning(
                 "opam switch '%s' no longer matches what it was built from; "
-                "rebuilding it", name)
+                "rebuilding it (%s)", name, "; ".join(changed) or "no visible "
+                "difference")
+            if any(c.startswith("source_sha") for c in changed):
+                logging.warning(
+                    "  the source checkout moved: %s. If you did not intend "
+                    "that, check $%s -- pointing it at a different checkout "
+                    "than the previous run is what makes this rebuild happen "
+                    "on every run.",
+                    source_dir(SWITCHES[name]), SWITCHES[name].get("source"))
             if dry_run:
                 logging.info("DRY RUN: opam switch remove %s --yes", name)
             else:
@@ -302,8 +416,7 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
             # from hanging on a user-local cmake it cannot see. See the helper.
             if not dry_run:
                 _ensure_cmake_depext_bypass(opam)
-            cwd = os.environ.get(spec["source"]) or os.path.expanduser(
-                "~/runtime_events_tools")
+            cwd = source_dir(spec)
         for cmd in build_commands(name, compiler):
             if dry_run:
                 logging.info("DRY RUN: %s%s", " ".join(cmd),

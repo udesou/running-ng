@@ -31,7 +31,20 @@ if ! PYTHONPATH="$PYTHONPATH" "$PYTHON" -c "import yaml, running" >/dev/null 2>&
   exit 1
 fi
 
-OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"
+# Exported, not just assigned: running.switches (below) keys the olly switch on
+# the SHA of this checkout, and resolves it from $OLLY_DIR with its own fallback
+# to ~/runtime_events_tools. Leaving it unexported let the two resolve to
+# DIFFERENT checkouts on a machine that has both -- this script building one
+# while the switch was keyed on the other, so every run rebuilt the switch the
+# previous run had just built.
+export OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"
+# Whether OLLY_BIN was pinned by the caller rather than derived from OLLY_DIR.
+# An explicit OLLY_BIN means "use this olly", so the build below leaves it
+# alone; a derived one is ours to (re)build.
+_OLLY_BIN_EXPLICIT=0
+if [[ -n "${OLLY_BIN:-}" ]]; then
+  _OLLY_BIN_EXPLICIT=1
+fi
 OLLY_BIN="${OLLY_BIN:-$OLLY_DIR/_build/install/default/bin}"
 
 # --- Verify runtime_events_tools is recent enough --------------------------
@@ -52,7 +65,7 @@ if [[ -d "$OLLY_DIR/.git" ]]; then
     echo "  HEAD does not contain $REQUIRED_OLLY_COMMIT" >&2
     echo "  (tarides/runtime_events_tools#85, required for max_rss_kb in --json output)." >&2
     echo "  Update: cd '$OLLY_DIR' && git checkout main && git pull" >&2
-    echo "  Then delete the stale binary: rm -rf '$OLLY_DIR/_build'" >&2
+    echo "  The build below then picks the new revision up on its own." >&2
     exit 1
   fi
 fi
@@ -118,10 +131,74 @@ if [[ ! -x "$_OPAM_PLUGIN_BIN" ]]; then
   exit 1
 fi
 
+# --- Build olly ------------------------------------------------------------
+# Unconditional, NOT guarded on the binary being absent. dune is already an
+# incremental build system, so with nothing to do this is a sub-second no-op,
+# and it is the only formulation that covers all three cases. A presence guard
+# covers the first two and silently skips the third:
+#
+#   no _build at all         first run on a machine, or install_deps_<os>.sh
+#                            was never run here
+#   _build deleted           the bench agent drops it whenever the olly pin
+#                            moves, then relies on this script to rebuild
+#                            (bench_agent.ml, "a pin move must invalidate the
+#                            cached _build")
+#   _build present, stale    a plain `git pull` in $OLLY_DIR, or any caller
+#                            that moves the checkout without deleting _build
+#
+# The third case is the dangerous one: it does not fail the run, it silently
+# measures with an olly built from a different revision than the one this run
+# records. That is worse than a crash, and a presence guard cannot see it.
+#
+# This is also why the build lives here rather than only in install_deps_<os>.sh:
+# nothing else runs between the agent deleting _build and the sweep starting,
+# so a sweep that cannot build olly can only fail. That gap is exactly how a
+# run died after the on-demand build was removed from this script.
+#
+# Built in OLLY_SWITCH, never TOOLS_SWITCH: installing olly's deps into the
+# tools switch evicts opam-compiler, which is the corruption described above.
+# running.switches ensure (above) has already created the switch and resolved
+# olly's dependencies into it, so only the build itself is left here.
+if [[ "$_OLLY_BIN_EXPLICIT" == 1 && -x "$OLLY_BIN/olly" ]]; then
+  # The caller pointed at a specific olly. Ours to use, not ours to rebuild.
+  echo "Using olly from OLLY_BIN: $OLLY_BIN"
+elif [[ ! -d "$OLLY_DIR" ]]; then
+  echo "ERROR: no runtime_events_tools checkout at $OLLY_DIR." >&2
+  echo "  Run install_deps_<os>.sh, which clones it, or set OLLY_DIR to a" >&2
+  echo "  checkout, or OLLY_BIN to an existing build." >&2
+  exit 1
+else
+  echo "Building olly from $OLLY_DIR in switch $OLLY_SWITCH (incremental) ..."
+  # Kept out of the console on success: a from-scratch olly build is hundreds
+  # of lines and this console log is a published run artifact. Not piped to
+  # `tail`, which would report tail's exit status rather than dune's.
+  _OLLY_BUILD_LOG="${TMPDIR:-/tmp}/running-ng-olly-build.log"
+  if ! (
+    cd "$OLLY_DIR"
+    # No --set-switch: this must affect the build and nothing else. The rest
+    # of the script needs TOOLS_BIN on PATH, and --set-switch would leave the
+    # user's global switch pointing at ours if we exited early.
+    # Captured rather than eval'd inline so a failure here is not swallowed
+    # by eval, which would silently leave dune resolving to the tools switch.
+    _olly_env="$("$_OPAM" env --switch="$OLLY_SWITCH")" || exit 1
+    eval "$_olly_env"
+    # No -j: dune already defaults to the core count, and `nproc` does not
+    # exist on FreeBSD or macOS, where this same script runs.
+    dune build -p runtime_events_tools @install
+  ) > "$_OLLY_BUILD_LOG" 2>&1; then
+    echo "ERROR: the olly build failed. Last 30 lines of $_OLLY_BUILD_LOG:" >&2
+    tail -30 "$_OLLY_BUILD_LOG" >&2
+    exit 1
+  fi
+fi
+
+# A post-condition, not a provisioning check: the build above reported success,
+# so a missing binary here means the package stopped installing olly, or that
+# OLLY_BIN points somewhere other than the build's install directory.
 if [[ ! -x "$OLLY_BIN/olly" ]]; then
-  echo "ERROR: olly not found at $OLLY_BIN/olly." >&2
-  echo "  Run install_deps_<os>.sh, which builds it in its own switch" >&2
-  echo "  ('$OLLY_SWITCH'), or point OLLY_DIR/OLLY_BIN at an existing build." >&2
+  echo "ERROR: olly is not at $OLLY_BIN/olly after a successful build." >&2
+  echo "  If OLLY_BIN is set, it must point at the install directory of a" >&2
+  echo "  runtime_events_tools build (.../_build/install/default/bin)." >&2
   exit 1
 fi
 
