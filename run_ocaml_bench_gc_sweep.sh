@@ -31,7 +31,13 @@ if ! PYTHONPATH="$PYTHONPATH" "$PYTHON" -c "import yaml, running" >/dev/null 2>&
   exit 1
 fi
 
-OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"
+# Exported, not just assigned: running.switches (below) keys the olly switch on
+# the SHA of this checkout, and resolves it from $OLLY_DIR with its own fallback
+# to ~/runtime_events_tools. Leaving it unexported let the two resolve to
+# DIFFERENT checkouts on a machine that has both -- this script building one
+# while the switch was keyed on the other, so every run rebuilt the switch the
+# previous run had just built.
+export OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"
 # Whether OLLY_BIN was pinned by the caller rather than derived from OLLY_DIR.
 # An explicit OLLY_BIN means "use this olly", so the build below leaves it
 # alone; a derived one is ours to (re)build.

@@ -164,12 +164,42 @@ def _package_versions(opam: str, switch: str, packages: List[str]) -> Dict[str, 
     return versions
 
 
-def _source_sha(spec: Dict) -> Optional[str]:
-    """git SHA of the checkout a switch is built from, if it has one."""
+def source_dir(spec: Dict) -> Optional[str]:
+    """The checkout a switch is built from, or None if it has no source.
+
+    Resolved in ONE place because the two callers must agree: _source_sha
+    decides whether a rebuild is due, ensure() builds there, and a machine
+    where they disagree rebuilds the switch on every alternate run.
+
+    That is not hypothetical. The sweep wrapper resolves OLLY_DIR itself and
+    used not to export it, so this module fell back to ~/runtime_events_tools
+    -- a SECOND checkout, at a different revision. A manual sweep then observed
+    one SHA and the bench agent (which does pass OLLY_DIR) observed the other,
+    so each run tore down and recompiled the olly switch the other had just
+    built. The fallback is kept for a machine with a single checkout in the
+    default location, but it is now announced rather than silent, because a
+    silent one is indistinguishable from the thrash it causes.
+    """
     env_var = spec.get("source")
     if not env_var:
         return None
-    path = os.environ.get(env_var) or os.path.expanduser("~/runtime_events_tools")
+    path = os.environ.get(env_var)
+    if path:
+        return path
+    fallback = os.path.expanduser("~/runtime_events_tools")
+    logging.warning(
+        "$%s is not set; falling back to %s. If that is not the checkout you "
+        "build from, set %s -- otherwise this switch is keyed on the wrong "
+        "revision and will be rebuilt on every other run.",
+        env_var, fallback, env_var)
+    return fallback
+
+
+def _source_sha(spec: Dict) -> Optional[str]:
+    """git SHA of the checkout a switch is built from, if it has one."""
+    path = source_dir(spec)
+    if path is None:
+        return None
     try:
         return _run(["git", "-C", path, "rev-parse", "HEAD"])
     except RuntimeError:
@@ -302,8 +332,7 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
             # from hanging on a user-local cmake it cannot see. See the helper.
             if not dry_run:
                 _ensure_cmake_depext_bypass(opam)
-            cwd = os.environ.get(spec["source"]) or os.path.expanduser(
-                "~/runtime_events_tools")
+            cwd = source_dir(spec)
         for cmd in build_commands(name, compiler):
             if dry_run:
                 logging.info("DRY RUN: %s%s", " ".join(cmd),
