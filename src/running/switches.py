@@ -224,16 +224,52 @@ def observe(opam: str, name: str) -> Optional[Dict]:
     return identity
 
 
+def missing_packages(opam: str, name: str) -> List[str]:
+    """Declared packages of `name` that are not installed in it.
+
+    Asked of opam directly rather than inferred from the recorded identity,
+    because the recorded identity is exactly what cannot be trusted here: it
+    says what was there when we last looked, not what we declared.
+    """
+    declared = SWITCHES[name].get("packages") or []
+    if not declared:
+        # olly's switch declares none: its dependencies come --deps-only from
+        # the project's own opam file, so there is no list to check against.
+        return []
+    installed = _package_versions(opam, name, declared)
+    return [p for p in declared if not installed.get(p)]
+
+
 def plan(opam: str, name: str) -> str:
-    """One of 'create', 'rebuild', 'ok'."""
+    """One of 'create', 'rebuild', 'repair', 'adopt' or 'ok'."""
     observed = observe(opam, name)
     if observed is None:
         return "create"
     recorded = load_state().get("switches", {}).get(name, {}).get("identity")
+
+    # Ask opam what the switch actually contains, not just whether it still
+    # matches what we recorded. Comparing against the recorded identity cannot
+    # answer that: `adopt` records whatever it finds, damage included, and from
+    # then on recorded == observed forever, so a switch missing a declared
+    # package reports 'ok' for the rest of its life. Not hypothetical --
+    # obelisk ran for months with opam-compiler evicted from the tools switch
+    # (olly's deps pulled cmdliner >= 2.0 into it), reporting 'ok' every run,
+    # while sweeps worked only because a stale plugin symlink pointed into an
+    # unrelated switch. Nothing louder than a warning was ever printed.
+    missing = missing_packages(opam, name)
+    if missing:
+        # Installing what is missing is the whole fix, so prefer it to a
+        # rebuild -- which costs a compiler -- unless something OTHER than
+        # those packages also drifted. That exception matters: repair re-records
+        # afterwards, so repairing a switch whose ocaml or source_sha had also
+        # moved would quietly adopt that drift as the new baseline.
+        others = [k for k in set(recorded or {}) | set(observed)
+                  if k not in missing and (recorded or {}).get(k) != observed.get(k)]
+        return "rebuild" if (recorded is not None and others) else "repair"
+
     if recorded is None:
-        # The switch exists but we did not build it, or the state was lost.
-        # Adopt it rather than destroying someone's work: record what is there
-        # and move on. A genuine drift is caught on the next run.
+        # The switch exists, we did not build it, and it does have what it
+        # declares. Adopt rather than destroying someone's work.
         return "adopt"
     return "ok" if recorded == observed else "rebuild"
 
@@ -313,6 +349,32 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
             _register_plugin(opam, name)
             _record(opam, name)
         return "adopt"
+
+    if action == "repair":
+        # Install what is missing rather than rebuilding: the switch is
+        # otherwise fine, and a rebuild costs a compiler. Note this can
+        # DOWNGRADE a package -- putting opam-compiler back pins cmdliner
+        # < 2.0 -- which is correct for this switch and is why olly has its
+        # own. Re-records afterwards, so the baseline is the repaired switch
+        # rather than the damage.
+        missing = missing_packages(opam, name)
+        logging.warning(
+            "opam switch '%s' is missing packages it declares: %s. Installing "
+            "them; this may change the versions of packages that depend on "
+            "them.", name, ", ".join(missing))
+        cmd = [opam, "install", "--switch", name, "--yes"] + missing
+        if dry_run:
+            logging.info("DRY RUN: %s", " ".join(cmd))
+            return "repair"
+        previous = _active_switch(opam)
+        try:
+            subprocess.run(cmd, check=True)
+            _register_plugin(opam, name)
+            _record(opam, name)
+        finally:
+            if previous and _active_switch(opam) != previous:
+                _run([opam, "switch", "set", previous], check=False)
+        return "repair"
 
     previous = _active_switch(opam)
     try:
