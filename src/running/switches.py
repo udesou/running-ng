@@ -317,9 +317,31 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
     previous = _active_switch(opam)
     try:
         if action == "rebuild":
+            # Name the keys that moved. A rebuild costs minutes (it recompiles
+            # a compiler), and the usual cause is source_sha -- two checkouts
+            # at different revisions, with $OLLY_DIR pointing at a different
+            # one than last run. Saying only "no longer matches" left that
+            # looking like routine progress output, so a machine could alternate
+            # between two checkouts and pay for a full rebuild every run
+            # without anything ever saying why.
+            recorded = (load_state().get("switches", {})
+                        .get(name, {}).get("identity") or {})
+            observed = observe(opam, name) or {}
+            changed = ["{}: {} -> {}".format(k, recorded.get(k, "absent"),
+                                             observed.get(k, "absent"))
+                       for k in sorted(set(recorded) | set(observed))
+                       if recorded.get(k) != observed.get(k)]
             logging.warning(
                 "opam switch '%s' no longer matches what it was built from; "
-                "rebuilding it", name)
+                "rebuilding it (%s)", name, "; ".join(changed) or "no visible "
+                "difference")
+            if any(c.startswith("source_sha") for c in changed):
+                logging.warning(
+                    "  the source checkout moved: %s. If you did not intend "
+                    "that, check $%s -- pointing it at a different checkout "
+                    "than the previous run is what makes this rebuild happen "
+                    "on every run.",
+                    source_dir(SWITCHES[name]), SWITCHES[name].get("source"))
             if dry_run:
                 logging.info("DRY RUN: opam switch remove %s --yes", name)
             else:
