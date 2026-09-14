@@ -15,9 +15,14 @@ The eagerness is worth pinning precisely because it is surprising: merely
 calling Configuration.resolve_class() on a config that declares runtimes will
 create and destroy opam switches.
 """
+import shutil
+
 import pytest
 
 from running.runtime import OCaml
+
+#: See the note in test_modifier.py: not "/bin/true", which is Linux-only.
+TRUE_BIN = shutil.which("true")
 
 
 @pytest.fixture
@@ -32,7 +37,7 @@ def no_real_opam(monkeypatch, tmp_path):
     monkeypatch.setattr(
         OCaml, "_ensure_switch",
         staticmethod(lambda kwargs, switch_name: calls["ensure_switch"].append(switch_name)))
-    monkeypatch.setattr(OCaml, "_find_opam", staticmethod(lambda: "/bin/true"))
+    monkeypatch.setattr(OCaml, "_find_opam", staticmethod(lambda: TRUE_BIN))
 
     class _Result:
         stdout = str(bin_dir)
