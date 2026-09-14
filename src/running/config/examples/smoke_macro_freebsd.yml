@@ -22,6 +22,17 @@
 # BSD-portable vendoring scripts, which is a separate change in the
 # macro-benches repo (scripts/lib-portable.sh).
 #
+# RUNNING_TAG=legacy is REQUIRED, not a refinement. With it unset, runbms
+# falls back to the `default_run` tag, whose exercised_by names the default
+# rungs (cpdf_squeeze_default, sedlex_tokenize_default). This config restricts
+# `benchmarks:` to the legacy anchors cpdf_merge and sedlex_tokenize, the
+# intersection is empty, and the run dies with "After applying
+# RUNNING_TAG=['default_run'], no benchmarks remain."
+#
+# The anchors are the point: they take about 1.5 s each, where
+# sedlex_tokenize_default is 6M lines, ~14 s and 8.5 GB. A smoke test answers
+# "does the macro path work at all", so keep it cheap and set the tag.
+#
 # Usage. `bash`, not `sh`: the wrapper is #!/usr/bin/env bash. PYTHON matters
 # because running-ng is usually in a virtualenv on FreeBSD.
 #
@@ -30,6 +41,7 @@
 #   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
 #   CONFIG_FILE=src/running/config/examples/smoke_macro_freebsd.yml \
 #   LOG_DIR=/tmp/smoke_macro_freebsd \
+#   RUNNING_TAG=legacy \
 #   RUNNING_REUSE_SWITCHES=1 \
 #     bash run_ocaml_bench_gc_sweep.sh
 # =============================================================================

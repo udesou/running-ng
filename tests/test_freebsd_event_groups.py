@@ -10,6 +10,7 @@ counters.
 Verified on rosemary: FreeBSD 15.1, Xeon E5-2640 v4 (Broadwell-EP), against a
 real GC-heavy OCaml workload, as complete groups rather than event by event.
 """
+import re
 from pathlib import Path
 
 import pytest
@@ -425,3 +426,43 @@ def test_tier1_overrides_reach_the_merged_config():
     assert c.get("spread_factor") == 1
     assert c.get("minheap_multiplier") == 1.0
     assert c.get("compress_logs") is False
+
+
+# --- the documented command must actually select something -------------------
+# smoke_macro_freebsd.yml shipped a usage block whose command could not run:
+# with RUNNING_TAG unset, runbms falls back to `default_run` (runbms.py), whose
+# exercised_by names the _default rungs, while the config restricts benchmarks:
+# to the legacy anchors. Empty intersection, ValueError, no run. Nothing caught
+# it because no test ever applied the tag a config tells you to use.
+#
+# So: take the RUNNING_TAG out of each config's own usage block, apply exactly
+# what runbms would apply, and require that benchmarks remain.
+# Only the COMMAND counts, so the line must end in a backslash continuation.
+# A bare `^#\s*RUNNING_TAG=` also matches prose explaining the variable, which
+# makes the test pass on precisely the config it is meant to fail on.
+_TAG_IN_USAGE = re.compile(r"^#\s+RUNNING_TAG=([A-Za-z0-9_,]+)\s*\\\s*$", re.M)
+
+
+@pytest.mark.parametrize("config", [
+    "all_micro_freebsd.yml",
+    "all_macro_freebsd_tier1.yml",
+    "smoke_micro_freebsd.yml",
+    "smoke_macro_freebsd.yml",
+])
+def test_the_documented_command_selects_benchmarks(config):
+    from running.config import Configuration
+
+    c = Configuration.from_file(EXAMPLES, config)
+    m = _TAG_IN_USAGE.search((EXAMPLES / config).read_text())
+    if m:
+        tags = m.group(1).split(",")
+    elif "default_run" in (c.get("tags") or {}):
+        tags = ["default_run"]          # runbms' fallback for a bare run
+    else:
+        tags = []                       # no tags block: no filter at all
+    if tags:
+        c.apply_tag_filter(tags)
+    kept = sum(len(v) for v in (c.get("benchmarks") or {}).values())
+    assert kept, (
+        "{} documents RUNNING_TAG={} but that selects no benchmarks; the "
+        "command in its usage block cannot run.".format(config, tags or "(unset)"))
