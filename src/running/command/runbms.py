@@ -682,10 +682,15 @@ def run(args):
         # else. Errors here mean a typo or structurally-broken block; better
         # to fail before benchmarks run.
         configuration.validate()
-        # Machine-setup check, before the expensive part (switch provisioning,
+        # Machine-setup checks, before the expensive part (switch provisioning,
         # builds) starts -- a throttling governor invalidates every timing this
-        # run is about to produce.
+        # run is about to produce, and an untuned machine lets the OS and the
+        # interrupts share the benchmark's cores. Both are reported here rather
+        # than left to be inferred from the variance afterwards, and both are
+        # warnings: the run is still worth having, it is just not comparable
+        # with one taken on a tuned machine.
         check_cpu_governor()
+        osinfo.warn_if_untuned()
         # Tag-block validation runs regardless of whether RUNNING_TAG is set
         # — catches typos in the tags: block (e.g. renamed program) at
         # config load time, before benchmarks run.

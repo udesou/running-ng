@@ -461,9 +461,10 @@ def test_summary_degrades_without_the_tool(monkeypatch):
     monkeypatch.setattr(osinfo, "numa_nodes", lambda: [list(range(32))])
     monkeypatch.setattr(osinfo, "IS_LINUX", True)
     monkeypatch.setattr(osinfo, "_linux_socket_count", lambda: 1)
+    monkeypatch.setattr(osinfo, "isolation_tier", lambda: "topology")
     s = osinfo.machine_topology_summary()
-    assert s == {"physical_cores": 16, "threads_per_core": 2,
-                 "numa_nodes": 1, "sockets": 1}
+    assert s == {"cpu_isolation": "topology", "physical_cores": 16,
+                 "threads_per_core": 2, "numa_nodes": 1, "sockets": 1}
     assert "cpu_kinds" not in s
 
 
@@ -472,7 +473,9 @@ def test_summary_is_empty_where_nothing_is_knowable(monkeypatch):
     monkeypatch.setattr(osinfo, "processor_topology", lambda: [])
     monkeypatch.setattr(osinfo, "numa_nodes", lambda: [])
     monkeypatch.setattr(osinfo, "IS_LINUX", False)
-    assert osinfo.machine_topology_summary() == {}
+    # cpu_isolation is always present: "none" is itself the useful fact, since
+    # it says the numbers came from a machine that cannot pin.
+    assert osinfo.machine_topology_summary() == {"cpu_isolation": "none"}
 
 
 # --- NUMA and socket detection -------------------------------------------------
@@ -910,3 +913,69 @@ def test_parse_cpu_mask_handles_wide_masks():
     assert osinfo._parse_cpu_mask("00000000,0000000f") == [0, 1, 2, 3]
     assert osinfo._parse_cpu_mask("") == []
     assert osinfo._parse_cpu_mask("zz") == []
+
+
+# --- isolation tier ------------------------------------------------------------
+
+@pytest.mark.parametrize("isolated,irq,groups,expected", [
+    ([4, 6], [0, 2], [[0, 1]], "isolcpus"),      # isolcpus wins over irqaffinity
+    ([], [0, 2], [[0, 1]], "irqaffinity"),        # irqaffinity alone
+    ([], [], [[0, 1]], "topology"),               # neither: SMT siblings only
+    ([], [], [], "none"),                         # no topology at all (macOS)
+])
+def test_isolation_tier(monkeypatch, isolated, irq, groups, expected):
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: groups)
+    monkeypatch.setattr(osinfo, "isolated_cpus", lambda: isolated)
+    monkeypatch.setattr(osinfo, "irq_cpus", lambda: irq)
+    assert osinfo.isolation_tier() == expected
+
+
+def test_tier_is_recorded_in_the_manifest(monkeypatch):
+    # Two results are comparable only at the same tier, and nothing else in
+    # the manifest would say which one produced them.
+    monkeypatch.setattr(osinfo, "sibling_groups", lambda: [[0, 1]])
+    monkeypatch.setattr(osinfo, "isolated_cpus", lambda: [0])
+    monkeypatch.setattr(osinfo, "irq_cpus", lambda: [])
+    assert osinfo.machine_topology_summary()["cpu_isolation"] == "isolcpus"
+
+
+def _reset_warning(monkeypatch):
+    monkeypatch.setattr(osinfo, "_warned_untuned", False)
+
+
+def test_untuned_machine_warns(monkeypatch, caplog):
+    _reset_warning(monkeypatch)
+    monkeypatch.setattr(osinfo, "isolation_tier", lambda: "topology")
+    osinfo.warn_if_untuned()
+    assert "not tuned for benchmarking" in caplog.text
+    assert "isolcpus" in caplog.text, "the warning should say how to fix it"
+
+
+def test_tuned_machine_does_not_warn(monkeypatch, caplog):
+    import logging
+    caplog.set_level(logging.INFO)
+    for tier in ("isolcpus", "irqaffinity"):
+        _reset_warning(monkeypatch)
+        caplog.clear()
+        monkeypatch.setattr(osinfo, "isolation_tier", lambda t=tier: t)
+        osinfo.warn_if_untuned()
+        assert "WARNING" not in caplog.text, tier
+        assert tier in caplog.text
+
+
+def test_a_platform_that_cannot_pin_warns_differently(monkeypatch, caplog):
+    _reset_warning(monkeypatch)
+    monkeypatch.setattr(osinfo, "isolation_tier", lambda: "none")
+    osinfo.warn_if_untuned()
+    assert "nothing can be pinned" in caplog.text
+
+
+def test_the_warning_fires_once_per_process(monkeypatch, caplog):
+    # It is called per run, not per invocation, but a guard costs nothing and
+    # a per-invocation warning would drown the log it shares with the results.
+    _reset_warning(monkeypatch)
+    monkeypatch.setattr(osinfo, "isolation_tier", lambda: "topology")
+    osinfo.warn_if_untuned()
+    first = caplog.text.count("not tuned for benchmarking")
+    osinfo.warn_if_untuned()
+    assert caplog.text.count("not tuned for benchmarking") == first == 1
