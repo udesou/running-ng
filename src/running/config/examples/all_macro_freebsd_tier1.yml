@@ -4,10 +4,17 @@
 # COVERAGE, not measurement: one invocation each, so the numbers are not
 # comparable. The question is which macro benchmarks build and run on FreeBSD.
 #
-# "Tier 1" is the 57 benchmarks across 15 suites that need nothing beyond what
-# OCaml itself needs, so they can be attempted on a host where nobody can run
-# `pkg install`. The seven suites disabled below need system libraries, which
-# on an unprivileged host is somebody else's decision:
+# "Tier 1" is the 57 benchmarks that need nothing beyond what OCaml itself
+# needs, so they can be attempted on a host where nobody can run `pkg
+# install`. They live in 13 suites: the base's 23, minus the eight disabled
+# below, minus lavyek and merlin which the base already leaves empty.
+#
+# NOTE those 57 are what the config ENABLES, not what a run measures. A bare
+# run auto-applies the `default_run` tag, which takes one rung per suite and
+# so measures 13. Use RUNNING_TAG=all_benches for all 57.
+#
+# The eight suites disabled below need system libraries, which on an
+# unprivileged host is somebody else's decision:
 #
 #   alt-ergo    zlib
 #   coq         (rocq build)
@@ -49,12 +56,17 @@
 includes:
   - "../base/ocaml/macro_base.yml"
 
-invocations: 1
-remote_host: null
-compress_logs: false
-minheap_multiplier: 1.0
-heap_range: 6
-spread_factor: 1
+# These six are all defined as top-level scalars by macro_base.yml, and
+# redefining an included scalar at top level is a `combine()` TypeError
+# ("not an array or a dictionary. Please use overrides instead"). It fails
+# fast on the first one, so the traceback names only `invocations`.
+overrides:
+  invocations: 1
+  remote_host: null
+  compress_logs: false
+  minheap_multiplier: 1.0
+  heap_range: 6
+  spread_factor: 1
 
 # A top-level `benchmarks:` dict UPDATES the base's, key by key, so naming a
 # suite with an empty list disables just that suite and leaves every other one

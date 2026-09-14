@@ -388,3 +388,40 @@ def test_macro_tier1_keeps_only_suites_needing_no_system_library():
     live = {s for s, v in merged.items() if v}
     assert not (live & needs_system_libs)
     assert sum(len(v) for v in merged.values() if v) == 57
+
+
+# --- the configs must actually LOAD -----------------------------------------
+# Everything above reads the YAML with yaml.safe_load, which never touches the
+# `includes:` merge. all_macro_freebsd_tier1.yml redefined six scalars that
+# macro_base.yml already sets at top level, which combine() rejects outright;
+# it therefore could not load on ANY platform while passing every test here.
+# Parse the file the way running-ng parses it, so that cannot recur.
+#
+# from_file + validate only. NOT resolve_class(): constructing a `type: OCaml`
+# runtime provisions its opam switch, so calling it from a test would wipe and
+# rebuild a compiler.
+@pytest.mark.parametrize("config", [
+    "all_micro_freebsd.yml",
+    "all_macro_freebsd_tier1.yml",
+    "smoke_micro_freebsd.yml",
+    "smoke_macro_freebsd.yml",
+])
+def test_freebsd_example_configs_load_through_the_real_merge(config):
+    from running.config import Configuration
+
+    c = Configuration.from_file(EXAMPLES, config)
+    c.validate()
+
+
+def test_tier1_overrides_reach_the_merged_config():
+    # The six scalars belong under `overrides:`; if they drift back to top
+    # level the merge raises, and if they are dropped the run silently takes
+    # macro_base's invocations: 3 instead of the coverage run's 1.
+    from running.config import Configuration
+
+    c = Configuration.from_file(EXAMPLES, "all_macro_freebsd_tier1.yml")
+    assert c.get("invocations") == 1
+    assert c.get("heap_range") == 6
+    assert c.get("spread_factor") == 1
+    assert c.get("minheap_multiplier") == 1.0
+    assert c.get("compress_logs") is False
