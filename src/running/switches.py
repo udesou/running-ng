@@ -118,11 +118,38 @@ def find_opam() -> str:
 
 
 def state_dir() -> str:
+    """Where the record of what we built lives.
+
+    Under the OPAM ROOT by default, not under ~/.cache, because that is what
+    the state describes: "switch X in this root was built from Y". Keyed to
+    ~/.cache it is a single file describing whichever root happened to be
+    current, so two consumers sharing a machine but not a root -- a local sweep
+    and the bench agent, say -- overwrite each other's record and each then
+    reports 'ok' for switches the other rebuilt.
+
+    Deriving it from the root instead makes the isolation structural: point
+    OPAMROOT somewhere else and the state follows automatically, with no second
+    variable to remember. RUNNING_NG_STATE_DIR still overrides, for a caller
+    that wants them apart.
+    """
     override = os.environ.get(STATE_ENV_VAR)
     if override:
         return override
-    cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-    return os.path.join(cache, "running-ng")
+    # $OPAMROOT directly when set, without asking opam: `opam var root` fails
+    # on a root that does not exist yet, which is precisely a consumer's FIRST
+    # run against its own root -- the case this isolation exists for. Falling
+    # back to the shared cache there would put the first record in the one
+    # place it must not be.
+    env_root = os.environ.get("OPAMROOT")
+    if env_root:
+        return os.path.join(env_root, "running-ng")
+    try:
+        return os.path.join(_run([find_opam(), "var", "root"]), "running-ng")
+    except (RuntimeError, OSError):
+        # No opam at all: fall back rather than making an unrelated command
+        # (`status` on a machine without opam) fail on this.
+        cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+        return os.path.join(cache, "running-ng")
 
 
 def state_path() -> str:

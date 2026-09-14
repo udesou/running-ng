@@ -286,3 +286,56 @@ def test_switches_module_is_not_importable_without_the_path(tmp_path):
     # while one whose editable install predates this module says
     # "No module named running.switches".
     assert "No module named" in p.stderr
+
+
+# --- the state file follows the opam root --------------------------------------
+#
+# Hermeticity: the state records "switch X in this root was built from Y", so
+# keying it to ~/.cache made it a single file describing whichever root was
+# current. Two consumers on one machine with separate roots -- a local sweep
+# and the bench agent -- then overwrote each other's record, and each reported
+# 'ok' for switches the other had rebuilt.
+
+def test_state_follows_opamroot(monkeypatch, tmp_path):
+    monkeypatch.delenv(switches.STATE_ENV_VAR, raising=False)
+    monkeypatch.setenv("OPAMROOT", str(tmp_path / "agent-root"))
+    assert switches.state_path().startswith(str(tmp_path / "agent-root"))
+
+
+def test_separate_roots_get_separate_state(monkeypatch, tmp_path):
+    monkeypatch.delenv(switches.STATE_ENV_VAR, raising=False)
+    monkeypatch.setenv("OPAMROOT", str(tmp_path / "a"))
+    a = switches.state_path()
+    monkeypatch.setenv("OPAMROOT", str(tmp_path / "b"))
+    b = switches.state_path()
+    assert a != b, "two opam roots must not share one state file"
+
+
+def test_a_root_that_does_not_exist_yet_still_gets_its_own_state(monkeypatch, tmp_path):
+    """A consumer's FIRST run against its own root is the case that matters.
+
+    `opam var root` fails on a root that has not been created, so asking opam
+    would fall back to the shared cache and put the very first record in the
+    one place it must not be.
+    """
+    monkeypatch.delenv(switches.STATE_ENV_VAR, raising=False)
+    root = tmp_path / "not-created-yet"
+    assert not root.exists()
+    monkeypatch.setenv("OPAMROOT", str(root))
+    assert switches.state_path().startswith(str(root))
+
+
+def test_explicit_state_dir_still_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPAMROOT", str(tmp_path / "root"))
+    monkeypatch.setenv(switches.STATE_ENV_VAR, str(tmp_path / "explicit"))
+    assert switches.state_path().startswith(str(tmp_path / "explicit"))
+
+
+def test_no_opam_at_all_is_not_fatal(monkeypatch, tmp_path):
+    # `switches status` on a machine without opam should report, not crash.
+    monkeypatch.delenv(switches.STATE_ENV_VAR, raising=False)
+    monkeypatch.delenv("OPAMROOT", raising=False)
+    monkeypatch.setattr(switches, "find_opam",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no opam")))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    assert switches.state_path().startswith(str(tmp_path / "cache"))

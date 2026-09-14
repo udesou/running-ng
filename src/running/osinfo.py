@@ -818,6 +818,76 @@ def refine_groups(groups: List[List[int]],
     return refined
 
 
+def isolation_tier() -> str:
+    """How well this machine can keep other work off the benchmark's cores.
+
+    One of:
+
+      "isolcpus"     the administrator set `isolcpus=`, so the scheduler will
+                     not migrate anything onto those cores. The strongest
+                     available, and the only one that also keeps the OS off.
+      "irqaffinity"  `irqaffinity=` confines interrupts, which is the largest
+                     single source of interference, but ordinary kernel and
+                     user work can still land on a benchmark core.
+      "topology"     neither is set. The benchmark gets one thread per physical
+                     core and the observers get the SMT siblings of those SAME
+                     cores, so they share execution resources, and nothing
+                     keeps the OS away at all.
+      "none"         the platform exposes no topology to pin with (macOS).
+
+    Recorded in the run manifest because it changes what a number means: two
+    results are only comparable if they were measured at the same tier. On an
+    8-core Xeon the difference between tuned and untuned was a 25.8s spread
+    over six runs against 0.33s.
+    """
+    if not sibling_groups():
+        return "none"
+    if isolated_cpus():
+        return "isolcpus"
+    if irq_cpus():
+        return "irqaffinity"
+    return "topology"
+
+
+#: Printed at most once per process; a per-invocation warning would be noise.
+_warned_untuned = False
+
+
+def warn_if_untuned() -> None:
+    """Say so, once, when the machine cannot keep other work off the cores.
+
+    Not fatal: an untuned machine still produces usable coverage data, and
+    tuning it needs root and a reboot. But a sweep whose numbers will carry
+    interference should say so while it is starting, not leave it to be
+    inferred from the variance afterwards.
+    """
+    global _warned_untuned
+    if _warned_untuned:
+        return
+    _warned_untuned = True
+    tier = isolation_tier()
+    if tier in ("isolcpus", "irqaffinity"):
+        logging.info("CPU isolation: %s", tier)
+        return
+    if tier == "none":
+        logging.warning(
+            "This platform exposes no CPU topology, so nothing can be pinned: "
+            "the benchmark, the OS and the observers all share every core. "
+            "Expect run-to-run variance and do not compare these numbers with "
+            "results from a pinned machine.")
+        return
+    logging.warning(
+        "This machine is not tuned for benchmarking: neither `isolcpus=` nor "
+        "`irqaffinity=` is set, so the kernel is free to schedule other work, "
+        "and interrupts, onto the benchmark's cores. Pinning still separates "
+        "the benchmark from the observers, but only onto SMT siblings of the "
+        "same physical cores. Measured cost of leaving a machine untuned: a "
+        "25.8s spread over six runs against 0.33s when tuned. Add "
+        "`isolcpus=<cpus> irqaffinity=<others>` to the kernel cmdline (needs "
+        "root and a reboot); results taken now are not comparable with results "
+        "taken after.")
+
+
 def machine_topology_summary() -> Dict[str, Any]:
     """Topology facts worth recording alongside a result.
 
@@ -825,7 +895,7 @@ def machine_topology_summary() -> Dict[str, Any]:
     silent about what it cannot determine.  Works on macOS too, where we can
     describe the machine but cannot pin on it.
     """
-    summary: Dict[str, Any] = {}
+    summary: Dict[str, Any] = {"cpu_isolation": isolation_tier()}
     groups = sibling_groups()
     if groups:
         summary["physical_cores"] = len(groups)
