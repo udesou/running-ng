@@ -374,21 +374,30 @@ def test_every_named_suite_exists_in_the_base(config):
 
 def test_macro_tier1_keeps_only_suites_needing_no_system_library():
     # The point of tier 1: runnable on a host where nobody can pkg install.
+    #
+    # alt-ergo and coq were in this set on the assumption that they needed
+    # system libraries. They do not: alt-ergo's only stated need is zlib, which
+    # FreeBSD has in the base system, and coq's is the rocq build, which setup
+    # performs anyway. Both were confirmed on rosemary building and running
+    # clean, which took the config from 57 programs to 67.
     d = yaml.safe_load((EXAMPLES / "all_macro_freebsd_tier1.yml").read_text())
     base = yaml.safe_load((BASE_DIR / "macro_base.yml").read_text())["benchmarks"]
     merged = dict(base)
     merged.update(d["benchmarks"])
     needs_system_libs = {
-        "macro-alt-ergo-monorepo", "macro-coq-monorepo", "macro-devkit",
-        "macro-frama-c-monorepo", "macro-goblint-monorepo",
+        "macro-devkit", "macro-frama-c-monorepo", "macro-goblint-monorepo",
         "macro-infer-monorepo", "macro-owl", "macro-pplacer",
     }
     for suite in needs_system_libs:
         assert suite in base, "{} vanished from macro_base".format(suite)
         assert not merged[suite], "{} needs a system library and must be off".format(suite)
+    for suite in ("macro-alt-ergo-monorepo", "macro-coq-monorepo"):
+        assert merged[suite], (
+            "{} needs no system library on FreeBSD and was verified running "
+            "there; it must stay enabled".format(suite))
     live = {s for s, v in merged.items() if v}
     assert not (live & needs_system_libs)
-    assert sum(len(v) for v in merged.values() if v) == 57
+    assert sum(len(v) for v in merged.values() if v) == 67
 
 
 # --- the configs must actually LOAD -----------------------------------------

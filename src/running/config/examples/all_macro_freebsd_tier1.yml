@@ -4,21 +4,25 @@
 # COVERAGE, not measurement: one invocation each, so the numbers are not
 # comparable. The question is which macro benchmarks build and run on FreeBSD.
 #
-# "Tier 1" is the 57 benchmarks that need nothing beyond what OCaml itself
-# needs, so they can be attempted on a host where nobody can run `pkg
-# install`. They live in 13 suites: the base's 23, minus the eight disabled
-# below, minus lavyek and merlin which the base already leaves empty.
+# "Tier 1" is the 67 benchmarks verified to build and run on FreeBSD without
+# root. They live in 15 suites: the base's 23, minus the six disabled below,
+# minus lavyek and merlin which the base already leaves empty.
 #
-# NOTE those 57 are what the config ENABLES, not what a run measures. A bare
+# NOTE those 67 are what the config ENABLES, not what a run measures. A bare
 # run auto-applies the `default_run` tag, which takes one rung per suite and
-# so measures 13. Use RUNNING_TAG=all_benches for all 57.
+# so measures 15. Use RUNNING_TAG=all_benches for all 67.
 #
-# The eight suites disabled below need system libraries, which on an
+# alt-ergo (6) and coq (4) were disabled here on the assumption that they
+# needed system libraries. They do not: alt-ergo's only stated need is zlib,
+# which is in the FreeBSD base system, and coq's is the rocq build, which
+# setup performs anyway. Both were confirmed on rosemary building and running
+# clean, 67/67 with three non-zero counters and reliable stats, so they are
+# enabled.
+#
+# The six suites disabled below need system libraries, which on an
 # unprivileged host is somebody else's decision:
 #
-#   alt-ergo    zlib
-#   coq         (rocq build)
-#   devkit      libcurl, libev, libevent, pcre, pcre2, zlib
+#   devkit      libcurl, libev, libevent, pcre, zlib
 #   frama-c     libyaml, zlib
 #   goblint     apron, camlidl, mpfr, perl        <- historically painful even on Linux
 #   infer       sqlite3, zlib
@@ -78,8 +82,6 @@ overrides:
 # fine. `macro-infer` instead of `macro-infer-monorepo` did exactly that here.
 # tests/test_freebsd_event_groups.py now checks every key against the base.
 benchmarks:
-  macro-alt-ergo-monorepo: []
-  macro-coq-monorepo: []
   macro-devkit: []
   macro-frama-c-monorepo: []
   macro-goblint-monorepo: []
