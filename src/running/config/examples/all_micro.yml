@@ -1,22 +1,20 @@
 # =============================================================================
-# All micro benchmarks, once each — FreeBSD coverage run
+# All micro benchmarks, once each — coverage run
 # =============================================================================
 # Purpose is COVERAGE, not measurement: build and run every micro benchmark
-# once, to find which ones fail to build or run on FreeBSD. One invocation
-# each, so the numbers are not worth comparing; do not read them as results.
+# once, to find which ones fail to build or run. One invocation each, so the
+# numbers are not worth comparing; do not read them as results.
 #
-# Prior FreeBSD coverage was the `simple` suite only (39/39 built). The suites
-# below are untested there, and the interesting ones are `with-deps` and
-# `with-packages`: they pull opam packages, so they surface a different
-# failure class from the GNU/BSD divergence checked so far. gmp is installed
-# on rosemary, so zarith should build.
+# 195 benchmarks across 13 suites, so this is long. Expect build failures
+# rather than run failures, and expect them to cluster by suite. Verified
+# 195/195 on FreeBSD 15.1.
 #
-# 196 benchmarks across 13 suites, so this is long. Expect build failures
-# rather than run failures, and expect them to cluster by suite.
-#
-# perf_grp1_freebsd, not perf_grp1: of the latter's events only `instructions`
-# resolves on FreeBSD, and pmcstat allocates all-or-nothing, so perf_grp1
-# would yield no counters at all.
+# Runs on Linux and FreeBSD from this one file. `perf_grp1` carries both event
+# vocabularies (`val` and `val_freebsd`) and PerfAndOllyAttach picks by host.
+# That matters here: of perf_grp1's Linux events only `instructions` resolves
+# under hwpmc, and pmcstat allocates all-or-nothing, so the wrong list yields
+# no counters at all rather than a partial set. A config that wants to pin one
+# platform's events deliberately can still name perf_grp1_freebsd.
 #
 # `re-25|md-2` matches what every established micro config uses
 # (config/experiments/micro_5.5.0*.yml). Without it four GC-event-dense
@@ -41,8 +39,8 @@
 #   cd ~/running-ng
 #   PYTHON=/path/to/venv/bin/python \
 #   RUNNING_BENCH_DIR=~/benches \
-#   CONFIG_FILE=src/running/config/examples/all_micro_freebsd.yml \
-#   LOG_DIR=/tmp/all_micro_freebsd \
+#   CONFIG_FILE=src/running/config/examples/all_micro.yml \
+#   LOG_DIR=/tmp/all_micro \
 #   RUNNING_REUSE_SWITCHES=1 \
 #     bash run_ocaml_bench_gc_sweep.sh
 #
@@ -80,4 +78,4 @@ runtimes:
     version: "5.4.1"
 
 configs:
-  - "ocaml-5.4.1|perf_grp1_freebsd|re-25|md-2"
+  - "ocaml-5.4.1|perf_grp1|re-25|md-2"

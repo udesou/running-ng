@@ -902,14 +902,26 @@ modifiers:
   perf_grp1:
     type: PerfAndOllyAttach
     val: "task-clock,page-faults,cycles,instructions"
+    # hwpmc vocabulary; used instead of `val` on FreeBSD. See the
+    # PerfAndOllyAttach docstring for why both live here rather than
+    # in a parallel _freebsd config file.
+    val_freebsd: "instructions,unhalted-cycles,PAGE_FAULT.ALL"
   # Group 2: pipeline stalls
   perf_grp2:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,stalled-cycles-frontend,stalled-cycles-backend"
+    # hwpmc vocabulary; used instead of `val` on FreeBSD. See the
+    # PerfAndOllyAttach docstring for why both live here rather than
+    # in a parallel _freebsd config file.
+    val_freebsd: "instructions,unhalted-cycles,idq_uops_not_delivered.core,resource_stalls.any"
   # Group 3: cache / TLB hierarchy
   perf_grp3:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,cache-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses"
+    # hwpmc vocabulary; used instead of `val` on FreeBSD. See the
+    # PerfAndOllyAttach docstring for why both live here rather than
+    # in a parallel _freebsd config file.
+    val_freebsd: "instructions,unhalted-cycles,longest_lat_cache.miss,mem_load_uops_retired.l3_miss,dtlb_load_misses.walk_completed,itlb_misses.walk_completed"
 
   # --- FreeBSD event groups (hwpmc via pmcstat) ---
   #

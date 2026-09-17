@@ -40,7 +40,7 @@ installed there; on a host without it, that is where failures would appear.
 `oxcaml_prefetch` needs a `type: OxCaml` runtime, so under an OCaml runtime the
 harness rejects it at build time with a precise reason and carries on. That is
 correct behaviour, not a portability gap, and the suite is disabled in
-`all_micro_freebsd.yml` so it does not recur as noise. OxCaml on FreeBSD is
+`all_micro.yml` so it does not recur as noise. OxCaml on FreeBSD is
 untested and out of scope.
 
 ## Discrepancies from Linux
@@ -132,17 +132,16 @@ published. perf has no equivalent hazard.
 
 ## Known gaps
 
-- **Macro benchmarks are set up but not yet run.** `~/macro-benches`'s
-  vendoring scripts were GNU-only (20 `sed -i`, six of them GNU-only sed
-  constructs, five `md5sum`, one `nproc`) and are now portable via
-  `scripts/lib-portable.sh` there. `smoke_macro_freebsd.yml` and
-  `all_macro_freebsd_tier1.yml` are ready. Tier 1 is the 57 benchmarks across
-  13 suites needing no system library; the other eight suites need
-  `pkg install` (`apron`/`camlidl` for goblint, `openblas` for owl, `gsl` and
-  `sqlite3` for pplacer, `libevent` and friends for devkit, `zlib` for
-  several), which needs root. Nothing has run on FreeBSD yet, and the likely
-  failures are C stubs and configure scripts inside `duniverse/` rather than
-  anything in running-ng.
+- **Macro benchmarks: 95 of 95 run.** `~/macro-benches`'s vendoring scripts
+  were GNU-only (20 `sed -i`, six of them GNU-only sed constructs, five
+  `md5sum`, one `nproc`) and are now portable via `scripts/lib-portable.sh`
+  there. Use `smoke_macro.yml` and `all_macro.yml`; there are no FreeBSD-only
+  copies any more, because the counter group carries both event vocabularies.
+  Every suite needs its system libraries installed (macro-benches' README has
+  the `pkg install` line), plus five source patches `make setup` applies for
+  you: extunix's `gettid` probe, owl's OpenMP link flags, gsl-ocaml's
+  hardcoded include path, goblint's `domainslib` select, and CIL's real-GCC
+  search, which looks for `gcc-14` where FreeBSD installs `gcc14`.
 - **lavyek cannot be covered anywhere.** It is in a private repo and disabled
   in the base config for everyone, so the parallel macro path and the
   `re_par`/`md_par`/`pin_lavyek` routing are untested on FreeBSD by

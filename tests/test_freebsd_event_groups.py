@@ -193,28 +193,17 @@ def test_linux_groups_are_untouched():
 
 EXAMPLES = (Path(__file__).parent.parent / "src" / "running" / "config"
             / "examples")
-SMOKE = EXAMPLES / "smoke_micro_freebsd.yml"
+SMOKE = EXAMPLES / "smoke_micro.yml"
 
-#: Every config meant to run on FreeBSD. Each must use a _freebsd group: the
-#: Linux ones cannot allocate there, and pmcstat is all-or-nothing, so such a
-#: config would silently produce no counters at all.
-FREEBSD_CONFIGS = ["smoke_micro_freebsd.yml", "all_micro_freebsd.yml"]
-
-
-def test_smoke_config_uses_a_freebsd_group():
-    d = yaml.safe_load(SMOKE.read_text())
-    assert d["configs"] == ["ocaml-5.4.1|perf_grp1_freebsd"]
-
-
-def test_smoke_config_differs_from_the_linux_one_only_in_the_group():
-    # It exists to exercise the FreeBSD counter path, so anything else
-    # diverging would make the two smoke runs incomparable.
-    linux = yaml.safe_load(
-        (SMOKE.parent / "smoke_micro.yml").read_text())
-    freebsd = yaml.safe_load(SMOKE.read_text())
-    differing = {k for k in set(linux) | set(freebsd)
-                 if linux.get(k) != freebsd.get(k)}
-    assert differing == {"configs"}
+#: The configs that must work on FreeBSD as well as Linux. There are no
+#: separate _freebsd copies any more: a group carries both vocabularies and
+#: PerfAndOllyAttach picks by host, so any group these name must define
+#: `val_freebsd`. Naming one that does not would fall back to the Linux events,
+#: of which only `instructions` resolves under hwpmc, and pmcstat allocates
+#: all-or-nothing, so the run would produce NO counters rather than a partial
+#: set. That is the failure this guards.
+PORTABLE_CONFIGS = ["smoke_micro.yml", "all_micro.yml",
+                    "smoke_macro.yml", "all_macro.yml"]
 
 
 def test_group_names_are_legal_modifier_names():
@@ -272,24 +261,13 @@ def test_page_fault_alias_reaches_the_contract_metric():
     assert vocab.PERF_EVENT_MAP[canonical] == "page_faults"
 
 
-@pytest.mark.parametrize("config", FREEBSD_CONFIGS)
-def test_freebsd_configs_use_freebsd_groups(config):
-    d = yaml.safe_load((EXAMPLES / config).read_text())
-    for entry in d["configs"]:
-        groups = [t for t in entry.split("|") if t.startswith("perf_grp")]
-        assert groups, "{} names no counter group".format(config)
-        for g in groups:
-            assert g.endswith("_freebsd"), (
-                "{} uses {}, whose events do not resolve on FreeBSD; pmcstat "
-                "allocates all-or-nothing so it would yield no counters at "
-                "all".format(config, g))
 
 
 def test_coverage_config_runs_every_micro_benchmark_once():
     # Its purpose is to find what fails to build or run, so one invocation
     # answers the question and it must not narrow the set beyond the single
     # suite that needs a different runtime type (asserted separately below).
-    d = yaml.safe_load((EXAMPLES / "all_micro_freebsd.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
     assert d["invocations"] == 1
     assert "benchmarks" not in d.get("overrides", {}), \
         "overrides would REPLACE the base's set, defeating the coverage point"
@@ -305,7 +283,7 @@ def test_coverage_config_carries_a_larger_runtime_events_ring():
     own output stats_reliable: false, while the invocation still passes. Every
     established micro config carries re-25|md-2, and this one omitted it.
     """
-    d = yaml.safe_load((EXAMPLES / "all_micro_freebsd.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
     entry = d["configs"][0]
     assert "re-25" in entry, entry
     assert "md-2" in entry, entry
@@ -315,7 +293,7 @@ def test_coverage_config_disables_the_oxcaml_suite_without_listing_the_rest():
     # A top-level `benchmarks:` updates the base's dict key by key, so naming
     # one suite empty disables just that one. Using `overrides:` instead would
     # replace the whole block, and go stale whenever micro_base changes.
-    d = yaml.safe_load((EXAMPLES / "all_micro_freebsd.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
     assert d["benchmarks"] == {"oxcaml-prefetch": []}
     assert "benchmarks" not in d.get("overrides", {})
 
@@ -323,7 +301,7 @@ def test_coverage_config_disables_the_oxcaml_suite_without_listing_the_rest():
 def test_coverage_config_still_tracks_every_other_suite():
     base = yaml.safe_load(
         (EXAMPLES.parent / "base" / "ocaml" / "micro_base.yml").read_text())
-    d = yaml.safe_load((EXAMPLES / "all_micro_freebsd.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
     merged = dict(base["benchmarks"])
     merged.update(d["benchmarks"])
     disabled = [s for s, b in merged.items() if not b]
@@ -336,22 +314,26 @@ def test_coverage_config_still_tracks_every_other_suite():
 # --- macro configs -------------------------------------------------------------
 
 BASE_DIR = EXAMPLES.parent / "base" / "ocaml"
-MACRO_CONFIGS = ["smoke_macro_freebsd.yml", "all_macro_freebsd_tier1.yml"]
 
 
-@pytest.mark.parametrize("config", MACRO_CONFIGS)
-def test_macro_freebsd_configs_use_freebsd_groups(config):
+@pytest.mark.parametrize("config", PORTABLE_CONFIGS)
+def test_portable_configs_name_groups_that_carry_freebsd_events(config):
     d = yaml.safe_load((EXAMPLES / config).read_text())
+    base_name = "micro_base.yml" if "micro" in config else "macro_base.yml"
+    base = yaml.safe_load((BASE_DIR / base_name).read_text())["modifiers"]
     for entry in d["configs"]:
         groups = [t for t in entry.split("|") if t.startswith("perf_grp")]
-        assert groups, config
+        assert groups, "{} names no counter group".format(config)
         for g in groups:
-            assert g.endswith("_freebsd"), (
-                "{} uses {}, whose events do not resolve on FreeBSD".format(
-                    config, g))
+            assert g in base, "{} names undefined modifier {}".format(config, g)
+            assert base[g].get("val_freebsd") or g.endswith("_freebsd"), (
+                "{} uses {}, which carries no val_freebsd. On FreeBSD it would "
+                "fall back to the Linux events, of which only `instructions` "
+                "resolves under hwpmc, and pmcstat allocates all-or-nothing, "
+                "so the run would yield NO counters at all.".format(config, g))
 
 
-@pytest.mark.parametrize("config", MACRO_CONFIGS + FREEBSD_CONFIGS)
+@pytest.mark.parametrize("config", PORTABLE_CONFIGS)
 def test_every_named_suite_exists_in_the_base(config):
     """A misspelled suite key is silently ADDED, not rejected.
 
@@ -372,37 +354,38 @@ def test_every_named_suite_exists_in_the_base(config):
         "and reports no error.".format(config, base_name, unknown))
 
 
-def test_macro_tier1_keeps_only_suites_needing_no_system_library():
-    # The point of tier 1: runnable on a host where nobody can pkg install.
-    #
-    # alt-ergo and coq were in this set on the assumption that they needed
-    # system libraries. They do not: alt-ergo's only stated need is zlib, which
-    # FreeBSD has in the base system, and coq's is the rocq build, which setup
-    # performs anyway. Both were confirmed on rosemary building and running
-    # clean, which took the config from 57 programs to 67.
-    d = yaml.safe_load((EXAMPLES / "all_macro_freebsd_tier1.yml").read_text())
-    base = yaml.safe_load((BASE_DIR / "macro_base.yml").read_text())["benchmarks"]
-    merged = dict(base)
-    merged.update(d["benchmarks"])
-    needs_system_libs = {
-        "macro-devkit", "macro-frama-c-monorepo", "macro-goblint-monorepo",
-        "macro-infer-monorepo", "macro-owl", "macro-pplacer",
-    }
-    for suite in needs_system_libs:
-        assert suite in base, "{} vanished from macro_base".format(suite)
-        assert not merged[suite], "{} needs a system library and must be off".format(suite)
-    for suite in ("macro-alt-ergo-monorepo", "macro-coq-monorepo"):
-        assert merged[suite], (
-            "{} needs no system library on FreeBSD and was verified running "
-            "there; it must stay enabled".format(suite))
-    live = {s for s, v in merged.items() if v}
-    assert not (live & needs_system_libs)
-    assert sum(len(v) for v in merged.values() if v) == 67
+def test_all_macro_enables_every_suite_the_base_defines():
+    """No suite is disabled any more, and the count is pinned.
 
+    This config used to be all_macro_freebsd_tier1.yml, where "tier 1" meant
+    the suites needing no system library, because the validation host had none
+    installed and nobody could pkg install. All of them are installed now and
+    every suite was verified building and running on FreeBSD 15.1 (95/95), so
+    the distinction describes nothing and the disable block is gone.
+
+    Pinning the number matters: dropping a suite from the base, or quietly
+    reintroducing a `benchmarks:` block here, would both show up as a count
+    change rather than as a silently smaller run.
+    """
+    d = yaml.safe_load((EXAMPLES / "all_macro.yml").read_text())
+    assert "benchmarks" not in d, (
+        "all_macro.yml disables suites again; if that is deliberate, say which "
+        "and why here")
+    assert "benchmarks" not in d.get("overrides", {}), (
+        "overrides.benchmarks would REPLACE the base's block, not update it")
+
+    base = yaml.safe_load((BASE_DIR / "macro_base.yml").read_text())["benchmarks"]
+    live = {s_: v for s_, v in base.items() if v}
+    assert sum(len(v) for v in live.values()) == 95
+    # lavyek is in a private repo and merlin is empty upstream; both are empty
+    # in the base already, so 21 suites carry the 95.
+    assert len(live) == 21
+    assert {s_ for s_, v in base.items() if not v} == {
+        "macro-merlin", "macro-lavyek-monorepo"}
 
 # --- the configs must actually LOAD -----------------------------------------
 # Everything above reads the YAML with yaml.safe_load, which never touches the
-# `includes:` merge. all_macro_freebsd_tier1.yml redefined six scalars that
+# `includes:` merge. all_macro.yml (then all_macro_freebsd_tier1.yml) redefined
 # macro_base.yml already sets at top level, which combine() rejects outright;
 # it therefore could not load on ANY platform while passing every test here.
 # Parse the file the way running-ng parses it, so that cannot recur.
@@ -411,10 +394,10 @@ def test_macro_tier1_keeps_only_suites_needing_no_system_library():
 # runtime provisions its opam switch, so calling it from a test would wipe and
 # rebuild a compiler.
 @pytest.mark.parametrize("config", [
-    "all_micro_freebsd.yml",
-    "all_macro_freebsd_tier1.yml",
-    "smoke_micro_freebsd.yml",
-    "smoke_macro_freebsd.yml",
+    "all_micro.yml",
+    "all_macro.yml",
+    "smoke_micro.yml",
+    "smoke_macro.yml",
 ])
 def test_freebsd_example_configs_load_through_the_real_merge(config):
     from running.config import Configuration
@@ -429,7 +412,7 @@ def test_tier1_overrides_reach_the_merged_config():
     # macro_base's invocations: 3 instead of the coverage run's 1.
     from running.config import Configuration
 
-    c = Configuration.from_file(EXAMPLES, "all_macro_freebsd_tier1.yml")
+    c = Configuration.from_file(EXAMPLES, "all_macro.yml")
     assert c.get("invocations") == 1
     assert c.get("heap_range") == 6
     assert c.get("spread_factor") == 1
@@ -438,7 +421,7 @@ def test_tier1_overrides_reach_the_merged_config():
 
 
 # --- the documented command must actually select something -------------------
-# smoke_macro_freebsd.yml shipped a usage block whose command could not run:
+# smoke_macro.yml shipped a usage block whose command could not run:
 # with RUNNING_TAG unset, runbms falls back to `default_run` (runbms.py), whose
 # exercised_by names the _default rungs, while the config restricts benchmarks:
 # to the legacy anchors. Empty intersection, ValueError, no run. Nothing caught
@@ -453,10 +436,10 @@ _TAG_IN_USAGE = re.compile(r"^#\s+RUNNING_TAG=([A-Za-z0-9_,]+)\s*\\\s*$", re.M)
 
 
 @pytest.mark.parametrize("config", [
-    "all_micro_freebsd.yml",
-    "all_macro_freebsd_tier1.yml",
-    "smoke_micro_freebsd.yml",
-    "smoke_macro_freebsd.yml",
+    "all_micro.yml",
+    "all_macro.yml",
+    "smoke_micro.yml",
+    "smoke_macro.yml",
 ])
 def test_the_documented_command_selects_benchmarks(config):
     from running.config import Configuration
