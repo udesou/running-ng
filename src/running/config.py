@@ -387,6 +387,25 @@ class Configuration(object):
         """
         new_values = copy.deepcopy(self.__items)
         for k, v in other.__items.items():
+            # A key written with nothing under it parses as None, not as an
+            # empty container: deleting the entries below `benchmarks:` and
+            # leaving the key behind is the obvious way to enable everything
+            # the base defines, and it used to die in the merge below with a
+            # bare "TypeError: 'NoneType' object is not iterable" naming
+            # neither the file nor the key.
+            #
+            # Treat it as no override at all, which is what an explicit `{}`
+            # already does here (`.update({})` is a no-op) and what omitting
+            # the key does. Warn rather than stay silent: an emptied key is
+            # usually an edit that lost its content, and this config family
+            # already has a trap in the same area, where a suite name absent
+            # from the base is added as an empty suite instead of rejected.
+            if v is None and k in new_values:
+                logging.warning(
+                    "Key `%s` is present but empty; ignoring it and keeping "
+                    "the included value. Write `%s: {}` to say this "
+                    "deliberately, or remove the key.", k, k)
+                continue
             if k in new_values:
                 if type(new_values[k]) is list:
                     new_values[k].extend(copy.deepcopy(other.__items[k]))
