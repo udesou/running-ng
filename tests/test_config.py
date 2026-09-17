@@ -101,3 +101,44 @@ def test_resolve_ocaml_runtime():
     c.resolve_class()
     ocaml = c.get("runtimes")["ocaml-system"]
     assert str(ocaml.executable) == "/usr/bin/ocaml"
+
+
+def test_a_present_but_empty_key_is_not_an_override(tmp_path, caplog):
+    """`benchmarks:` with nothing under it must not kill the run.
+
+    Deleting the entries below a key and leaving the key behind is the obvious
+    way to say "enable everything the base defines". YAML parses that as None,
+    not as an empty container, and combine() used to die on it with a bare
+    "TypeError: 'NoneType' object is not iterable" that named neither the file
+    nor the key. It is treated as no override, matching what an explicit `{}`
+    already did, and warns because an emptied key is usually a lost edit.
+    """
+    import logging
+
+    base = tmp_path / "base.yml"
+    base.write_text(
+        "benchmarks:\n"
+        "  suite_a: [one, two]\n"
+        "  suite_b: [three]\n"
+    )
+    child = tmp_path / "child.yml"
+    child.write_text('includes:\n  - "./base.yml"\n\nbenchmarks:\n')
+
+    with caplog.at_level(logging.WARNING):
+        c = Configuration.from_file(tmp_path, "child.yml")
+
+    assert c.get("benchmarks") == {"suite_a": ["one", "two"], "suite_b": ["three"]}
+    assert "present but empty" in caplog.text, \
+        "an emptied key should warn, not pass silently"
+    assert "benchmarks" in caplog.text, "the warning must name the key"
+
+
+def test_an_explicit_empty_mapping_still_means_no_override(tmp_path):
+    # `{}` already behaved this way (dict.update({}) is a no-op); pin it so the
+    # None handling above and this stay consistent.
+    base = tmp_path / "base.yml"
+    base.write_text("benchmarks:\n  suite_a: [one]\n")
+    child = tmp_path / "child.yml"
+    child.write_text('includes:\n  - "./base.yml"\n\nbenchmarks: {}\n')
+    c = Configuration.from_file(tmp_path, "child.yml")
+    assert c.get("benchmarks") == {"suite_a": ["one"]}

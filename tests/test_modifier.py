@@ -1,7 +1,13 @@
+import shutil
+
 from running.benchmark import JavaBenchmark, OCamlBenchmark
 from running.modifier import *
 from running.config import Configuration
 from running.runtime import OCaml
+
+#: A real, existing no-op binary. NOT "/bin/true": FreeBSD has it at
+#: /usr/bin/true, and BinaryBenchmark asserts program.exists().
+TRUE_BIN = shutil.which("true")
 
 
 def test_jvm_arg():
@@ -130,7 +136,7 @@ from running.benchmark import BinaryBenchmark  # noqa: E402
 
 
 def _bm(suite, name):
-    return BinaryBenchmark(Path("/bin/true"), [], suite_name=suite, name=name)
+    return BinaryBenchmark(Path(TRUE_BIN), [], suite_name=suite, name=name)
 
 
 def _wrapped(suite, name, m):

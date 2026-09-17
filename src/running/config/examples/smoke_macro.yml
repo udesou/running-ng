@@ -12,10 +12,22 @@
 # Prerequisites: ~/macro-benches/ must have been built via `make setup`.
 #
 # Usage:
+# RUNNING_TAG=legacy is REQUIRED, not a refinement. With it unset, runbms falls
+# back to the `default_run` tag, whose exercised_by names the default rungs
+# (cpdf_squeeze_default, sedlex_tokenize_default), while this config restricts
+# `benchmarks:` to the legacy anchors cpdf_merge and sedlex_tokenize. The
+# intersection is empty and the run dies with "After applying
+# RUNNING_TAG=['default_run'], no benchmarks remain."
+#
+# The anchors are the point: about 1.5 s each, where sedlex_tokenize_default is
+# 6M lines, ~14 s and 8.5 GB. A smoke test answers "does the macro path work at
+# all", so keep it cheap and set the tag.
+#
 #   cd ~/running-ng
 #   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
 #   CONFIG_FILE=src/running/config/examples/smoke_macro.yml \
 #   LOG_DIR=/tmp/smoke_macro \
+#   RUNNING_TAG=legacy \
 #     bash run_ocaml_bench_gc_sweep.sh
 # =============================================================================
 

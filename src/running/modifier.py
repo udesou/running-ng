@@ -185,10 +185,30 @@ class PerfAndOllyAttach(Modifier):
     attach before any code runs. Requires olly on PATH and perf installed.
 
     Optional `val`: extra perf stat -e events string, e.g. "cycles,instructions".
+
+    Optional `val_freebsd`: the same list in hwpmc's vocabulary, used instead of
+    `val` on FreeBSD. The two backends do not share an event vocabulary, and the
+    difference is not only spelling: `task-clock` has no hwpmc equivalent at all,
+    so the FreeBSD list is legitimately shorter, and the stall/cache groups are
+    approximations whose numbers are NOT comparable with Linux's (see the
+    comments in the base configs).
+
+    Carrying both here rather than in a parallel `_freebsd` config file is
+    deliberate. The alternative was a second copy of every config differing by
+    one line, and those copies drift: all_macro_freebsd_tier1.yml sat for months
+    with a merge error that made it fail to load on EVERY platform, unnoticed
+    precisely because nothing but FreeBSD ever read it. The explicitly-named
+    perf_grp*_freebsd modifiers still exist for a config that wants to pin one
+    platform's events deliberately.
+
+    Same pattern as CpuPin, which derives its CPU list from the running machine
+    rather than being written out per host.
     """
     def __init__(self, value_opts=None, **kwargs):
         super().__init__(value_opts, **kwargs)
         val = self._kwargs.get("val", "")
+        if osinfo.IS_FREEBSD and self._kwargs.get("val_freebsd"):
+            val = self._kwargs["val_freebsd"]
         self.perf_events: list = split_quoted(val) if val else []
 
     def __str__(self) -> str:
