@@ -13,10 +13,11 @@ hard-won gotchas, and the current list of known-broken files.
   it builds compilers (via `opam-compiler`), builds benchmark binaries per
   runtime, runs them under `perf` + `olly`, sweeps GC parameters, and emits
   data-contract artifacts.
-- Benchmarks live in sibling repos: micro = `~/benches` (13 suites, 195 enabled
-  programs — 196 listed, `oxcaml_prefetch` needs an OxCaml runtime), macro =
-  `~/macro-benches` (22 suites, 31 enabled programs; merlin and lavyek
-  disabled). Both are driven through `OCamlBenchmarkSuite`.
+- Benchmarks live in sibling repos: micro = `~/benches` (13 suites, 196 enabled
+  programs of 200 declared; 195 of the 196 run on stock OCaml, `oxcaml_prefetch`
+  needs an OxCaml runtime), macro = `~/macro-benches` (23 suites declared, 21 with
+  programs, 95 enabled; merlin and lavyek disabled). Both are driven through
+  `OCamlBenchmarkSuite`.
   Both repos also carry their own program list (`manifest.yml` /
   `benchmarks/manifest.yml`) with `args` copied verbatim from the matching base
   config here, so they can build and run themselves without this repo.
@@ -56,13 +57,13 @@ the data contract (PR #5), reproducible switch provisioning (PR #4) and memtrace
 support (PR #3) — all three merged, so the contract, `adapt`, `MemtraceAttach`
 and the opam-root lock documented here are all present on it.
 
+`knob-a-rungs` (the input-size ladders: `<tool>_..._{small,default,large}` rungs
+in `macro_base.yml` plus the size/legacy tags) and `fix-switch-provisioning` are
+merged into it too. The `knob-a-rungs` branch name keeps the historical label;
+the docs and configs call it the input-size ladder.
+
 Still unmerged:
 
-- **`knob-a-rungs`** — the input-size ladders: `<tool>_..._{small,default,large}`
-  rungs in `macro_base.yml`, the size/legacy tags, and one `*_ladder_5.5.0.yml`
-  olly-pass config per tool. Independent of the contract work; the two touch
-  `macro_base.yml` in different places. (Branch name keeps the historical
-  "knob-a" label; the docs/configs call it the input-size ladder.)
 - **`mmtk-minheap`** — `experiments/mmtk_minheap.yml` + its result file (see the
   known-broken table).
 
@@ -71,24 +72,24 @@ Still unmerged:
 Each macro tool has a `{small,default,large}` (a few also `huge`) input-size
 ladder — rungs chosen so each reaches a different GC/runtime regime, not just a
 scaled-up copy of the one below. `macro_base.yml` enables **every** program in
-`benchmarks:` (all rungs + legacy = 92), and `tags:` carries the run selectors:
+`benchmarks:` (all rungs + legacy = 95), and `tags:` carries the run selectors:
 
 - `default_run` / `small_run` / `large_run` / `huge_run` — the rung of that size
-  across every tool (`default_run` = 20, one per tool; `huge_run` = 2).
+  across every tool (`default_run` = 21, one per tool; `huge_run` = 2).
 - `legacy` (30) — the pre-ladder benches kept but not run by default: original
   anchors, extra per-tool workloads (cpdf ops, alt-ergo problems, menhir
   grammars, devkit stre/network/gzip), and the frozen issue reproducers
   (`liq_video_frames_pool` #14533, `goblint` #13733).
-- `all_benches` (92) — everything runnable at once.
+- `all_benches` (95) — everything runnable at once.
 
 **A bare run (no `RUNNING_TAG`) auto-applies `default_run`** (`runbms.py` — guarded
 on the tag existing, so micro-benches is unaffected). So the standard suite is the
 default rungs; other sizes / legacy / everything are opt-in via `RUNNING_TAG`. The
 tag filter is *intersection-only* (can't re-enable a program absent from
-`benchmarks:`), which is why `benchmarks:` lists everything. Per-tool
-`*_ladder_5.5.0.yml` configs still exist for one-tool olly passes (they override
-`benchmarks:` to that tool's rungs; a bare run of one gives its `_default` rung —
-pass `RUNNING_TAG=small_run,default_run,large_run` for all three).
+`benchmarks:`), which is why `benchmarks:` lists everything. (The per-tool
+`*_ladder_5.5.0.yml` one-tool olly-pass configs are not on this branch; narrow
+`overrides.benchmarks` to a tool instead, and pass
+`RUNNING_TAG=small_run,default_run,large_run` for all three rungs.)
 
 ## Where things live (read first)
 
@@ -483,6 +484,14 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   `NotImplementedError` / are skipped. The live log interleaves the harmless
   `already exists; skipping build` WARNING, so each `o`/`x` prints at the *start
   of the next line* — read the RESULT yaml, not the live log.
+- **Reading `minheap` numbers under MMTk.** Off-heap memory (Bigarray, GMP, other
+  custom blocks) does not count against `MMTK_HEAP_SIZE_MB` and is not GC-paced,
+  so off-heap-heavy benches (`owl_gc`, `zarith_pi`) bottom out at the search floor
+  while their real RSS keeps growing with the budget: their "minimum heap" is an
+  artefact, not a measurement. `alt_ergo_{fill,yyll,unsat_smt2}` crash with
+  SIGSEGV (moving GC vs. C-held custom blocks) and `pplacer_testsuite` with
+  SIGABRT (channel finaliser during GC); both are excluded from the shipped MMTk
+  configs rather than being live failures.
 - **MMTk runtime (`type: OCamlMMTk`)** is a drop-in. Default repo is
   `udesou/ocaml-mmtk`; the shipped `mmtk_*.yml` configs override `repo:` to
   `fplaunchpad/ocaml-mmtk`. Three mechanisms make the stock scripts work:
