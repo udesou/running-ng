@@ -1,0 +1,78 @@
+# =============================================================================
+# Smoke test for the 2026-07-13 pr14796 sweeps  --  RUN THIS FIRST
+# =============================================================================
+# Forces both runtime switches to build and exercises the per-runtime
+# olly_ref / RUNNING_OLLY_BIN plumbing end-to-end BEFORE launching the long
+# sweeps.
+#
+#   - trunk-e53a0322      : merge-base of the current PR head vs trunk
+#                           (ocaml/ocaml @ e53a0322, 2026-07-08)
+#   - gc-pacing-72c712d4  : udesou/ocaml @ gc-pacing-33bd0510+events
+#                           (PR #14796 head 33bd0510 + one commit syncing the
+#                           OCaml runtime_counter enum with the 41-entry C
+#                           ev_runtime_counter enum). The PR head itself has a
+#                           STALE 28-entry OCaml enum out of sync with its C
+#                           side, which mis-decodes every counter from index 18
+#                           on (major_words reads ~0). The fork fixes that.
+#
+# olly_ref: trunk = "main"; gc-pacing = "gc-pacing-compat" (sums the split
+# EV_C_MAJOR_ALLOCATED_{ON,OFF,EPHE}_HEAP counters back into major words, so
+# major_words stays comparable to trunk's single EV_C_MAJOR_ALLOCATED_WORDS).
+#
+# PASS criteria: both olly_cpdf_merge*.json sidecars are non-empty and the two
+# runtimes report major_heap words within a few % on cpdf_merge.
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/pr14796_smoke_2026_07_13.yml \
+#   LOG_DIR=/tmp/pr14796_smoke_2026_07_13 \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 1
+  benchmarks:
+    macro-cpdf-monorepo: [cpdf_merge]
+    macro-lavyek-monorepo: []
+    macro-menhir-monorepo: []
+    macro-alt-ergo-monorepo: []
+    macro-coq-monorepo: []
+    macro-devkit: []
+    macro-irmin: []
+    macro-ocamlformat: []
+    macro-decompress: []
+    macro-eio: []
+    macro-sedlex: []
+    macro-yojson: []
+    macro-zarith: []
+    macro-owl: []
+    macro-ocamlc-self-compile: []
+    macro-liquidsoap-lang: []
+    macro-merlin: []
+    macro-jsoo: []
+    macro-liq-video-frames: []
+    macro-pplacer: []
+
+runtimes:
+  ocaml-trunk-e53a0322:
+    type: OCaml
+    commit: "e53a032298229338268c3dc3640214e1fa710c95"
+    olly_ref: "main"
+
+  ocaml-gc-pacing-72c712d4:
+    type: OCaml
+    repo: "https://github.com/udesou/ocaml.git"
+    commit: "72c712d414aa46e2e524bb2f7d1cd43abc76cb37"
+    olly_ref: "gc-pacing-compat"
+
+configs:
+  - "ocaml-trunk-e53a0322|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-gc-pacing-72c712d4|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+
+comparisons:
+  - label: "smoke"
+    a: ocaml-trunk-e53a0322
+    b: ocaml-gc-pacing-72c712d4

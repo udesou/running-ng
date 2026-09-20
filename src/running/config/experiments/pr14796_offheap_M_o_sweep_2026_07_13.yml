@@ -1,0 +1,109 @@
+# =============================================================================
+# PR #14796 (new GC-pacing) vs merge-base trunk — off-heap (M, o) sweep
+# 2026-07-13
+# =============================================================================
+# Same two runtimes as pr14796_s_o_sweep_2026_07_13.yml, but sweeps the
+# custom-block major ratio M × o and is restricted to the 8 off-heap
+# macrobenchmarks (Bigarray / Z.t / refcounted-pool allocators) — the ones
+# whose behaviour M actually governs.
+#
+#   alt_ergo_fill           (zarith Z.t custom blocks)
+#   cpdf_merge              (camlpdf Bigarray streams)
+#   cpdf_scale              (camlpdf Bigarray streams)
+#   cpdf_squeeze            (camlpdf Bigarray streams)
+#   liq_video_frames_pool   (POOL=1, TOUCH=full — refcounted-pool, #14533)
+#   owl_gc                  (Bigarray-backed ndarray + finalisers)
+#   pplacer_testsuite       (gsl + Bigarray matrices)
+#   zarith_pi               (zarith Z.t custom blocks)
+#
+# Grid:  M ∈ {11, 22, 44, 100, 250}     (default 44;  1/4x → 5.7x)
+#        o ∈ {40, 80, 120, 150, 200}     (default 120)
+#        → 5 × 5 = 25 cells per (bench, runtime)
+#
+# Scale: 25 cells × 2 runtimes × 8 benches × 5 invocations = 2000 runs.
+#        (Lower `invocations` to 3 -> 1200 runs if you want it faster; the
+#        2026-05-13 off-heap M×o sweep used 3.)
+#
+# olly_ref: trunk = "main"; gc-pacing = "gc-pacing-compat" (see smoke config
+# header — the fork syncs the OCaml runtime_events enum and compat olly sums the
+# split major-alloc counters). Lavyek is disabled; the
+# re_par/md_par/pin_lavyek modifiers are carried to match the (s, o) sweep so
+# the shared off-heap benches are measured identically across both grids.
+#
+# NB from the May (s,o) run: liq_video_frames_pool on gc-pacing thrashes badly
+# at low o — expect very long / timed-out cells for that bench off the default
+# o. That is a real PR signal, not an artifact.
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/pr14796_offheap_M_o_sweep_2026_07_13.yml \
+#   LOG_DIR=$PWD/gc-sweep-logs-pr14796-offheap-M-o-2026-07-13 \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
+
+overrides:
+  invocations: 5
+  benchmarks:
+    macro-menhir-monorepo:     []
+    macro-cpdf-monorepo:       [cpdf_merge, cpdf_scale, cpdf_squeeze]
+    macro-alt-ergo-monorepo:   [alt_ergo_fill]
+    macro-coq-monorepo:        []
+    macro-devkit:              []
+    macro-irmin:               []
+    macro-ocamlformat:         []
+    macro-decompress:          []
+    macro-eio:                 []
+    macro-sedlex:              []
+    macro-yojson:              []
+    macro-zarith:              [zarith_pi]
+    macro-owl:                 [owl_gc]
+    macro-ocamlc-self-compile: []
+    macro-liquidsoap-lang:     []
+    macro-merlin:              []
+    macro-jsoo:                []
+    macro-liq-video-frames:    [liq_video_frames_pool]
+    macro-pplacer:             [pplacer_testsuite]
+    macro-lavyek-monorepo:     []
+
+runtimes:
+  ocaml-trunk-e53a0322:
+    type: OCaml
+    commit: "e53a032298229338268c3dc3640214e1fa710c95"
+    olly_ref: "main"
+
+  ocaml-gc-pacing-72c712d4:
+    type: OCaml
+    repo: "https://github.com/udesou/ocaml.git"
+    commit: "72c712d414aa46e2e524bb2f7d1cd43abc76cb37"
+    olly_ref: "gc-pacing-compat"
+
+modifiers:
+  M:
+    type: OCamlRunParam
+    val: "M={0}"
+  o:
+    type: OCamlRunParam
+    val: "o={0}"
+
+configs:
+  - "ocaml-trunk-e53a0322|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-gc-pacing-72c712d4|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+
+config_sweep:
+  M: [11, 22, 44, 100, 250]
+  o: [40, 80, 120, 150, 200]
+
+comparisons:
+  - label: "gc-pacing PR vs trunk merge-base — off-heap (M, o) sweep 2026-07-13"
+    a: ocaml-trunk-e53a0322
+    b: ocaml-gc-pacing-72c712d4

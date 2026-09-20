@@ -1,0 +1,62 @@
+# =============================================================================
+# Full-coverage build/pipeline smoke for the 2026-07-13 pr14796 comparison
+# =============================================================================
+# Purpose: prove the WHOLE pipeline end-to-end before the long sweeps —
+#   * both runtime switches build (trunk merge-base + PR #14796 head)
+#   * every (buildable) macrobenchmark builds against both runtimes
+#   * per-runtime olly attaches (trunk: main; gc-pacing: gc-pacing-compat)
+#     and emits non-empty sidecars, with major_words comparable across runtimes
+#   * NATIVE data-contract emission works (schema_version set -> inline
+#     <log_dir>/contract/{manifest.json, measurements/*.ndjson}, no adapter)
+#   * the two runtimes are comparable (default GC params, same everything)
+#
+# All benchmarks from the base default set; ONE invocation; DEFAULT GC params
+# (no s/o/M modifiers, no config_sweep). lavyek stays disabled (private repo)
+# and merlin stays disabled (upstream race) — same as base.
+#
+# NB: coq / frama-c / goblint are heavy to build (frama-c needs apron). runbms
+# logs any build failure and skips that (bench, runtime), so the run still
+# completes and the tail "Build failures" list tells you exactly what didn't
+# build.
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/pr14796_smoke_all_2026_07_13.yml \
+#   LOG_DIR=$PWD/gc-sweep-logs-pr14796-smoke-all-2026-07-13 \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+# Native data-contract emission (schema_version) is now inherited from
+# macro_base.yml — no need to set it here.
+
+overrides:
+  invocations: 1
+  # benchmarks: intentionally NOT overridden -> inherit the full base default
+  # set (lavyek + merlin already disabled there).
+
+runtimes:
+  ocaml-trunk-e53a0322:
+    type: OCaml
+    commit: "e53a032298229338268c3dc3640214e1fa710c95"
+    olly_ref: "main"
+
+  ocaml-gc-pacing-72c712d4:
+    type: OCaml
+    repo: "https://github.com/udesou/ocaml.git"
+    commit: "72c712d414aa46e2e524bb2f7d1cd43abc76cb37"
+    olly_ref: "gc-pacing-compat"
+
+# Default GC params: same modifier string as the sweeps, minus any s/o/M sweep.
+# re_par/md_par/pin_lavyek are lavyek-scoped and no-ops here (lavyek disabled),
+# kept only so the config string matches the sweeps for comparability.
+configs:
+  - "ocaml-trunk-e53a0322|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-gc-pacing-72c712d4|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+
+comparisons:
+  - label: "gc-pacing PR vs trunk merge-base — full smoke 2026-07-13"
+    a: ocaml-trunk-e53a0322
+    b: ocaml-gc-pacing-72c712d4

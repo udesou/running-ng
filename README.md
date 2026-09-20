@@ -426,6 +426,34 @@ The `olly` section is the direct output of `olly gc-stats --json`. The `perf` se
 
 The `.json` sidecar is the preferred input for analysis scripts. Old `.log` files without a sidecar are still supported via regex fallback in `plot_gc_sweep.py`.
 
+**Data-contract output (dashboard-ready).** Both base configs
+(`base/ocaml/{macro_base,micro_base}.yml`) set `schema_version: "1.0"`, so every
+experiment that `includes:` a base also emits the shared benchmark
+**data contract** natively as the run proceeds, alongside the raw sidecars:
+
+```
+<run-dir>/contract/
+  manifest.json                # run metadata: machine, configs (with their
+                               #   sweep dimensions), comparisons, tool versions
+  measurements/olly.ndjson     # one record per invocation, one entry per metric
+  measurements/perf.ndjson
+```
+
+This is the format the [ocaml-bench-dashboard](https://github.com/udesou/ocaml-bench-dashboard)
+ingests directly — point its `BENCH_RUN_DIR` at a `<run-dir>` and it uses the
+`contract/` as-is. `schema_version` is inherited from the base; **do not
+re-declare it at the top level of an experiment** — a top-level scalar defined
+in both the base and the including config is a `combine()` `TypeError` (see the
+config-merge gotcha). Override it via `overrides:` if you ever need to.
+
+Legacy runs that predate this (raw sidecars only, no `contract/`) can be
+converted after the fact:
+
+```bash
+python3 -m running adapt <run-dir> -c <config.yml> \
+  --adapter contract-adapter/bin/adapter    # build once: (cd contract-adapter && ./build.sh)
+```
+
 ## Environment Variables
 
 | Variable | Default | Description |

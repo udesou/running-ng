@@ -16,6 +16,7 @@ short and current. Deep reference lives in `~/PROJECT_SUMMARY.md`.
 
 ## Hard rules (do not violate)
 
+- **Do not comment on PRs, or add to PRs, unless explicitly asked to.**
 - No "Claude"/Anthropic/Co-Authored-By: Claude in further commit messages.
 - **Remote is `origin = github.com/udesou/running-ng`** (a personal fork). Default
   working branch is **`adding-ocaml-support`** (all the OCaml support); `master`

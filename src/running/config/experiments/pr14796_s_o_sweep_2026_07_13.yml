@@ -1,0 +1,82 @@
+# =============================================================================
+# PR #14796 (new GC-pacing) vs merge-base trunk — (s, o) sweep, 2026-07-13
+# =============================================================================
+# Reproduces the 2026-05-26 (s, o) sweep for the CURRENT PR head, so results
+# are directly comparable to ~/running-ng/gc-sweep-logs-pr14796-2026-05-26/.
+#
+# Runtimes:
+#   ocaml-trunk-e53a0322      ocaml/ocaml @ e53a0322 (merge-base of PR head vs
+#                             trunk, 2026-07-08) — isolates the PR from trunk drift
+#   ocaml-gc-pacing-72c712d4  udesou/ocaml @ gc-pacing-33bd0510+events (PR #14796
+#                             head 33bd0510 + OCaml runtime_events enum sync)
+#
+# olly_ref: trunk = "main"; gc-pacing = "gc-pacing-compat". The PR head's OCaml
+# runtime_counter enum (28) is out of sync with its C enum (41), so major_words
+# mis-decodes; the fork syncs the enum and gc-pacing-compat sums the split
+# ALLOCATED_{ON,OFF,EPHE}_HEAP counters. See the smoke config header.
+#
+# Grid:  s ∈ {131072, 262144, 524288, 1048576, 2097152}   (default 262144)
+#        o ∈ {40, 80, 120, 150, 200}                       (default 120)
+#        → 5 × 5 = 25 cells per (bench, runtime)
+#
+# Scale: 25 cells × 2 runtimes × 22 benches × 5 invocations ≈ 5500 runs
+#        (the May run on monolith took ~14 h wall).
+#
+# Lavyek stays DISABLED (as in the May run): gc-pacing emits ~16x more major-GC
+# events, overflowing the re_par-22 ring and corrupting wall_time. The
+# re_par-22|md_par-8|pin_lavyek modifiers are still carried so the shared
+# off-heap benches are measured identically to the M×o sweep and the May run.
+#
+# Usage:
+#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
+#   CONFIG_FILE=src/running/config/experiments/pr14796_s_o_sweep_2026_07_13.yml \
+#   LOG_DIR=$PWD/gc-sweep-logs-pr14796-s-o-2026-07-13 \
+#     bash run_ocaml_bench_gc_sweep.sh
+# =============================================================================
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
+
+overrides:
+  invocations: 5
+  benchmarks.macro-lavyek-monorepo: []
+
+runtimes:
+  ocaml-trunk-e53a0322:
+    type: OCaml
+    commit: "e53a032298229338268c3dc3640214e1fa710c95"
+    olly_ref: "main"
+
+  ocaml-gc-pacing-72c712d4:
+    type: OCaml
+    repo: "https://github.com/udesou/ocaml.git"
+    commit: "72c712d414aa46e2e524bb2f7d1cd43abc76cb37"
+    olly_ref: "gc-pacing-compat"
+
+modifiers:
+  s:
+    type: OCamlRunParam
+    val: "s={0}"
+  o:
+    type: OCamlRunParam
+    val: "o={0}"
+
+configs:
+  - "ocaml-trunk-e53a0322|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-gc-pacing-72c712d4|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
+
+config_sweep:
+  s: [131072, 262144, 524288, 1048576, 2097152]
+  o: [40, 80, 120, 150, 200]
+
+comparisons:
+  - label: "gc-pacing PR vs trunk merge-base — (s, o) sweep 2026-07-13"
+    a: ocaml-trunk-e53a0322
+    b: ocaml-gc-pacing-72c712d4
