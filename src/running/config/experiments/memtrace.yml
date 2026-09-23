@@ -1,0 +1,25 @@
+# memtrace proof of concept: test_decompress only (the one macro-benches binary
+# patched to call Memtrace.trace_if_requested ()), traced via memtrace_grp1. Each
+# invocation writes memtrace_<...>.trace (CTF) and a .json folded-stack sidecar.
+# Includes macro_base.yml; run with run_ocaml_bench_gc_sweep.sh (RUNNING_MACRO_BENCH_DIR set).
+# `benchmarks:` must sit under overrides:; a top-level one merges key-by-key with the base.
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 3
+  benchmarks:
+    macro-decompress:
+      - test_decompress
+  # Always rebuild so a stale pre-memtrace binary cannot silently skip tracing.
+  suites.macro-decompress.always_build: true
+
+runtimes:
+  # Named for the exact version so it shares the running-ng-ocaml-5.5.0 switch.
+  ocaml-5.5.0:
+    type: OCaml
+    version: "5.5.0"
+
+configs:
+  - "ocaml-5.5.0|memtrace_grp1"

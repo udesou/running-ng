@@ -104,15 +104,7 @@ def test_resolve_ocaml_runtime():
 
 
 def test_a_present_but_empty_key_is_not_an_override(tmp_path, caplog):
-    """`benchmarks:` with nothing under it must not kill the run.
-
-    Deleting the entries below a key and leaving the key behind is the obvious
-    way to say "enable everything the base defines". YAML parses that as None,
-    not as an empty container, and combine() used to die on it with a bare
-    "TypeError: 'NoneType' object is not iterable" that named neither the file
-    nor the key. It is treated as no override, matching what an explicit `{}`
-    already did, and warns because an emptied key is usually a lost edit.
-    """
+    """`benchmarks:` with nothing under it parses as None; it must act as no override and warn."""
     import logging
 
     base = tmp_path / "base.yml"
@@ -134,8 +126,6 @@ def test_a_present_but_empty_key_is_not_an_override(tmp_path, caplog):
 
 
 def test_an_explicit_empty_mapping_still_means_no_override(tmp_path):
-    # `{}` already behaved this way (dict.update({}) is a no-op); pin it so the
-    # None handling above and this stay consistent.
     base = tmp_path / "base.yml"
     base.write_text("benchmarks:\n  suite_a: [one]\n")
     child = tmp_path / "child.yml"

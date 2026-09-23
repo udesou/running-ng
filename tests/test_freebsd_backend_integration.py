@@ -1,14 +1,5 @@
-"""End-to-end exercise of the FreeBSD counter path, on any POSIX host.
-
-Nobody has run running-ng on FreeBSD yet.  This drives the real code path
-(backend selection, command construction, process lifecycle, output file
-handling, table parsing, event aliasing) against tests/fixtures/fake_pmcstat.py,
-which reproduces pmcstat(8)'s counting-mode output format from its source.
-
-What this canNOT tell us: whether hwpmc is loaded, whether the event names
-resolve on real hardware, or whether the counts mean anything.  Only a FreeBSD
-box answers those.  It does mean that when one is available, the remaining
-failures are about PMCs rather than about plumbing.
+"""End-to-end exercise of the FreeBSD counter path on any POSIX host, against
+tests/fixtures/fake_pmcstat.py. Cannot tell whether events resolve on real hardware.
 """
 import json
 import os
@@ -57,33 +48,25 @@ def test_freebsd_path_collects_and_aliases_counters(fake_pmcstat_on_path):
     assert status.name == "Normal"
     assert data["counter_backend"] == "freebsd-pmc"
     by_name = {e["event"]: e["counter-value"] for e in data["perf"]}
-    # "unhalted-cycles" is aliased onto perf's "cycles" so the contract
-    # vocabulary needs no change to accept FreeBSD counters.
+    # "unhalted-cycles" is aliased onto perf's "cycles"
     assert set(by_name) == {"instructions", "cycles"}
     assert all(v > 0 for v in by_name.values())
 
 
 def test_freebsd_path_still_reports_rusage(fake_pmcstat_on_path):
     data, _ = _run("instructions")
-    # rusage is the floor every backend keeps, and on FreeBSD it is also the
-    # only CPU-time source, since pmcstat has no task-clock equivalent.
+    # on FreeBSD rusage is the only CPU-time source
     assert set(data["rusage"]) >= {"user_time", "system_time", "minor_faults"}
 
 
 def test_freebsd_path_has_no_task_clock_crosscheck(fake_pmcstat_on_path):
     data, _ = _run("instructions,unhalted-cycles")
-    # The check must be absent rather than silently passing: there is no
-    # task-clock on this backend to compare against rusage.
+    # absent, not silently passing: no task-clock on this backend
     assert "perf_incomplete" not in data
 
 
 def test_benchmark_exit_status_is_the_benchmarks_own(fake_pmcstat_on_path):
-    """The reason we attach instead of letting the tool launch.
-
-    `pmc stat` always returns 0 (cmd_pmc_stat.c:481), so a crashed benchmark
-    would look clean.  Attaching keeps the benchmark our direct child, so a
-    non-zero exit still surfaces.
-    """
+    """`pmc stat` always returns 0; attaching keeps the benchmark's own exit status."""
     bm = BinaryBenchmark(Path("/bin/sh"), [], suite_name="s", name="crashy")
     mod = PerfAndOllyAttach(name="pmc_grp1", type="PerfAndOllyAttach", val="instructions")
     _out, _companion, status = bm._run_with_perf_and_olly(
@@ -92,15 +75,8 @@ def test_benchmark_exit_status_is_the_benchmarks_own(fake_pmcstat_on_path):
 
 
 def test_bad_event_list_degrades_without_failing_the_run(fake_pmcstat_on_path, caplog):
-    """A wrong event name is the expected first failure on real hardware.
-
-    libpmc has no portable aliases on modern x86, so the names in a config will
-    not resolve until someone reads them off `pmc list`.  That must cost the
-    invocation its counters, not the whole sweep.
-    """
+    """An unresolvable event name costs the invocation its counters, not the sweep."""
     bm = BinaryBenchmark(Path("/bin/sleep"), ["1"], suite_name="s", name="smoke")
-    # The stand-in refuses to allocate an event that is neither a libpmc alias
-    # nor a raw uppercase name, exactly as pmc_allocate does on real hardware.
     mod = PerfAndOllyAttach(name="pmc_grp1", type="PerfAndOllyAttach",
                             val="stalled-cycles-frontend")
     _out, companion, status = bm._run_with_perf_and_olly(

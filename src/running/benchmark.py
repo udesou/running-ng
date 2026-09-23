@@ -25,33 +25,21 @@ from enum import Enum
 import pty
 
 def _is_dry_run() -> bool:
-    """Whether this is a dry run, asked lazily to keep the import cycle open.
-
-    running.suite imports names from this module (`from running.benchmark
-    import JavaBenchmark, ...`), so it needs those names to already exist.
-    Importing running.suite back at module level here therefore made the pair
-    order-dependent: `import running.suite` worked, because it only needs this
-    module's *module object*, while `import running.benchmark` on its own
-    failed with "cannot import name 'JavaBenchmark' from partially initialized
-    module". Deferring to call time means either order works.
-    """
+    """Imported lazily: running.suite imports names from this module, so a
+    module-level import here would make the import order matter."""
     from running import suite
     return suite.is_dry_run()
 
 
-# Executables that are never the benchmark itself.  Some benchmark wrapper
-# scripts run OCaml programs in $(...) subshells before exec'ing the real
-# binary (coq's wrapper runs `ocamlfind printconf stdlib` to set OCAMLPATH);
-# with OCAML_RUNTIME_EVENTS_START inherited, each writes its own .events file.
+# Never the benchmark itself: wrapper scripts may run these in $(...) subshells
+# before exec'ing the real binary, and each then writes its own .events file.
 BUILD_TOOLS = {"ocamlfind", "ocamlc", "ocamlc.opt", "ocamlopt",
                "ocamlopt.opt", "ocaml", "ocamldep", "ocamlmklib",
                "ocamllex", "ocamlyacc", "dune", "menhir",
                "bash", "sh"}
 
 
-#: perf names the unit of each counter-value in a sibling field.  task-clock
-#: has come back as "msec" on every perf we have seen, but the value is only
-#: meaningful together with its unit, so it is read rather than assumed.
+#: perf names the unit of each counter-value in a sibling field (task-clock is usually "msec").
 _COUNTER_UNIT_SECONDS = {
     "sec": 1.0, "s": 1.0, "msec": 1e-3, "ms": 1e-3,
     "usec": 1e-6, "us": 1e-6, "nsec": 1e-9, "ns": 1e-9,
@@ -59,14 +47,8 @@ _COUNTER_UNIT_SECONDS = {
 
 
 def counter_seconds(entry: Dict[str, Any]) -> Optional[float]:
-    """A time-valued perf counter in seconds, or None if it cannot be read.
-
-    `counter-value` is in the unit named by `unit`; the sibling `event-runtime`
-    is nanoseconds.  Reading the first as if it were the second is a factor of
-    a million, which is how the task-clock cross-check below came to fire on
-    every invocation of every benchmark -- 36769.670031 msec, a faithful 36.8s,
-    read as 0.0000368s and duly reported as perf having missed threads.
-    """
+    """A time-valued perf counter in seconds, or None. `counter-value` is in
+    the unit named by `unit`; the sibling `event-runtime` is nanoseconds."""
     try:
         value = float(entry["counter-value"])
     except (KeyError, TypeError, ValueError):
@@ -74,7 +56,7 @@ def counter_seconds(entry: Dict[str, Any]) -> Optional[float]:
     scale = _COUNTER_UNIT_SECONDS.get((entry.get("unit") or "").strip().lower())
     if scale is not None:
         return value * scale
-    # No unit, or one not in the table: event-runtime is documented nanoseconds.
+    # event-runtime is documented as nanoseconds
     try:
         return float(entry["event-runtime"]) / 1e9
     except (KeyError, TypeError, ValueError):
@@ -82,21 +64,8 @@ def counter_seconds(entry: Dict[str, Any]) -> Optional[float]:
 
 
 def _warn_if_gc_stats_unreliable(benchmark_name: str, olly: Any) -> None:
-    """Warn when olly says its own GC numbers cannot be trusted.
-
-    olly sets `stats_reliable: false` when the runtime_events ring overflowed
-    and events were dropped, which makes every GC figure in that record an
-    undercount. The invocation still exits zero and is recorded as passed, so
-    without this the numbers go into a sweep looking exactly like good ones.
-
-    Observed on four GC-event-dense benchmarks (the globroots trio, which
-    force majors explicitly, and pidigits5 at ~13.7k major collections) when
-    run with the DEFAULT ring. The fix is a bigger ring: `re-25`, which the
-    established micro configs already carry. So this is a loud symptom of a
-    config that is missing it, not a defect to work around.
-
-    Warning rather than failing: the counters and rusage in the same record
-    are unaffected, so the invocation still carries usable data.
+    """Warn when olly reports `stats_reliable: false` (runtime_events ring
+    overflowed, GC figures undercount). The fix is a bigger ring (`re-25`).
     """
     if not isinstance(olly, dict):
         return
@@ -120,16 +89,10 @@ def pid_alive(pid: int) -> bool:
 
 
 def pid_is_benchmark(pid: int) -> bool:
-    """PID must be alive and its exe must not be a known setup tool.
+    """PID is alive and its exe is not a known setup tool.
 
-    Where the platform can resolve a PID's executable, a failed lookup
-    (zombie, transient, permission denied …) is a reject rather than an
-    accept — defaulting to accept lets dying subshells slip through when the
-    lookup briefly fails.
-
-    Where the platform offers no lookup at all, only the alive check applies.
-    Rejecting there would reject *every* PID, so the olly attach would never
-    fire and every invocation would stall out its deadline with no GC data.
+    A failed exe lookup rejects (dying subshells must not slip through); a
+    platform with no lookup at all applies only the alive check.
     """
     if not pid_alive(pid):
         return False
@@ -152,9 +115,7 @@ class Benchmark(object):
     def __init__(self, suite_name: str, name: str, wrapper: Optional[str] = None, timeout: Optional[int] = None, override_cwd: Optional[Path] = None, companion: Optional[str] = None, expected_exit: int = 0, **kwargs):
         self.name = name
         self.suite_name = suite_name
-        # The exit code a *successful* run of this benchmark returns. Almost
-        # always 0, but for some workloads a non-zero exit is the by-design
-        # outcome rather than a failure — see `_exit_is_expected`.
+        # Exit code of a successful run; non-zero for some workloads (see _exit_is_expected).
         self.expected_exit: int = int(expected_exit)
         self.env_args: Dict[str, str]
         self.env_args = {}
@@ -168,23 +129,15 @@ class Benchmark(object):
         else:
             self.companion = []
         self.perf_and_olly_attach: Optional[PerfAndOllyAttach] = None
-        # Set by a CpuPin modifier; carries the observer CPU set so olly
-        # and the counter tool can be kept off the benchmark's cores.
+        # Set by CpuPin; carries the observer CPU set for olly and the counter tool.
         self.cpu_pin: Optional[CpuPin] = None
         self.memtrace_attach: Optional[MemtraceAttach] = None
         self.timeout = timeout
         # ignore the current working directory provided by commands like runbms or minheap
         # certain benchmarks expect to be invoked from certain directories
         self.override_cwd = override_cwd
-        # Per-benchmark OCAMLRUNPARAM (e.g. "e=25,d=2"), declared in the suite.
-        # Applied in attach_modifiers AFTER the config-string OCamlRunParam
-        # modifiers (re/md), overriding the SAME keys — so a benchmark that needs
-        # its own runtime_events ring / max-domains (a bursty allocator that
-        # overflows the default ring, or a multicore workload that needs > 2
-        # domains) wins over whatever a global config string sets, without touching
-        # that config. This is the hook that lets re/md move out of the configs and
-        # be probed per-benchmark; keys a benchmark doesn't set fall through to the
-        # config.
+        # Per-benchmark OCAMLRUNPARAM from the suite; its keys override the
+        # config string's re/md modifiers in attach_modifiers.
         self.ocamlrunparam: str = str(kwargs.get("ocamlrunparam", "") or "")
 
     def get_env_str(self) -> str:
@@ -199,43 +152,21 @@ class Benchmark(object):
         return list(self.wrapper)
 
     def prepare(self, _runtime: Runtime):
-        # Optional pre-run preparation hook. Most benchmarks do nothing.
         return
 
     def _exit_is_expected(self, returncode: Optional[int]) -> bool:
-        """Did this invocation finish the way a *successful* run should?
+        """True if `returncode` is None (still running) or equals `expected_exit`.
 
-        `None` means the process was still running when we stopped looking,
-        which the callers treat as normal.  Otherwise compare against
-        `expected_exit` (0 unless the benchmark declares otherwise).
-
-        Some workloads exit non-zero by design, and treating that as a crash
-        loses their data: `alt_ergo_unsat_smt2` runs with `--timelimit 15`, so
-        the workload *is* "solve for 15 seconds" — alt-ergo arms SIGVTALRM, the
-        goal never closes, and the process dies of its own signal with 128+14 =
-        142 on every single run.  Its olly/perf output is complete and correct,
-        but the native contract emitter drops invocations the runner calls
-        crashed, so the benchmark silently never reached the dashboard while the
-        legacy adapter (which reads the sidecars) kept it — the two contract
-        paths disagreed by exactly those cells.
-
-        `macro-benches` already declares this in `benchmarks/manifest.yml` as
-        `expected_exit: 142`; the field is spelled the same here so the two
-        lists stay mechanically diffable.
+        Some workloads exit non-zero by design (alt_ergo_unsat_smt2 dies of its
+        own SIGVTALRM, 142); the field is spelled as in macro-benches' manifest.yml.
         """
         if returncode is None:
             return True
         return returncode == self.expected_exit
 
     def in_modifier_scope(self, m: Modifier) -> bool:
-        """False when `m` carries an `includes` list this benchmark is not on.
-
-        Only `includes` is decided here; `excludes` keeps its existing handling
-        in the callers, and still subtracts from whatever `includes` allowed.
-        That handling is left alone deliberately: it drops a modifier for every
-        program of a partially-excluded suite, and several stale exclude lists
-        in macro_base.yml are only lavyek-only because of it.
-        """
+        """False when `m` carries an `includes` list this benchmark is not on;
+        `excludes` is handled by the callers and still subtracts."""
         if not m.includes:
             return True
         return self.name in m.includes.get(self.suite_name, ())
@@ -251,15 +182,9 @@ class Benchmark(object):
             elif type(m) == Wrapper:
                 b.wrapper.extend(m.val)
             elif type(m) == CpuPin:
-                # Same effect as a Wrapper, but its command is derived from
-                # this machine's topology rather than written in the config.
-                # Empty where the OS cannot pin, which contributes nothing.
+                # Like a Wrapper, with the command derived from this machine's topology.
                 if b.cpu_pin is not None and m.val:
-                    # Two taskset prefixes nest, and the inner one silently
-                    # wins, so the benchmark runs on a set nobody chose.  The
-                    # usual cause is naming a second CpuPin in a config string
-                    # when one already arrives via default_modifiers; scope
-                    # them apart with `excludes` instead.
+                    # Nested taskset prefixes: the inner one silently wins.
                     logging.warning(
                         "%s: CpuPin %s applies on top of %s; the innermost "
                         "pin wins. Scope them apart with excludes.",
@@ -282,10 +207,8 @@ class Benchmark(object):
                 b.memtrace_attach = m
             elif type(m) == ModifierSet:
                 logging.warning("ModifierSet should have been flattened")
-        # Per-benchmark OCAMLRUNPARAM override: merge over the modifier-built value,
-        # this benchmark's keys winning. Config keys the benchmark doesn't set are
-        # kept; keys it sets are replaced (last-value-wins matches OCaml's own
-        # OCAMLRUNPARAM parsing). See self.ocamlrunparam in __init__.
+        # Merge the benchmark's own OCAMLRUNPARAM keys over the modifiers'
+        # (last value wins, as in OCaml's own parsing).
         if self.ocamlrunparam:
             merged: Dict[str, Optional[str]] = {}
             for src in (b.env_args.get("OCAMLRUNPARAM", ""), self.ocamlrunparam):
@@ -315,18 +238,13 @@ class Benchmark(object):
         cwd: Optional[Path],
         modifier: 'PerfAndOllyAttach',
     ) -> Tuple[bytes, bytes, SubprocessrExit]:
-        """Run benchmark with perf stat and olly gc-stats attached via a sync pipe.
+        """Run with perf stat and olly gc-stats attached.
 
-        Owns the per-invocation tmpdir holding the OCaml runtime_events ring
-        and intermediate perf/olly output. Always removes tmpdir before
-        returning — GC-heavy benchmarks (owl_gc, liq_video_frames) leave 100+
-        MB ring files behind, and over a multi-thousand-invocation run those
-        will fill the tmpfs and the next benchmark dies with SIGBUS (mmap
-        write fails on the ring buffer).
+        Owns the per-invocation tmpdir (runtime_events ring, tool output) and
+        always removes it: leftover 100+ MB ring files fill the tmpfs and the
+        next benchmark dies with SIGBUS.
         """
         tmpdir = tempfile.mkdtemp(prefix="running-ng-events-")
-        # Warn early if the tmpfs is already low so the run can be aborted
-        # before we start producing SIGBUS-killed cells.
         try:
             free_mb = shutil.disk_usage(tmpdir).free // (1024 * 1024)
             if free_mb < 1024:
@@ -349,26 +267,15 @@ class Benchmark(object):
         cwd: Optional[Path],
         modifier: 'PerfAndOllyAttach',
     ) -> Tuple[bytes, bytes, SubprocessrExit]:
-        """Body of _run_with_perf_and_olly that uses an externally-owned tmpdir.
-
-        Using SIGSTOP in preexec_fn deadlocks because Python's Popen blocks
-        reading the internal errpipe until the child calls exec() (which closes
-        the CLOEXEC fd). Instead, we block the child in preexec_fn by reading
-        from a pipe: parent gets the pid, starts observers, then closes the write
-        end so the child unblocks and proceeds to exec().
-        """
+        """Body of _run_with_perf_and_olly with an externally-owned tmpdir."""
         env_args = env_args.copy()
         env_args["OCAML_RUNTIME_EVENTS_START"] = "1"
         env_args["OCAML_RUNTIME_EVENTS_DIR"] = tmpdir
         env_args["OCAML_RUNTIME_EVENTS_PRESERVE"] = "1"
 
-        # Spawn a tiny Python wrapper as the child.  It blocks reading from
-        # sync_r, then os.execvp's into the real benchmark.  The PID is
-        # preserved through exec(), so perf and olly track it correctly.
-        #
-        # We cannot use preexec_fn for blocking because Popen.__init__ itself
-        # blocks reading its internal errpipe until the child calls exec().
-        # Any blocking inside preexec_fn therefore deadlocks Popen.
+        # The child is a Python trampoline that blocks on sync_r, then execvp's
+        # the benchmark (same PID, so the tools track it). Blocking in
+        # preexec_fn instead would deadlock: Popen reads its errpipe until exec().
         sync_r, sync_w = os.pipe()
         sync_env = env_args.copy()
         sync_env["_BENCH_SYNC_FD"] = str(sync_r)
@@ -380,12 +287,8 @@ class Benchmark(object):
             "os.read(fd,1); os.close(fd); "
             "os.execvp(sys.argv[1], sys.argv[1:])"
         )
-        # sys.executable, not "python3": the trampoline is our own code, so it
-        # must run the interpreter the harness is running, not whichever
-        # python3 the child's PATH happens to resolve.  A bare "python3" also
-        # depends on the child env carrying a usable PATH, and when it does not
-        # subprocess falls back to os.defpath (":/bin:/usr/bin"), which has no
-        # python3 on FreeBSD (it lives in /usr/local/bin).
+        # sys.executable, not "python3": the child's PATH may not resolve one
+        # (os.defpath has no python3 on FreeBSD).
         bench = subprocess.Popen(
             [sys.executable, "-c", wrapper] + [str(c) for c in cmd],
             env=sync_env,
@@ -397,85 +300,40 @@ class Benchmark(object):
         pid = bench.pid
         os.close(sync_r)
 
-        # Attach the counter tool to the PID while the wrapper is still blocked,
-        # so it is counting before the benchmark's first instruction.  Attaching
-        # (rather than launching) is what keeps the benchmark our own direct
-        # child: `bench.returncode` stays the benchmark's, not a tool's.  Which
-        # tool this is depends on the OS; see running.counters.
+        # Attach while the trampoline is still blocked; attaching (not
+        # launching) keeps the benchmark our direct child.
         backend = counters.select_backend()
-        # Keep olly and the counter tool off the benchmark's own CPUs when a
-        # CpuPin modifier says which those are.  olly is the one that matters:
-        # perf stat in counting mode just reads counters at start and end,
-        # while olly continuously drains the runtime_events ring alongside the
-        # benchmark.  Empty (so a no-op) without CpuPin, or on an OS that
-        # cannot pin.
+        # Keep the observers off the benchmark's CPUs; olly continuously
+        # drains the runtime_events ring alongside the benchmark.
         observer_prefix = (osinfo.pin_command(self.cpu_pin.observer_cpus)
                            if self.cpu_pin is not None else [])
         counter_handle = backend.attach(pid, tmpdir, modifier.perf_events, "main",
                                         pin_prefix=observer_prefix)
 
-        # Whole-process CPU time and fault counts, straight from the kernel.
-        # RUSAGE_CHILDREN only accounts for children already reaped, and nothing
-        # is reaped between here and the post-run snapshot (perf and olly are
-        # waited for later), so the delta is exactly this benchmark's usage.
-        # This is ground truth for utime/stime/faults independent of perf, and
-        # the cross-check that catches a perf attach that missed threads.
+        # RUSAGE_CHILDREN counts reaped children only; nothing else is reaped
+        # before the post-run snapshot, so the delta is this benchmark's usage.
         ru_before = resource.getrusage(resource.RUSAGE_CHILDREN)
 
-        # Do not release the benchmark until the counter tool is actually
-        # counting.  perf handles this inside attach() via --control; pmcstat
-        # has no such protocol, and releasing into the gap between Popen
-        # returning and the PMC being attached recorded zero or partial totals
-        # in roughly half of all invocations.
+        # Releasing before the tool counts loses or under-counts the invocation.
         backend.wait_ready(counter_handle)
 
-        # Release: wrapper execs the benchmark, OCaml runtime starts, ring buffer is created
+        # release the trampoline
         os.close(sync_w)
 
-        # Wait for a *.events file in tmpdir whose PID belongs to the real
-        # benchmark (not a short-lived helper).  Some benchmark wrapper
-        # scripts run OCaml programs in `$(...)` subshells before exec'ing
-        # the real benchmark — e.g. coq's wrapper runs `ocamlfind printconf
-        # stdlib` to set up OCAMLPATH.  With OCAML_RUNTIME_EVENTS_START=1
-        # inherited from our env, each of those writes a .events file with
-        # its own short-lived PID.  If we latch onto one of those we'll
-        # miss the real benchmark.
-        #
-        # Filter strategy:
-        #   1. PID must still be alive (kill(pid, 0) succeeds), AND
-        #   2. The process exe path must not look like a build/setup tool
-        #      (ocamlfind, ocamlc, dune, ocamlopt ...).
-        # The tool filter needs a PID->executable lookup: /proc/<pid>/exe on
-        # Linux, proc_pidpath on macOS, KERN_PROC_PATHNAME on FreeBSD (see
-        # running.osinfo).  Where none is available only the alive check
-        # applies.
-        # Wait for a usable *.events file in tmpdir.  Priority:
-        #
-        #   1. The wrapper PID's own events file.  Our Python wrapper
-        #      execvp's the benchmark script, and the script ultimately
-        #      exec's the real benchmark binary — so `/proc/<wrapper_pid>`
-        #      ends up as the benchmark itself with the same PID.  Any
-        #      other .events files in tmpdir come from short-lived OCaml
-        #      helpers that the wrapper script invoked in $(...)
-        #      subshells (e.g. coq's wrapper runs `ocamlfind printconf
-        #      stdlib` to set up OCAMLPATH).
-        #
-        #   2. Fall back to scanning for other alive, non-build-tool PIDs
-        #      — needed when a wrapper like /usr/bin/time forks a child
-        #      with a different PID than the one we launched.
+        # Wait for the real benchmark's *.events file: prefer the trampoline
+        # PID's own, else any alive non-build-tool PID (a wrapper like
+        # /usr/bin/time forks a child with a different PID). Short-lived
+        # helpers in the wrapper script write .events files too.
         events_file = None
         ocaml_pid = None
         bench_exited_early = False
         wrapper_events = os.path.join(tmpdir, "{}.events".format(pid))
         deadline = time.time() + 10.0
         while time.time() < deadline:
-            # Prefer the wrapper's own events file whenever it exists and
-            # the PID has exec'd into the benchmark binary.
             if os.path.exists(wrapper_events) and pid_is_benchmark(pid):
                 events_file = wrapper_events
                 ocaml_pid = pid
                 break
-            # Fallback: any other alive, non-build-tool PID.
             hits = sorted(glob.glob(os.path.join(tmpdir, "*.events")))
             candidates = [h for h in hits
                           if pid_is_benchmark(int(os.path.basename(h)[:-len(".events")]))]
@@ -483,11 +341,8 @@ class Benchmark(object):
                 events_file = max(candidates, key=os.path.getmtime)
                 ocaml_pid = int(os.path.basename(events_file)[:-len(".events")])
                 break
-            # A benchmark that already exited (crashed on startup, or finished
-            # in milliseconds) can never become attachable — a dead PID fails
-            # pid_is_benchmark forever, so waiting out the deadline is 10s of
-            # pure stall per invocation (times each config). poll() also reaps
-            # the zombie, which kill(pid, 0) would otherwise keep "alive".
+            # An exited benchmark never becomes attachable; do not wait out
+            # the deadline. poll() also reaps the zombie kill(pid, 0) sees as alive.
             if bench.poll() is not None:
                 bench_exited_early = True
                 break
@@ -503,11 +358,8 @@ class Benchmark(object):
                 logging.warning("No runtime events file found in %s; olly will not attach", tmpdir)
             olly_p = None
         else:
-            # events_file was found, so the scan set ocaml_pid alongside it.
             assert ocaml_pid is not None
-            # If the actual OCaml PID differs from bench.pid (e.g. /usr/bin/time
-            # forked a child), re-attach the counter tool to the real benchmark
-            # PID so it tracks the OCaml process, not the idle wrapper.
+            # e.g. /usr/bin/time forked a child: track that, not the idle wrapper
             if ocaml_pid != pid:
                 logging.info("OCaml PID %d differs from wrapper PID %d; re-attaching %s",
                              ocaml_pid, pid, backend.name)
@@ -516,11 +368,8 @@ class Benchmark(object):
                     ocaml_pid, tmpdir, modifier.perf_events, "reattach",
                     pin_prefix=observer_prefix)
 
-            # olly writes its JSON output to stderr by default.  That gets
-            # interleaved with ring-buffer warnings like "[ring_id=0] Lost N
-            # events" on GC-heavy workloads, corrupting the JSON.  Use
-            # --output to redirect JSON to a file and leave stderr for the
-            # warnings we want to discard.
+            # --output keeps the JSON apart from "[ring_id=0] Lost N events"
+            # warnings on stderr, which would corrupt it.
             olly_output = os.path.join(tmpdir, "olly.json")
             olly_p = subprocess.Popen(
                 list(observer_prefix) +
@@ -532,20 +381,14 @@ class Benchmark(object):
 
         try:
             _, bench_stderr = bench.communicate(timeout=self.timeout)
-            # A crash (e.g. SIGSEGV) returns non-zero but raises no exception, so
-            # this must inspect returncode explicitly — otherwise a crashed run is
-            # reported Normal and its partial olly/perf output pollutes results.
-            # `_exit_is_expected` is what keeps a benchmark whose non-zero exit is
-            # the workload (expected_exit:) from being mistaken for such a crash.
+            # A crash raises no exception here; inspect returncode.
             subprocess_exit = (SubprocessrExit.Normal
                                if self._exit_is_expected(bench.returncode)
                                else SubprocessrExit.Error)
         except subprocess.TimeoutExpired:
             bench.kill()
-            # If the actual OCaml process is a forked child of the wrapper
-            # (e.g. /usr/bin/time), killing the wrapper leaves the child
-            # reparented to init, still holding the stderr pipe open.
-            # Kill it explicitly to avoid an infinite hang on communicate().
+            # A forked child of the wrapper is reparented to init and keeps
+            # the stderr pipe open, hanging communicate().
             if ocaml_pid is not None and ocaml_pid != pid:
                 try:
                     os.kill(ocaml_pid, signal.SIGKILL)
@@ -554,7 +397,7 @@ class Benchmark(object):
             _, bench_stderr = bench.communicate(timeout=30)
             subprocess_exit = SubprocessrExit.Timeout
 
-        # Snapshot before perf/olly are reaped so their usage stays out of the delta.
+        # before perf/olly are reaped, so their usage stays out of the delta
         ru_after = resource.getrusage(resource.RUSAGE_CHILDREN)
         rusage = {
             "user_time": round(ru_after.ru_utime - ru_before.ru_utime, 3),
@@ -565,14 +408,10 @@ class Benchmark(object):
             "involuntary_ctx_switches": ru_after.ru_nivcsw - ru_before.ru_nivcsw,
         }
 
-        # The counter tool exits on its own when its target does; this only
-        # bounds the wait and releases any control fds.
         backend.stop(counter_handle)
 
-        # --- Build structured JSON result ---
         structured: Dict[str, Any] = {"rusage": rusage}
 
-        # olly gc-stats --json output (written to olly_output via --output)
         if olly_p is not None:
             try:
                 _, olly_stderr = olly_p.communicate(timeout=30)
@@ -581,7 +420,7 @@ class Benchmark(object):
                 olly_p.kill()
                 _, olly_stderr = olly_p.communicate()
             if olly_stderr:
-                # Lost-events warnings etc. — surface the first line, don't spam.
+                # surface the first line only
                 lines = olly_stderr.decode("utf-8", errors="replace").splitlines()
                 if lines:
                     logging.info("olly stderr: %s (and %d more lines)", lines[0],
@@ -592,9 +431,7 @@ class Benchmark(object):
             except FileNotFoundError:
                 olly_text = ""
                 logging.warning("olly output file %s not found", olly_output)
-            # olly emits C-style `-nan` / `nan` / `-inf` / `inf` when a metric
-            # is computed from zero events (e.g. gc_overhead = 0/0).  These
-            # aren't valid JSON, so substitute `null` before parsing.
+            # olly emits C-style nan/inf (e.g. gc_overhead = 0/0), which is not JSON.
             olly_text_clean = re.sub(
                 r"(?<![A-Za-z0-9_])-?(?:nan|inf(?:inity)?)\b",
                 "null",
@@ -609,23 +446,14 @@ class Benchmark(object):
             else:
                 _warn_if_gc_stats_unreliable(self.name, structured["olly"])
 
-        # Counter records, normalised by the backend to {event, counter-value}.
-        # Still keyed "perf" so existing logs, the contract adapter and
-        # emit.perf_metrics keep working; `counter_backend` says which tool
-        # actually produced them.
+        # Keyed "perf" whatever the backend, for existing consumers.
         structured["counter_backend"] = backend.name
         if counter_handle is not None:
             structured["perf"] = backend.collect(counter_handle)
 
-        # Cross-check the counters against the kernel's own accounting.
-        # task-clock is CPU time over all threads, so it should match
-        # utime+stime closely; a large shortfall means the tool counted only
-        # some threads and every counter here is an under-report.
-        #
-        # Only linux-perf reports task-clock.  On a backend that does not
-        # (freebsd-pmc, none) this check is simply absent, not passing: there
-        # is no equivalent instrument, because the only CPU-time number
-        # available there is the rusage we would be checking against.
+        # task-clock should match utime+stime; a large shortfall means perf
+        # missed threads and every counter is an under-report. Only
+        # linux-perf reports it, so the check is absent on other backends.
         cpu_time = rusage["user_time"] + rusage["system_time"]
         task_clock_s = None
         for entry in structured.get("perf", []):
@@ -679,9 +507,7 @@ class Benchmark(object):
                     timeout=self.timeout,
                     cwd=effective_cwd,
                 )
-                # subprocess.run without check=True does not raise on a non-zero
-                # exit, so a crash returns here — inspect returncode explicitly.
-                # See `_exit_is_expected` for why this is not just `== 0`.
+                # A crash raises no exception here; inspect returncode.
                 subprocess_exit = (SubprocessrExit.Normal
                                    if self._exit_is_expected(p.returncode)
                                    else SubprocessrExit.Error)
@@ -964,9 +790,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
             return
         out_binary.parent.mkdir(parents=True, exist_ok=True)
 
-        # When isolated_switch is set (macrobenchmarks), create a
-        # per-benchmark satellite switch so that opam installs don't
-        # pollute the shared runtime switch.
+        # isolated_switch: opam installs go to a per-benchmark satellite switch.
         if self.isolated_switch:
             env = runtime.get_benchmark_switch_env(self.benchmark_name)
             switch_name = runtime.get_benchmark_switch_name(self.benchmark_name)
@@ -975,9 +799,6 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
             switch_name = runtime.get_switch_name()
 
         env.update(self.build_env)
-        # Runtime build-env overrides (e.g. OCamlMMTk's fixed MMTk heap +
-        # libmmtk_ocaml.a on LIBRARY_PATH).  Applied last; the runtime folds in
-        # any existing value it wants to preserve.
         env.update(runtime.get_build_env_overrides())
         env["RUNNING_OCAML_OUTPUT"] = str(out_binary)
         env["RUNNING_OCAML_BENCH_DIR"] = str(self.benchmark_dir)
@@ -994,8 +815,6 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         else:
             cmd = [str(build_script)]
         cmd.extend(self.build_args)
-        # Runtime-specific launcher prefix (e.g. OCamlMMTk needs `setarch -R`
-        # so the MMTk compiler doesn't flake while building the benchmark).
         cmd = list(runtime.get_command_prefix()) + cmd
         logging.info("Building OCaml benchmark %s with command: %s", self.name, " ".join(cmd))
         subprocess.run(cmd, cwd=str(self.benchmark_dir), env=env, check=True)

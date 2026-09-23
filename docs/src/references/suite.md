@@ -95,7 +95,7 @@ Therefore, companion programs should have appropriate timeouts or detect when ma
 Here is an example of using `companion` to launch `bpftrace` in the background to count the system calls.
 ```yaml
 includes:
-  - "$RUNNING_NG_PACKAGE_DATA/base/runbms.yml"
+  - "$RUNNING_NG_PACKAGE_DATA/base/upstream/runbms.yml"
 
 overrides:
   "suites.dacapo2006.timing_iteration": 1
@@ -154,7 +154,7 @@ Note that you will need to prepend probes to the classpaths, so that the [modifi
 Here is an example configuration file.
 ```yaml
 includes:
-  - "/home/zixianc/running-ng/src/running/config/base/runbms.yml"
+  - "$RUNNING_NG_PACKAGE_DATA/base/upstream/runbms.yml"
 
 modifiers:
   probes_cp:

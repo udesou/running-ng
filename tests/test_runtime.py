@@ -1,19 +1,6 @@
-"""Switch provisioning contract for version/commit-pinned OCaml runtimes.
-
-The contract, as intended: constructing such a runtime provisions its opam
-switch eagerly, wiping an existing switch of the same name first, unless
-RUNNING_REUSE_SWITCHES says otherwise. Nothing records which compiler source
-or dune version built a leftover switch, so reusing one silently makes the
-toolchain a function of run history.
-
-This replaces a test that asserted the opposite (lazy resolution) by
-monkeypatching OCaml._resolve_or_build_executable, an API deleted in 7635268
-when opam-compiler replaced the clone-and-build path. It had therefore been
-failing at collection rather than testing anything.
-
-The eagerness is worth pinning precisely because it is surprising: merely
-calling Configuration.resolve_class() on a config that declares runtimes will
-create and destroy opam switches.
+"""Switch provisioning contract for version/commit-pinned OCaml runtimes:
+constructing one provisions its switch eagerly (so Configuration.resolve_class()
+creates and destroys switches), wiping a leftover unless RUNNING_REUSE_SWITCHES is set.
 """
 import shutil
 
@@ -21,7 +8,7 @@ import pytest
 
 from running.runtime import OCaml
 
-#: See the note in test_modifier.py: not "/bin/true", which is Linux-only.
+#: Not "/bin/true", which is Linux-only.
 TRUE_BIN = shutil.which("true")
 
 
@@ -49,10 +36,9 @@ def no_real_opam(monkeypatch, tmp_path):
 def test_construction_provisions_the_switch_eagerly(no_real_opam):
     calls, bin_dir = no_real_opam
     runtime = OCaml(name="ocaml-v5.3", version="5.3.0")
-    # Eager, not lazy: the switch exists by the time __init__ returns.
     assert calls["ensure_switch"] == ["running-ng-ocaml-v5.3"]
     assert runtime.get_executable() == (bin_dir / "ocaml").absolute()
-    # And get_executable is a plain accessor, so it never provisions again.
+    # a plain accessor; never provisions again
     runtime.get_executable()
     assert len(calls["ensure_switch"]) == 1
 
@@ -70,7 +56,6 @@ def test_executable_mode_provisions_nothing(no_real_opam, tmp_path):
     exe.write_text("#!/usr/bin/env bash\nexit 0\n")
     exe.chmod(0o755)
     runtime = OCaml(name="ocaml-local", executable=str(exe))
-    # Legacy mode: a prebuilt compiler, so no switch to manage.
     assert calls["ensure_switch"] == []
     assert runtime.get_switch_name() is None
 
@@ -84,8 +69,6 @@ def test_version_and_commit_are_mutually_exclusive(no_real_opam):
     with pytest.raises(ValueError):
         OCaml(name="ocaml-both", version="5.3.0", commit="abc123")
 
-
-# --- _claim_switch: the wipe-or-reuse decision ---------------------------------
 
 @pytest.fixture
 def claim(monkeypatch):
@@ -110,8 +93,6 @@ def test_absent_switch_is_created_without_removing_anything(claim):
 
 
 def test_existing_switch_is_wiped_then_recreated(claim):
-    # The default. A leftover switch records nothing about which compiler
-    # source or dune version built it, so it is not safe to reuse.
     claim["exists"] = True
     assert OCaml._claim_switch("running-ng-ocaml-v5.3") is True
     assert claim["removed"] == ["running-ng-ocaml-v5.3"]
@@ -142,7 +123,6 @@ def test_a_switch_made_earlier_in_this_run_is_reused(claim):
 
 
 def test_dry_run_never_removes_a_switch(claim):
-    # A dry run reports what would happen; destroying a switch is not that.
     claim["exists"] = True
     claim["dry_run"] = True
     assert OCaml._claim_switch("running-ng-ocaml-v5.3") is False

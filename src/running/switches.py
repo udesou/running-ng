@@ -1,43 +1,11 @@
-"""Infrastructure opam switches: declare them, create them, cache them.
+"""running-ng's own opam switches (tools and olly), separate from the
+per-runtime switches runtime.py provisions. Two switches because olly needs
+cmdliner >= 2.0 and opam-compiler pins cmdliner < 2.0. A switch is rebuilt
+when its observed identity (package versions, olly checkout SHA) no longer
+matches what was recorded at creation.
 
-running-ng needs opam switches of its own, separate from the per-runtime
-switches `runtime.py` provisions for benchmarks. This module owns them.
-
-Three rules shape the design:
-
-* **Never borrow a switch.** The sweep wrapper used to scan `opam switch list`
-  for the first one containing dune, which picked a local switch on one
-  machine and the olly switch on another. A switch we did not build has
-  unknown contents, so we declare what we need and build it.
-* **Two switches, not one.** olly needs cmdliner >= 2.0 while every published
-  opam-compiler pins cmdliner < 2.0. Installing either into the other's switch
-  corrupts it, which has happened twice. They are declared separately here so
-  that cannot be expressed.
-* **Put the active switch back.** Creating a switch changes what opam
-  considers current, which is the user's setting, not ours.
-
-Invalidation is by observed identity: what a switch was built from is recorded
-when it is created, and a switch whose observation no longer matches is
-rebuilt. For the olly switch that identity includes the git SHA of the olly
-checkout, so moving the checkout rebuilds olly, which is the case that has
-actually bitten people.
-
-POLICY NOTE: the bench service is expected to key its own switch cache on
-declared VERSIONS rather than observed SHAs, because it provisions from a
-manifest rather than from whatever is checked out locally. This module is the
-local counterpart and deliberately uses SHAs, since locally the checkout is
-the source of truth. If the two are ever unified, this is the thing to change:
-replace `observe()` with a function of the declaration alone.
-
-Standard library only, so this can run before running-ng's dependencies are
-installed. `python3 -m running.switches --help`.
-
-STILL DUPLICATED: install_deps_{linux,macos,freebsd}.sh create these same two
-switches inline, and that duplication is exactly how the wrapper and the
-installers drifted apart in the first place. They should delegate here,
-keeping only the parts this does not own (the opam binary, the olly dune
-build, the benchmarks clone). Not done yet because the FreeBSD installer was
-verified on hardware in its current form and changing it means re-verifying.
+Standard library only, so it can run before running-ng's dependencies are
+installed: `python3 -m running.switches --help`.
 """
 import argparse
 import datetime
@@ -49,12 +17,10 @@ import subprocess
 import sys
 from typing import Dict, List, Optional
 
-#: State file recording what was built and from what. Machine-local, so NOT in
-#: the repo: it would show up in `git status`, get committed by accident, and
-#: be wrong on the next machine. The declaration below is the versioned half.
+#: Overrides where the machine-local state file (what was built, from what) lives.
 STATE_ENV_VAR = "RUNNING_NG_STATE_DIR"
 
-#: Where the olly checkout lives, matching install_deps_*.sh.
+#: Where the olly checkout lives.
 OLLY_DIR_ENV_VAR = "OLLY_DIR"
 
 TOOLS_SWITCH = "running-ng-tools"
@@ -62,25 +28,21 @@ OLLY_SWITCH = "running-ng-olly"
 
 DEFAULT_COMPILER = "5.4.0"
 
-#: What each switch is for and what goes in it. The versioned half of the
-#: state: this is the declaration, the state file records what came of it.
+#: Declaration of each switch; the state file records what came of it.
 SWITCHES: Dict[str, Dict] = {
     TOOLS_SWITCH: {
         "purpose": "build tools and the opam-compiler plugin",
         "packages": ["dune", "ocamlfind", "opam-compiler"],
-        # Identity: the versions of what we installed, plus the compiler. If
-        # any moves, something changed the switch out from under us.
+        # A change in any of these versions triggers a rebuild.
         "identity_packages": ["ocaml", "dune", "ocamlfind", "opam-compiler"],
         "source": None,
-        # opam-compiler declares `flags: plugin`, so it must also be linked
-        # into $(opam var root)/plugins/bin or `opam compiler create` cannot
-        # resolve it. See install_deps_*.sh.
+        # `flags: plugin` packages must be linked into $(opam var root)/plugins/bin
+        # or `opam compiler create` cannot resolve them.
         "registers_plugin": "opam-compiler",
     },
     OLLY_SWITCH: {
         "purpose": "olly (runtime_events_tools), which needs cmdliner >= 2.0",
-        # Resolved from olly's own opam file rather than listed here: a
-        # hand-written list is what let the cmdliner conflict through.
+        # Resolved --deps-only from olly's own opam file.
         "packages": [],
         "identity_packages": ["ocaml", "cmdliner"],
         "source": OLLY_DIR_ENV_VAR,
@@ -97,9 +59,7 @@ def _run(cmd: List[str], check: bool = True) -> str:
     return p.stdout.strip()
 
 
-#: Explicit opam binary, for callers that installed their own. The FreeBSD
-#: installer puts a user-local opam in ~/.local/bin, which may not be on PATH
-#: yet at the point it calls us.
+#: Explicit opam binary, for installers whose user-local opam is not on PATH yet.
 OPAM_BIN_ENV_VAR = "OPAM_BIN"
 
 
@@ -118,36 +78,21 @@ def find_opam() -> str:
 
 
 def state_dir() -> str:
-    """Where the record of what we built lives.
-
-    Under the OPAM ROOT by default, not under ~/.cache, because that is what
-    the state describes: "switch X in this root was built from Y". Keyed to
-    ~/.cache it is a single file describing whichever root happened to be
-    current, so two consumers sharing a machine but not a root -- a local sweep
-    and the bench agent, say -- overwrite each other's record and each then
-    reports 'ok' for switches the other rebuilt.
-
-    Deriving it from the root instead makes the isolation structural: point
-    OPAMROOT somewhere else and the state follows automatically, with no second
-    variable to remember. RUNNING_NG_STATE_DIR still overrides, for a caller
-    that wants them apart.
+    """State dir: RUNNING_NG_STATE_DIR, else under the opam root (the state
+    describes switches of that root, so consumers with separate roots must
+    not share it).
     """
     override = os.environ.get(STATE_ENV_VAR)
     if override:
         return override
-    # $OPAMROOT directly when set, without asking opam: `opam var root` fails
-    # on a root that does not exist yet, which is precisely a consumer's FIRST
-    # run against its own root -- the case this isolation exists for. Falling
-    # back to the shared cache there would put the first record in the one
-    # place it must not be.
+    # Read $OPAMROOT directly: `opam var root` fails on a root that does not exist yet.
     env_root = os.environ.get("OPAMROOT")
     if env_root:
         return os.path.join(env_root, "running-ng")
     try:
         return os.path.join(_run([find_opam(), "var", "root"]), "running-ng")
     except (RuntimeError, OSError):
-        # No opam at all: fall back rather than making an unrelated command
-        # (`status` on a machine without opam) fail on this.
+        # no opam at all
         cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
         return os.path.join(cache, "running-ng")
 
@@ -161,8 +106,7 @@ def load_state() -> Dict:
         with open(state_path()) as f:
             return json.load(f)
     except (OSError, ValueError):
-        # A missing or corrupt state file means "nothing is known", which is
-        # the same as a fresh machine: everything gets rebuilt. Never fatal.
+        # missing or corrupt state means nothing is known; everything gets rebuilt
         return {"version": 1, "switches": {}}
 
 
@@ -194,18 +138,8 @@ def _package_versions(opam: str, switch: str, packages: List[str]) -> Dict[str, 
 def source_dir(spec: Dict) -> Optional[str]:
     """The checkout a switch is built from, or None if it has no source.
 
-    Resolved in ONE place because the two callers must agree: _source_sha
-    decides whether a rebuild is due, ensure() builds there, and a machine
-    where they disagree rebuilds the switch on every alternate run.
-
-    That is not hypothetical. The sweep wrapper resolves OLLY_DIR itself and
-    used not to export it, so this module fell back to ~/runtime_events_tools
-    -- a SECOND checkout, at a different revision. A manual sweep then observed
-    one SHA and the bench agent (which does pass OLLY_DIR) observed the other,
-    so each run tore down and recompiled the olly switch the other had just
-    built. The fallback is kept for a machine with a single checkout in the
-    default location, but it is now announced rather than silent, because a
-    silent one is indistinguishable from the thrash it causes.
+    Shared by _source_sha and ensure(): if they resolved it separately, a
+    machine with two checkouts would rebuild the switch on alternate runs.
     """
     env_var = spec.get("source")
     if not env_var:
@@ -234,12 +168,7 @@ def _source_sha(spec: Dict) -> Optional[str]:
 
 
 def observe(opam: str, name: str) -> Optional[Dict]:
-    """What this switch is built from right now, or None if it is absent.
-
-    Compared against what was recorded at creation time to decide whether a
-    rebuild is due. Includes the source SHA, which is the whole point for the
-    olly switch: moving the checkout must rebuild olly.
-    """
+    """The switch's current identity (package versions, source SHA), or None if absent."""
     if not switch_exists(opam, name):
         return None
     spec = SWITCHES[name]
@@ -252,16 +181,9 @@ def observe(opam: str, name: str) -> Optional[Dict]:
 
 
 def missing_packages(opam: str, name: str) -> List[str]:
-    """Declared packages of `name` that are not installed in it.
-
-    Asked of opam directly rather than inferred from the recorded identity,
-    because the recorded identity is exactly what cannot be trusted here: it
-    says what was there when we last looked, not what we declared.
-    """
+    """Declared packages of `name` that opam says are not installed in it."""
     declared = SWITCHES[name].get("packages") or []
     if not declared:
-        # olly's switch declares none: its dependencies come --deps-only from
-        # the project's own opam file, so there is no list to check against.
         return []
     installed = _package_versions(opam, name, declared)
     return [p for p in declared if not installed.get(p)]
@@ -274,29 +196,19 @@ def plan(opam: str, name: str) -> str:
         return "create"
     recorded = load_state().get("switches", {}).get(name, {}).get("identity")
 
-    # Ask opam what the switch actually contains, not just whether it still
-    # matches what we recorded. Comparing against the recorded identity cannot
-    # answer that: `adopt` records whatever it finds, damage included, and from
-    # then on recorded == observed forever, so a switch missing a declared
-    # package reports 'ok' for the rest of its life. Not hypothetical --
-    # obelisk ran for months with opam-compiler evicted from the tools switch
-    # (olly's deps pulled cmdliner >= 2.0 into it), reporting 'ok' every run,
-    # while sweeps worked only because a stale plugin symlink pointed into an
-    # unrelated switch. Nothing louder than a warning was ever printed.
+    # Check contents against the declaration, not only against the recorded
+    # identity: `adopt` records whatever it finds, damage included, so a
+    # switch missing a declared package would otherwise report 'ok' forever.
     missing = missing_packages(opam, name)
     if missing:
-        # Installing what is missing is the whole fix, so prefer it to a
-        # rebuild -- which costs a compiler -- unless something OTHER than
-        # those packages also drifted. That exception matters: repair re-records
-        # afterwards, so repairing a switch whose ocaml or source_sha had also
-        # moved would quietly adopt that drift as the new baseline.
+        # Repair (cheap) unless something other than the missing packages also
+        # drifted: repair re-records afterwards and would adopt that drift.
         others = [k for k in set(recorded or {}) | set(observed)
                   if k not in missing and (recorded or {}).get(k) != observed.get(k)]
         return "rebuild" if (recorded is not None and others) else "repair"
 
     if recorded is None:
-        # The switch exists, we did not build it, and it does have what it
-        # declares. Adopt rather than destroying someone's work.
+        # exists, not built by us, complete: adopt rather than destroy
         return "adopt"
     return "ok" if recorded == observed else "rebuild"
 
@@ -309,12 +221,7 @@ def _active_switch(opam: str) -> Optional[str]:
 
 
 def build_commands(name: str, compiler: str = DEFAULT_COMPILER) -> List[List[str]]:
-    """The commands that would create `name`, without running any of them.
-
-    Split out so the plan is inspectable and testable without an opam root:
-    creating a switch compiles a compiler, so this is the only part that can
-    be exercised anywhere.
-    """
+    """The commands that would create `name`, without running any of them."""
     opam = "opam"
     spec = SWITCHES[name]
     cmds = [[opam, "switch", "create", name,
@@ -323,24 +230,15 @@ def build_commands(name: str, compiler: str = DEFAULT_COMPILER) -> List[List[str
         cmds.append([opam, "install", "--switch", name, "--yes"]
                     + spec["packages"])
     if spec["source"]:
-        # --deps-only from the project's own opam file, never a list here.
         cmds.append([opam, "install", "--switch", name, "--deps-only", "--yes", "."])
     return cmds
 
 
 def _ensure_cmake_depext_bypass(opam: str) -> None:
-    """Stop opam prompting for a system ``cmake`` when a usable cmake is already
-    on PATH but invisible to opam's package-manager depext check.
+    """Tell opam ``conf-cmake``'s depext is satisfied when cmake is on PATH.
 
-    olly's ``hdr_histogram`` dependency declares ``conf-cmake``, whose depext is
-    the distro ``cmake`` package. On a no-sudo box cmake is often installed
-    user-local (e.g. ``~/.local/bin/cmake``), which dpkg/pkg cannot see, so opam
-    stops to ask whether to install it — which hangs a headless sweep. When
-    cmake is on PATH we tell opam it is satisfied. Global, so it survives the
-    switch rebuilds this module does, and covers every caller (the sweep wrapper
-    and all install_deps_*.sh delegate here). Guarded on cmake actually being
-    present, so a genuine absence (e.g. FreeBSD without ``pkg install cmake``) is
-    still reported rather than masked. Idempotent."""
+    A user-local cmake is invisible to dpkg/pkg, so opam's depext check would
+    prompt and hang a headless sweep. Global setting; idempotent."""
     if not shutil.which("cmake"):
         return
     current = _run([opam, "option", "--global", "depext-bypass"], check=False)
@@ -353,18 +251,14 @@ def _ensure_cmake_depext_bypass(opam: str) -> None:
 
 def ensure(name: str, compiler: str = DEFAULT_COMPILER,
            dry_run: bool = False) -> str:
-    """Make `name` exist and match its declaration. Returns the action taken.
-
-    Always leaves the previously active switch selected: creating a switch
-    changes what opam considers current, and that is the user's setting.
+    """Make `name` exist and match its declaration; returns the action taken.
+    Leaves the previously active switch selected.
     """
     opam = find_opam()
     action = plan(opam, name)
     if action == "ok":
         logging.info("opam switch '%s' is up to date", name)
-        # Still check the plugin link: the switch being right says nothing
-        # about $(opam var root)/plugins/bin, and a missing link there blocks
-        # every sweep. Idempotent, so this is cheap.
+        # The plugin link lives outside the switch; check it anyway.
         if not dry_run:
             _register_plugin(opam, name)
         return "ok"
@@ -378,12 +272,8 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
         return "adopt"
 
     if action == "repair":
-        # Install what is missing rather than rebuilding: the switch is
-        # otherwise fine, and a rebuild costs a compiler. Note this can
-        # DOWNGRADE a package -- putting opam-compiler back pins cmdliner
-        # < 2.0 -- which is correct for this switch and is why olly has its
-        # own. Re-records afterwards, so the baseline is the repaired switch
-        # rather than the damage.
+        # May downgrade packages (opam-compiler pins cmdliner < 2.0); that is
+        # correct for this switch.
         missing = missing_packages(opam, name)
         logging.warning(
             "opam switch '%s' is missing packages it declares: %s. Installing "
@@ -406,13 +296,8 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
     previous = _active_switch(opam)
     try:
         if action == "rebuild":
-            # Name the keys that moved. A rebuild costs minutes (it recompiles
-            # a compiler), and the usual cause is source_sha -- two checkouts
-            # at different revisions, with $OLLY_DIR pointing at a different
-            # one than last run. Saying only "no longer matches" left that
-            # looking like routine progress output, so a machine could alternate
-            # between two checkouts and pay for a full rebuild every run
-            # without anything ever saying why.
+            # Name the keys that moved: a rebuild recompiles a compiler, and
+            # the usual cause is $OLLY_DIR pointing at a different checkout.
             recorded = (load_state().get("switches", {})
                         .get(name, {}).get("identity") or {})
             observed = observe(opam, name) or {}
@@ -439,8 +324,7 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
         cwd = None
         spec = SWITCHES[name]
         if spec["source"]:
-            # olly's hdr_histogram dep needs cmake; keep opam's depext check
-            # from hanging on a user-local cmake it cannot see. See the helper.
+            # olly's hdr_histogram dep needs cmake
             if not dry_run:
                 _ensure_cmake_depext_bypass(opam)
             cwd = source_dir(spec)
@@ -455,7 +339,6 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
             _register_plugin(opam, name)
             _record(opam, name)
     finally:
-        # Put it back even if the build failed partway.
         if previous and not dry_run and _active_switch(opam) != previous:
             _run([opam, "switch", "set", previous], check=False)
             logging.info("restored the active opam switch to '%s'", previous)
@@ -465,11 +348,8 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
 def _register_plugin(opam: str, name: str) -> None:
     """Link a `flags: plugin` package into $(opam var root)/plugins/bin.
 
-    opam resolves plugins from there, not from the switch that installed them,
-    so without this `opam compiler create` fails with "unknown command
-    'compiler'". Mirrors install_deps_*.sh; see its comment for why the
-    tempting one-liner (`opam install opam-compiler` with no --switch) must
-    not be used.
+    opam resolves plugins from there, not from the installing switch; without
+    the link `opam compiler create` fails with "unknown command 'compiler'".
     """
     plugin = SWITCHES[name].get("registers_plugin")
     if not plugin:
@@ -488,8 +368,7 @@ def _register_plugin(opam: str, name: str) -> None:
         os.remove(link)
     os.symlink(target, link)
     if not os.access(link, os.X_OK):
-        # An external or local switch does not live under the opam root, so
-        # the relative form does not resolve; fall back to absolute.
+        # external/local switches are not under the opam root; use an absolute target
         os.remove(link)
         os.symlink(os.path.join(_run([opam, "var", "bin", "--switch", name]),
                                 plugin), link)

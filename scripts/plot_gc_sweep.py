@@ -78,7 +78,6 @@ def _parse_from_json(data: dict, log_name: str, s: int, o: int) -> dict:
         "o": o,
     }
 
-    # olly gc-stats --json metrics (flat top-level fields)
     olly = data.get("olly", {})
     row["olly_wall_time_s"] = olly.get("wall_time", np.nan)
     row["olly_cpu_time_s"] = olly.get("cpu_time", np.nan)
@@ -87,13 +86,11 @@ def _parse_from_json(data: dict, log_name: str, s: int, o: int) -> dict:
     row["max_rss_kb"] = olly.get("max_rss_kb", np.nan)
     row["max_rss_mb"] = row["max_rss_kb"] / 1024.0 if row["max_rss_kb"] and not (isinstance(row["max_rss_kb"], float) and np.isnan(row["max_rss_kb"])) else np.nan
 
-    # Allocation stats from olly (replaces OCAMLRUNPARAM gc_verbose)
     alloc = olly.get("allocations", {})
     row["minor_words"] = alloc.get("minor_heap", np.nan)
     row["promoted_words"] = alloc.get("promoted_words", np.nan)
     row["major_words"] = alloc.get("major_heap", np.nan)
 
-    # Collection counts from olly
     collections = olly.get("collections", {})
     row["minor_collections"] = collections.get("minor", np.nan)
     row["major_collections"] = collections.get("major", np.nan)
@@ -103,7 +100,6 @@ def _parse_from_json(data: dict, log_name: str, s: int, o: int) -> dict:
     row["promotion_rate"] = row["promoted_words"] / row["minor_words"] if row["minor_words"] else np.nan
     row["major_per_minor"] = row["major_collections"] / row["minor_collections"] if row["minor_collections"] else np.nan
 
-    # perf stat --json output: array of {"event": "cycles", "counter-value": "123", ...}
     perf_list = data.get("perf", [])
     for entry in perf_list:
         event = entry.get("event")
@@ -113,7 +109,6 @@ def _parse_from_json(data: dict, log_name: str, s: int, o: int) -> dict:
             row[f"perf_{event}"] = float(entry["counter-value"])
         except (KeyError, ValueError, TypeError):
             row[f"perf_{event}"] = np.nan
-        # Also store the derived metric if present (e.g. "insn per cycle", "GHz")
         metric_val = entry.get("metric-value")
         metric_unit = entry.get("metric-unit")
         if metric_val is not None and metric_unit:
@@ -132,12 +127,11 @@ def parse_log(path: Path) -> dict:
         raise ValueError(f"Cannot parse s/o from filename: {path.name}")
     s, o = map(int, m.groups())
 
-    # Try structured JSON sidecar first (per-tool or legacy combined).
     data = _read_json_sidecar(path)
     if data is not None:
         return _parse_from_json(data, path.name, s, o)
 
-    # Fallback: regex-parse the text log (backward compat for old runs)
+    # Old runs have no JSON sidecar; regex-parse the text log.
     text = path.read_text()
 
     row = {
@@ -146,7 +140,6 @@ def parse_log(path: Path) -> dict:
         "o": o,
     }
 
-    # /usr/bin/time metrics (optional).
     try:
         row["elapsed_s"] = _read_elapsed(text)
     except ValueError:
@@ -158,7 +151,6 @@ def parse_log(path: Path) -> dict:
         row["maxresident_kb"] = np.nan
         row["maxresident_mb"] = np.nan
 
-    # olly gc-stats metrics (optional).
     try:
         row["olly_wall_time_s"] = _read_olly_time_s(text, "Wall time (s)")
     except ValueError:
@@ -168,7 +160,7 @@ def parse_log(path: Path) -> dict:
     except ValueError:
         row["olly_gc_time_s"] = np.nan
 
-    # Optional OCaml GC metrics from Gc.print_stat (present for binarytrees, absent for markbench).
+    # Gc.print_stat output is present for binarytrees only.
     for metric in [
         "minor_collections",
         "major_collections",
@@ -315,7 +307,6 @@ def main() -> None:
     if "max_rss_mb" in df.columns and not df["max_rss_mb"].isna().all():
         metric_specs.append(("max_rss_mb", "Max RSS (MB) over (s,o)", False))
 
-    # Legacy /usr/bin/time metrics (old logs without JSON sidecar)
     if "elapsed_s" in df.columns and not df["elapsed_s"].isna().all():
         metric_specs.append(("elapsed_s", "Elapsed time (s) over (s,o)", False))
     if "maxresident_mb" in df.columns and not df["maxresident_mb"].isna().all():

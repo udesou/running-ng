@@ -10,8 +10,6 @@ def test_smart_quote():
     assert smart_quote(Path("/bin")/"123 456") == "\"/bin/123 456\""
 
 
-# --- default_modifiers ----------------------------------------------------------
-
 import pytest  # noqa: E402
 from running.config import Configuration  # noqa: E402
 from running.util import default_modifiers, parse_config_str  # noqa: E402
@@ -30,7 +28,6 @@ MODS = {
 
 
 def test_no_key_means_no_default_modifiers():
-    # Every config predating this key must behave exactly as before.
     c = _config(modifiers=dict(MODS))
     assert default_modifiers(c, []) == []
 
@@ -41,7 +38,7 @@ def test_default_modifiers_are_applied_without_being_named():
 
 
 def test_naming_a_default_explicitly_does_not_apply_it_twice():
-    # Two taskset prefixes would nest and the inner one would silently win.
+    # nested taskset prefixes: the inner one would silently win
     c = _config(modifiers=dict(MODS), default_modifiers=["pin_bench"])
     named = [c.get("modifiers")["pin_bench"]]
     assert default_modifiers(c, named) == []

@@ -1,114 +1,45 @@
-# =============================================================================
-# Macrobenchmarks — BASE config
-# =============================================================================
-# Shared suites / benchmarks / modifiers for all macrobenchmark runs.
-# Intended to be pulled in by other configs via:
+# Macrobenchmark base: shared suites, modifiers, benchmark lists and tags for every
+# OCaml macrobenchmark experiment. Experiments include it with
+#   includes: ["../base/ocaml/macro_base.yml"]
+# and supply their own `runtimes` and `configs`; change base scalars via `overrides:`.
+# Run: running-env/bin/python -m running runbms LOG_DIR <experiment>.yml
 #
-#   includes:
-#     - "./macrobenchmarks_base.yml"
+# Needs ~/macro-benches populated (duniverse/, vendor/, benchmarks/<tool>/ inputs) and
+# RUNNING_MACRO_BENCH_DIR set.
 #
-# The base file deliberately does NOT define `runtimes` or `configs` — those
-# are specific to each experiment and must be supplied by the including file.
-#
-# Prerequisites (monorepo):
-#   - ~/macro-benches/duniverse/ populated (opam monorepo pull)
-#   - ~/macro-benches/vendor/{camlpdf,cpdf-source,zarith} populated
-#   - Input files in ~/macro-benches/benchmarks/<tool>/
-#
-# Env vars referenced by ${RUNNING_MACRO_BENCH_DIR} must be set before running.
-#
-# -----------------------------------------------------------------------------
-# REQUIRED modifier set when including the lavyek (multi-domain) suite
-# -----------------------------------------------------------------------------
-# If your config's `benchmarks:` block enables `macro-lavyek-monorepo` (it is
-# enabled by default in this base — opt out by setting `macro-lavyek-monorepo: []`
-# in your derived config), the config-string entries MUST include the parallel
-# modifier triple `|re_par-22|md_par-8|pin_lavyek` in addition to the sequential
-# `|re-<N>|md-<M>` you use for everything else.
-#
-# Canonical full-suite config-string template:
-#
-#   configs:
-#     - "<runtime>|perf_grp1|re-25|md-2|re_par-22|md_par-8|pin_lavyek"
-#
-# CPU pinning is NOT in that list: `pin_bench` is applied to every config
-# automatically via `default_modifiers:` below, because a sweep that silently
-# ran unpinned is not comparable with one that did not, and per-config spelling
-# makes forgetting it the easy mistake.  Exempt a benchmark with the modifier's
-# `excludes`, not by leaving it out of a config string.
-#
-# Note: `re_par` and `md_par` REQUIRE explicit values (`-22`, `-8`). The bare
-# tokens `re_par|md_par` render to the literal string `e={0}` / `d={0}` and
-# break OCAMLRUNPARAM at runtime. `pin_lavyek` takes no value: it is a CpuPin
-# modifier, which derives its CPU list from the running machine and emits
-# `taskset -c` on Linux or `cpuset -l` on FreeBSD.
-#
-# Reason: `re`/`md` are scoped to non-lavyek programs via `excludes`, and `re_par`/
-# `md_par`/`pin_lavyek` are scoped to lavyek-only. Omitting the parallel triple
-# means lavyek runs with olly's default 8 MB per-domain ring (e=23), which
-# overflows on the 10M-op workload across 8 domains and silently drops events
-# — the per-domain wall-time then falls back to `now - boot_time`, producing
-# garbage wall_time values (commonly observed as ~ -4.7M seconds, the system
-# uptime). See `2026-05-16-full-s-o-sweep-monolith.md` §Methodology for the
-# observed-in-the-wild failure.
-#
-# Suites that need this set their `required_modifiers:` field (see
-# `macro-lavyek-monorepo` below). running-ng silently accepts the field today;
-# it's a documented contract for config authors and a future validation hook.
-# =============================================================================
+# A config that enables macro-lavyek-monorepo (disabled below) must add
+# `|re_par-22|md_par-8|pin_lavyek` to every config string; see the lavyek suite and
+# the re_par/md_par modifiers.
 
-# Modifiers applied to every config in every run, before the config string's
-# own.  Naming one explicitly is not an error and does not apply it twice.
+# Applied to every config before its own modifiers; naming one again is harmless.
 default_modifiers:
   - pin_bench
   - pin_bench_mc
 
+# Inherited by every including config; a top-level redeclaration in an experiment is
+# a combine() TypeError, use overrides:.
+# schema_version emits contract/{manifest.json,measurements/} inline during runbms.
+# compress_logs must stay false: absent it defaults to true and gzips every sidecar.
 invocations: 3
-remote_host: null
-compress_logs: false
-minheap_multiplier: 1.0
-heap_range: 6
-spread_factor: 1
-
-# Emit the data-contract natively during runbms (inline
-# <log_dir>/contract/{manifest.json, measurements/*.ndjson}), so every derived
-# experiment is dashboard-ready without a post-hoc `adapt` step. Inherited by
-# all including configs; do NOT re-declare at top level in an experiment (a
-# top-level scalar in both base and experiment is a combine() TypeError) —
-# override it via `overrides:` if you ever need a different value.
 schema_version: "1.0"
+compress_logs: false
 
-# Note: plugins (e.g. Zulip notifications) are NOT defined here — they are a
-# per-experiment concern, and requiring them here would force every including
-# config to have the plugin's Python deps installed (`pip install running-ng[zulip]`
-# for Zulip).  Add a `plugins:` block in your derived config if you want them.
+# No plugins here: they would force every including config to install the plugin deps.
 
-# =============================================================================
-# Suites — monorepo builds (OCamlBenchmarkSuite)
-# =============================================================================
+# Suites
 suites:
   macro-menhir-monorepo:
     type: OCamlBenchmarkSuite
-    # Suite-level runtime_events ring. This suite's event rate overflows the
-    # default ring under olly (measured lost events at the default ring; see the
-    # per-benchmark ring probe). The `d=2` is load-bearing, not just a domain cap:
-    # OCaml sizes the ring as max_domains * 2^e, so e=25 at the default
-    # max_domains(128) demands ~4GB and aborts (SIGABRT + "olly internal error");
-    # d=2 bounds it to ~64MB. Together e=25,d=2 == the retired global re-25|md-2,
-    # proven through running-ng; declared per-suite so configs carry no re/md.
+    # Event rate overflows olly's default runtime_events ring. d=2 is load-bearing:
+    # the ring is max_domains * 2^e, so e=25 at the default d=128 needs ~4GB and
+    # aborts ("olly internal error"); d=2 bounds it to ~64MB.
     ocamlrunparam: "e=25,d=2"
     timeout: 600
     programs:
       menhir_ocamly:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
         build_script: "menhir.build.sh"
-        # `--canonical` builds the full canonical LR(1) automaton (vs the
-        # smaller LALR tables in `--lalr`). For the OCaml grammar this is
-        # ~80× more work — brings wall time from 0.4s to ~33s on this
-        # machine and uses ~2.7 GB RSS for the state table. The other two
-        # menhir benchmarks (sql_parser, sysver) use different algorithms
-        # already; switching ocamly to canonical gives the suite three
-        # distinct menhir workloads.
+        # --canonical (full LR(1)) is ~80x the LALR work; sql_parser/sysver use other algorithms.
         args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/ocaml.mly --list-errors --no-stdlib --canonical"
       menhir_sql_parser:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
@@ -118,13 +49,8 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
         build_script: "menhir.build.sh"
         args: "-v --table ${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir/sysver.mly"
-      # Input-size ladder (automaton scale, monotone by footprint AND wall on current
-      # hardware): small=menhir_sysver (sysver --table, 7.7s/0.72GB), default=
-      # menhir_ocamly (ocaml --canonical --list-errors, 12.7s/2.76GB), large=
-      # menhir_sysver_canonical (sysver --canonical, 33s/4.0GB). All single-run —
-      # menhir has no callable main to loop in-process (its main.ml is init-time
-      # side effects), so a bigger input is the only way to lengthen a run.
-      # menhir_sql_parser (LALR, 1.2s) stays as a fast standalone, not a ladder rung.
+      # Size ladder: small=menhir_sysver, default=menhir_ocamly, large=menhir_sysver_canonical.
+      # menhir has no in-process loop, so input size is the only knob.
       menhir_sysver_canonical:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/menhir"
         build_script: "menhir.build.sh"
@@ -150,14 +76,7 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
         build_script: "cpdf.build.sh"
         args: "-squeeze ${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf/PDFReference16.pdf_toobig -o /dev/null"
-      # Input-size squeeze ladder (working set = document size). cpdf.build.sh emits a
-      # wrapper for these cpdf_squeeze_* outputs that merges argv.1 copies of the
-      # input PDF (the whole parsed object graph stays resident → top_heap grows
-      # ~linearly with N) and recompresses every stream. Recompression is the CPU
-      # that lifts wall into the standard bands (merge alone is memory-bound and
-      # tops out ~17s). Measured 5.5.0 / Ryzen 9 9950X: 8 copies ~7s/0.88GB/top_heap
-      # 110M w, 24 ~18s/1.78GB/225M w, 64 ~55s/3.16GB/405M w (major GC 38→45→56,
-      # promo ~0.42-0.46). The single arg is the copy count.
+      # Squeeze ladder: arg = number of input-PDF copies merged then recompressed (wrapper from cpdf.build.sh).
       cpdf_squeeze_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/cpdf"
         build_script: "cpdf.build.sh"
@@ -178,25 +97,14 @@ suites:
       alt_ergo_fill:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
-        # fill_x100.why is generated at build time by alt-ergo.build.sh —
-        # it replicates the original `fill_assert_39` goal 100 times so
-        # alt-ergo solves each independently. Scales work linearly: ~14s
-        # wall on this machine, vs 0.18s for the single-goal fill.why.
-        # See ~/macro-benches/README.md §"Iteration counts".
+        # fill_x100.why is generated by alt-ergo.build.sh (fill.why's goal replicated 100 times).
         args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/fill_x100.why"
       alt_ergo_yyll:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
         args: "--input native ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/yyll.why"
-      # Input-size congruence-chain ladder (working set = single-solve problem size).
-      # alt-ergo.build.sh generates alt_ergo_chain_<rung>.why: one goal asserting
-      # a(0)=0 and a(i)=a(i-1)+1 for i in 1..N, proving a(N)=N, so alt-ergo builds
-      # an N-term congruence/arithmetic structure in ONE solve (unlike fill_x100,
-      # which is 100 independent copies = repetition, constant peak working set). This
-      # is fill.why's array-cell reasoning parameterised. Super-linear (~N^2.2 in
-      # wall and live heap). Measured 5.5.0 / Ryzen 9 9950X: N=4000 ~4s/0.6GB/
-      # top_heap 76M w, 7000 ~13s/1.9GB/244M w, 10500 ~32s/5.0GB/638M w (minor GC
-      # 3.7k->25k, major 16->24, promo 0.09->0.14). Input file selects the rung.
+      # Chain ladder: alt-ergo.build.sh generates alt_ergo_chain_<rung>.why, one N-term
+      # congruence chain solved in a single goal (cost ~N^2.2).
       alt_ergo_chain_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
@@ -213,29 +121,14 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
         args: "--timelimit 15 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/unsat.smt2"
-        # The workload IS "solve for 15 seconds": --timelimit arms SIGVTALRM, the
-        # goal never closes, alt-ergo prints `unknown / (error "timeout")` and the
-        # process dies of the signal — 128+14 = 142, every run, by design.
-        # Without this the runner calls it a crash and the native contract
-        # emitter drops the invocation, so the benchmark silently never reaches
-        # the dashboard (while the legacy adapter, reading the sidecars, keeps
-        # it). Matches `expected_exit: 142` in macro-benches'
-        # benchmarks/manifest.yml — keep the two in sync.
+        # --timelimit kills the process with SIGVTALRM every run (exit 142) by design;
+        # without expected_exit the runner counts it as a crash and the contract emitter
+        # drops the invocation. Keep in sync with macro-benches benchmarks/manifest.yml.
         expected_exit: 142
 
-  # Frama-C EVA (value/abstract-interpretation).  Static-linked kernel+EVA
-  # (vendored 32.1); the build script's wrapper sets DUNE_DIR_LOCATIONS and
-  # -no-autoload-plugins.  The wrapper selects the workload by its single
-  # arg: "t" (zlib t.c) or "sqlite" (258k-line SQLite amalgamation — the
-  # ocaml#11733 weak/ephemeron hash-consing reproducer, ~460MB RSS).
-  # Input-size ladder (2026-07-24): the axis is EVA precision (-eva-precision N),
-  # passed as the wrapper's 2nd arg ("sqlite N").  NOT -eva-slevel — measured
-  # flat 0..2000 at every config (EVA merges states without loop-unrolling).
-  # Precision changes shape (P0->P2: RSS 457->641MB, live 53->77M words, minor
-  # GC 11k->31k) but saturates ~730MB; there is no >5min "huge" rung reachable
-  # via any EVA knob (would need a bigger C amalgamation) -- deferred honestly.
-  # frama_c_eva_sqlite (bare "sqlite" == precision 0) is kept as the legacy /
-  # tag anchor and equals the _small rung.
+  # Wrapper arg selects the workload: "t" (zlib t.c) or "sqlite [precision]" (SQLite
+  # amalgamation, the ocaml#11733 ephemeron reproducer). Ladder axis is -eva-precision;
+  # -eva-slevel measured flat. Bare "sqlite" == precision 0 == the _small rung.
   macro-frama-c-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 600
@@ -248,16 +141,15 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
         build_script: "frama-c.build.sh"
         args: "sqlite"
-      # ladder rungs (precision N); see block comment above
-      frama_c_eva_sqlite_small:      # P0: ~7s, 457MB, 11k minor GC (== legacy sqlite)
+      frama_c_eva_sqlite_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
         build_script: "frama-c.build.sh"
         args: "sqlite 0"
-      frama_c_eva_sqlite_default:    # P2: ~18s, 641MB, 31k minor GC, live 77M
+      frama_c_eva_sqlite_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
         build_script: "frama-c.build.sh"
         args: "sqlite 2"
-      frama_c_eva_sqlite_large:      # P3: ~124s, 695MB, 182k minor GC, 48G alloc (max ephemeron churn)
+      frama_c_eva_sqlite_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/frama-c"
         build_script: "frama-c.build.sh"
         args: "sqlite 3"
@@ -270,17 +162,8 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
         build_script: "goblint.build.sh"
         args: ""
-      # Input-size ladder (working set = analysed-program size). The frozen `goblint`
-      # runs the fixed #13733 reproducer (~0.2s — too short). goblint.build.sh
-      # generates a synthetic Btor2C-style bit-vector state machine with N state
-      # vars (goblint_gen_<rung>.c) and emits a wrapper that analyses it with the
-      # same svcomp.json/apron config. A bigger N grows the interval+octagon
-      # constraint system, scaling goblint's signature #13733 behaviour: massive
-      # minor-GC allocation churn with a small live set (octagon is O(N^2), so
-      # wall+allocation are super-linear). No args — the C file is baked per rung.
-      # Measured 5.5.0 / Ryzen 9 9950X (all `SV-COMP result: true`): N=100 ~4.3s/
-      # 3.8G alloc-words/77MB, 165 ~16s/14G/120MB, 240 ~47s/40G/186MB (minor GC
-      # 15k->151k, major 41->97, top_heap 5.9->19.5M). Read by allocated_words.
+      # goblint is the frozen ocaml#13733 reproducer. goblint_gen_* analyse a generated
+      # Btor2C-style state machine; goblint.build.sh bakes N per rung, hence no args.
       goblint_gen_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/goblint"
         build_script: "goblint.build.sh"
@@ -298,25 +181,10 @@ suites:
     type: OCamlBenchmarkSuite
     timeout: 600
     programs:
-      # Input-size ladder (working set = #classes analysed). infer.build.sh selects
-      # roots_<rung>.idx by output name and execs `infer analyze --multicore` on that
-      # subset of the shared per-runtime capture. More roots = more procedures = more
-      # shared-heap allocation + multicore GC, at a flat capture footprint. Infer is
-      # manually vendored + a per-runtime javalib/sawja prefix (the goblint/apron
-      # model), not opam-monorepo-built. Measured warm -j12, 32-core, 5.5.0: small 72
-      # roots ~9s, default 215 ~16s, large 542 ~44s (cold first run ~2-2.5x). No args:
-      # the rung is baked into the wrapper. The suite's first --multicore (multi-domain
-      # shared-heap) workload; INFER_JOBS sets the domain count (default 12).
-      #
-      # `ocamlrunparam: "e=18,d=128"` — per-benchmark override of the global re/md
-      # (see Benchmark.attach_modifiers). infer's --multicore needs both because the
-      # global `re-25|md-2` breaks it: (1) d=2 caps max-domains below the 12-domain
-      # pool -> Domain.spawn "failed to allocate domain", so d=128 lifts it; (2) a
-      # large runtime_events ring segfaults the multi-domain process (e>=22 SIGSEGVs
-      # on 5.5.0 — a runtime bug), while too small drops olly events. e=18 is the
-      # smallest ring clean for BOTH rungs (measured -j12: small needs >=16, large
-      # >=18; the default ~16 ring loses ~97k events on large) and sits under the
-      # e=22 segfault wall. Machine-relative; re-probe if the farm differs.
+      # Rung (roots_<rung>.idx) is baked into the wrapper by infer.build.sh; INFER_JOBS
+      # sets the --multicore domain count (default 12). ocamlrunparam overrides re/md:
+      # d=2 fails Domain.spawn ("failed to allocate domain"), e>=22 segfaults the
+      # multi-domain process on 5.5.0, e<18 loses olly events on the large rung.
       infer_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/infer"
         build_script: "infer.build.sh"
@@ -333,34 +201,25 @@ suites:
         args: ""
         ocamlrunparam: "e=18,d=128"
 
-  # Size axis = numeral size (unary-nat kernel reduction). coqc_corelib_stress is
-  # the legacy mixed workload (fib/ack/tree). The coqc_tree_* rungs are a clean
-  # single-knob ladder: `Compute tree_size (make_tree D)` reduces a 2^D-deep
-  # unary nat, so coqc's kernel does exponential allocation-heavy reduction and
-  # RSS/live grow with D (each +1 depth ~doubles+ the work). Vendored .v files.
-  # Measured 5.5.0 / Ryzen 9950X (wall / RSS / live):
-  #   small   D=17  5.3s   0.60GB  62M words
-  #   default D=18  18.6s  1.03GB  104M words
-  #   large   D=19  68s    1.98GB  204M words
-  # (huge D>=20 deferred — exponential, D=21 already >200s.)
+  # coqc_tree_* reduce a 2^D-deep unary nat (D=17/18/19); work roughly doubles per step.
   macro-coq-monorepo:
     type: OCamlBenchmarkSuite
-    ocamlrunparam: "e=25,d=2"   # overflows the default runtime_events ring under olly (see macro-menhir note)
+    ocamlrunparam: "e=25,d=2"   # ring overflows under olly; see macro-menhir-monorepo
     timeout: 900
     programs:
       coqc_corelib_stress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
         build_script: "coq.build.sh"
         args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_corelib_stress.v"
-      coqc_tree_small:      # make_tree 17: ~5s, 0.6GB
+      coqc_tree_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
         build_script: "coq.build.sh"
         args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_tree_small.v"
-      coqc_tree_default:    # make_tree 18: ~19s, 1.03GB
+      coqc_tree_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
         build_script: "coq.build.sh"
         args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_tree_default.v"
-      coqc_tree_large:      # make_tree 19: ~68s, 1.98GB
+      coqc_tree_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq"
         build_script: "coq.build.sh"
         args: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/coq/coq_tree_large.v"
@@ -373,15 +232,7 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
         args: ""
-      # Input-size ladder (working set = per-document content size). devkit_htmlstream
-      # is a synthetic 8-part HtmlStream GC-stress suite; the arg is a scale factor
-      # (argv.1) that multiplies the per-document content counts (elements
-      # generated + structures retained) while keeping the outer document
-      # repetition fixed. Bigger factor => bigger HTML parsed and bigger live set:
-      # both allocation churn AND working set grow ~linearly (only the bounded
-      # linear loops are scaled). arg=1 is the frozen devkit_htmlstream. Measured
-      # 5.5.0 / Ryzen 9 9950X: 1 ~7s/365MB/1.6G-words, 3 ~20s/1.09GB/4.8G, 8 ~51s/
-      # 2.57GB/12.3G (top_heap peak 633MB->4.57GB, minor GC 3.8k->28k, major 255->342).
+      # devkit_htmlstream_*: arg scales per-document content; arg=1 == the frozen devkit_htmlstream.
       devkit_htmlstream_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
@@ -397,69 +248,43 @@ suites:
       devkit_stre:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
-        # arg = in-process loop count, read by stre_bench.ml as Sys.argv.(1).
-        # Each iteration is ~0.47s on this machine (full 8 sub-benches),
-        # so arg=30 → ~14s wall.
-        # See ~/macro-benches/README.md §"Iteration counts".
+        # arg = in-process loop count (Sys.argv.(1)).
         args: "30"
       devkit_network:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
-        # arg = in-process loop count. Each iteration ~4.3s, so arg=4 → ~17s.
+        # arg = in-process loop count.
         args: "4"
       devkit_gzip:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ahrefs-devkit"
         build_script: "ahrefs-devkit.build.sh"
-        # arg = in-process loop count. Each iteration ~2.7s, so arg=5 → ~14s.
-        # gc_overhead ≈ 1% — gzip is compute-bound, GC isn't the story here.
-        # Candidate for `tag: compute-bound` once tags are wired up.
+        # arg = in-process loop count.
         args: "5"
 
   macro-irmin:
     type: OCamlBenchmarkSuite
     timeout: 300
     programs:
-      # args = "n_keys n_ops read_pct total_ops".
-      #   irmin_mem_rw   = repetition: 3000-key store, 20000 mixed ops (80% read).
-      #   irmin_mem_rw_* = size ladder: store SIZE (n_keys), few extra ops. Every
-      #     set_exn commits a new revision and re-hashes the flat "root" node
-      #     (all keys in one directory), so the write phase is O(n_keys^2) in
-      #     the persistent-hash-tree / Hashtbl churn — allocation volume, major
-      #     cycles and the live store all grow with n_keys (RSS stays modest
-      #     <100MB; this is a churn/throughput ladder, not a footprint one).
-      #     Measured 5.5.0 / Ryzen 9950X:
-      #       small   6000 keys   5.4s   30MB   9k minorGC / 295 majorGC
-      #       default 10000 keys  15s    44MB   24k / 674
-      #       large   18000 keys  52s    71MB   74k / 1522
-      #   (huge deferred — quadratic.)
+      # args = "n_keys n_ops read_pct total_ops". irmin_mem_rw_* scale n_keys (the write
+      # phase is O(n_keys^2) on the flat root node); a churn ladder, RSS stays <100MB.
       irmin_mem_rw:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
         build_script: "irmin.build.sh"
         args: "3000 10000 80 20000"
-      irmin_mem_rw_small:      # 6000-key store: ~5s, 30MB
+      irmin_mem_rw_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
         build_script: "irmin.build.sh"
         args: "6000 0 50 1000"
-      irmin_mem_rw_default:    # 10000-key store: ~15s, 44MB
+      irmin_mem_rw_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
         build_script: "irmin.build.sh"
         args: "10000 0 50 1000"
-      irmin_mem_rw_large:      # 18000-key store: ~52s, 71MB
+      irmin_mem_rw_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/irmin"
         build_script: "irmin.build.sh"
         args: "18000 0 50 1000"
 
-  # Size axis = source SIZE (# lines). The rung inputs wl_{12,30,150,450}x.ml are
-  # generated by ocamlformat.build.sh (N-times concatenation of workload.ml,
-  # ~3.3k lines of Rocq source) and gitignored. ocamlformat holds the whole AST
-  # + output doc in memory, so RSS/live-heap grow ~linearly with N (a genuine
-  # footprint+throughput ladder — NOT shape-invariant like the compiler benches).
-  # Measured 5.5.0 / Ryzen 9950X (wall / RSS / live-heap):
-  #   small   12x   4.7s   0.6GB   75M words
-  #   default 30x   13s    1.7GB   213M words
-  #   large   150x  90s    8.8GB   1.1G words
-  # (huge band ~450x / ~26 GB RSS deferred — tracked separately.) Legacy
-  # ocamlformat_rocq (workload_5x, ~1.8s) kept as the anchor.
+  # wl_<N>x.ml inputs are generated (gitignored) by ocamlformat.build.sh: workload.ml x N.
   macro-ocamlformat:
     type: OCamlBenchmarkSuite
     timeout: 600
@@ -468,76 +293,55 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
         build_script: "ocamlformat.build.sh"
         args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/workload_5x.ml -o /dev/null"
-      ocamlformat_rocq_small:      # 12x ~40k lines: ~5s, 0.6GB
+      ocamlformat_rocq_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
         build_script: "ocamlformat.build.sh"
         args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/wl_12x.ml -o /dev/null"
-      ocamlformat_rocq_default:    # 30x ~100k lines: ~13s, 1.7GB
+      ocamlformat_rocq_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
         build_script: "ocamlformat.build.sh"
         args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/wl_30x.ml -o /dev/null"
-      ocamlformat_rocq_large:      # 150x ~500k lines: ~90s, 8.8GB
+      ocamlformat_rocq_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat"
         build_script: "ocamlformat.build.sh"
         args: "--impl ${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlformat/wl_150x.ml -o /dev/null"
 
-  # Two knobs (args "$ITERATIONS $DATA_SIZE"):
-  #   test_decompress   = repetition: 64 iterations of a fixed 512 KB payload (legacy anchor).
-  #   test_decompress_* = size ladder: 1 iteration, payload SIZE (argv.2, bytes) grows the
-  #                       input string + compress/uncompress buffers, so RSS/live-heap
-  #                       grow ~linearly. Compute + Bigstring-alloc bench (low gc%,
-  #                       ~0 promotion; major-GC count pinned by the fixed-size Bigstring
-  #                       io buffers, not by payload). Measured 5.5.0 / Ryzen 9950X:
-  #                         small   80 MB  ~5s   0.5GB    large  1 GB  ~63s  5.7GB
-  #                         default 256 MB ~16s  1.4GB
-  #   (huge band deferred.) Data is random (incompressible) as in the original bench.
+  # args = "$ITERATIONS $DATA_SIZE" (payload bytes, random data).
   macro-decompress:
     type: OCamlBenchmarkSuite
-    ocamlrunparam: "e=25,d=2"   # overflows the default runtime_events ring under olly (see macro-menhir note)
+    ocamlrunparam: "e=25,d=2"   # ring overflows under olly; see macro-menhir-monorepo
     timeout: 300
     programs:
       test_decompress:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
         build_script: "decompress.build.sh"
         args: "64 524288"
-      test_decompress_small:      # 1 iter, 80MB payload: ~5s, 0.5GB
+      test_decompress_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
         build_script: "decompress.build.sh"
         args: "1 83886080"
-      test_decompress_default:    # 1 iter, 256MB payload: ~16s, 1.4GB
+      test_decompress_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
         build_script: "decompress.build.sh"
         args: "1 268435456"
-      test_decompress_large:      # 1 iter, 1GB payload: ~63s, 5.7GB
+      test_decompress_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/decompress"
         build_script: "decompress.build.sh"
         args: "1 1073741824"
 
-  # Eio: OCaml 5 effect-based concurrency (requires OCaml >= 5.2)
+  # Requires OCaml >= 5.2.
   macro-eio:
     type: OCamlBenchmarkSuite
-    ocamlrunparam: "e=25,d=2"   # overflows the default runtime_events ring under olly (see macro-menhir note)
-    # Raised 120 -> 300 (2026-08-23). The suite timeouts here were sized against
-    # the Ryzen 9 9950X reference box; on obelisk (Xeon E5-2667 v2, 5-9x slower
-    # on these workloads) eio_conc_default measured 110-120s and lost 3 of 20
-    # invocations to the 120s cap. A timeout is a hang guard, not a calibration
-    # knob, so it is sized for the slowest machine in the fleet.
+    ocamlrunparam: "e=25,d=2"   # ring overflows under olly; see macro-menhir-monorepo
+    # Sized for the slowest fleet machine (obelisk, 5-9x slower than the 9950X reference).
     timeout: 300
     programs:
       eio_fiber_stream:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
         build_script: "eio.build.sh"
         args: ""
-      # Input-size ladder (working set = concurrency degree). eio_fiber_stream is a
-      # throughput bench (few fibers, one shared stream, tiny constant live set);
-      # eio_conc_bench scales the other axis — the number of independent
-      # producer/consumer fiber pairs (argv.1), each on its own bounded stream —
-      # so the live set (parked fibers' effect continuations + data buffered
-      # across all the streams) grows ~linearly. eio.build.sh selects this driver
-      # by the eio_conc_* output name; per-fiber work is fixed at 20000 items.
-      # Measured 5.5.0 / Ryzen 9 9950X: 3000 pairs ~5.5s/0.69GB, 9000 ~16s/2.1GB,
-      # 21000 ~39s/5.1GB (top_heap 84->619M words, promotion ~0.85 — a live-set
-      # ladder). Arg = n_pairs.
+      # eio_conc_*: arg = producer/consumer fiber pairs (eio.build.sh picks the driver by
+      # output name); the live set grows with it.
       eio_conc_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/eio"
         build_script: "eio.build.sh"
@@ -551,15 +355,7 @@ suites:
         build_script: "eio.build.sh"
         args: "21000"
 
-  # Size axis = input SIZE (argv.1 = generated # lines). The driver generates the
-  # pseudo-code in-process and RETAINS the whole token list, so the live set +
-  # RSS grow ~linearly with the input (a footprint ladder). Tokenising is cheap,
-  # so wall is ~linear and reaching the time bands needs big inputs / much RAM.
-  # Measured 5.5.0 / Ryzen 9950X (wall / RSS / live-heap; promo steady ~0.17):
-  #   small   2M   4.6s   2.8GB   379M words
-  #   default 6M   14s    8.5GB   1.14G words
-  #   large   20M  46s    28GB    3.83G words   (RAM-capped just under the 1-3min band)
-  # (huge band deferred.) Legacy sedlex_tokenize (700k, ~1.5s) kept as anchor.
+  # arg = generated line count; the token list is retained, so RSS grows ~linearly (28GB at 20M).
   macro-sedlex:
     type: OCamlBenchmarkSuite
     timeout: 300
@@ -568,30 +364,21 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
         build_script: "sedlex.build.sh"
         args: "700000"
-      sedlex_tokenize_small:      # 2M lines: ~4.6s, 2.8GB
+      sedlex_tokenize_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
         build_script: "sedlex.build.sh"
         args: "2000000"
-      sedlex_tokenize_default:    # 6M lines: ~14s, 8.5GB
+      sedlex_tokenize_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
         build_script: "sedlex.build.sh"
         args: "6000000"
-      sedlex_tokenize_large:      # 20M lines: ~46s, 28GB
+      sedlex_tokenize_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/sedlex"
         build_script: "sedlex.build.sh"
         args: "20000000"
 
-  # Two knobs (args "$ITERATIONS $DOC"). $DOC is a file path (read, legacy) OR
-  # an integer RECORD COUNT (generated in-process — see ydump_repeat.ml):
-  #   ydump_repeat   = repetition: 1000 iterations of sample.json (687KB) — repetition.
-  #   ydump_repeat_* = size ladder: 1 iteration, doc SIZE via generated record count.
-  #                    Parse builds a memory-heavy Yojson tree (~28% promoted to the
-  #                    major heap), so RSS/live grow ~linearly (a promotion-heavy
-  #                    footprint ladder). Measured 5.5.0 / Ryzen 9950X:
-  #                      small   2M recs  257MB  ~5.5s  3.25GB
-  #                      default 6M recs  771MB  ~16s   10GB
-  #                      large   12M recs 1.54GB ~33s   20GB   (RAM-capped, under 1-3min band)
-  #   (huge band deferred.) No generated files — the count arg produces the JSON in-process.
+  # args = "$ITERATIONS $DOC"; $DOC is a file path or an integer record count generated
+  # in-process. The large rung needs ~20GB RAM.
   macro-yojson:
     type: OCamlBenchmarkSuite
     timeout: 300
@@ -600,36 +387,30 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
         build_script: "yojson.build.sh"
         args: "1000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson/sample.json"
-      ydump_repeat_small:      # 1 iter, 2M records (~257MB): ~5.5s, 3.25GB
+      ydump_repeat_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
         build_script: "yojson.build.sh"
         args: "1 2000000"
-      ydump_repeat_default:    # 1 iter, 6M records (~771MB): ~16s, 10GB
+      ydump_repeat_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
         build_script: "yojson.build.sh"
         args: "1 6000000"
-      ydump_repeat_large:      # 1 iter, 12M records (~1.54GB): ~33s, 20GB
+      ydump_repeat_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/yojson"
         build_script: "yojson.build.sh"
         args: "1 12000000"
 
   macro-zarith:
     type: OCamlBenchmarkSuite
-    ocamlrunparam: "e=25,d=2"   # heaviest ring user (~290M events dropped at default); see macro-menhir note
-    timeout: 900   # raised from 120 for the `huge` rung (~358s on Ryzen 9950X)
+    ocamlrunparam: "e=25,d=2"   # heaviest ring user; see macro-menhir-monorepo
+    timeout: 900   # for the huge rung
     programs:
-      # Legacy single input; kept so existing configs + the off_heap_accounting /
-      # custom_block_finalisation / ffi_bulk tag refs keep resolving.
+      # Legacy input; tag references resolve to it.
       zarith_pi:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
         build_script: "zarith.build.sh"
         args: "15000"
-      # Input-size ladder (digit count = working set). Measured wall on
-      # Ryzen 9950X / OCaml 5.5.0: small 5.5s, default 16.7s, large 123s, huge 358s.
-      # zarith is an allocation-churn / promotion-pressure bench (GMP custom-block
-      # off-heap path): gc% FALLS with size (19%->8%, more mutator compute) while
-      # tail pauses GROW (40->253ms). small/default = GC-throughput signal;
-      # large/huge = GC-latency signal. See docs/benchmarks/zarith.md.
+      # arg = digits of pi.
       zarith_pi_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
         build_script: "zarith.build.sh"
@@ -647,20 +428,8 @@ suites:
         build_script: "zarith.build.sh"
         args: "180000"
 
-  # Two knobs (wrapper args "$LOOP $DIM"):
-  #   owl_gc      = repetition: loop=6, dim=100 (legacy ~16s steady-state).
-  #   owl_gc_*    = size ladder (working set): loop=1, dim scales the matrix size, so the
-  #                 off-heap Bigarray live set = 100 * dim^2 * 8 bytes grows RSS
-  #                 ~quadratically (a footprint ladder). top_heap_words is FLAT
-  #                 (off-heap under-reports) -> read RSS + allocated_words, not top_heap.
-  #                 Measured 5.5.0 / Ryzen 9950X (wall is BLAS-thread-bound so it is
-  #                 secondary; RSS is the stable shape signal):
-  #                   small   dim 300  ~4s    95 MB
-  #                   default dim 500  ~11s   230 MB
-  #                   large   dim 1500 ~124s  1.9 GB
-  #                   huge    dim 2400 ~320s  ~4.6 GB
-  #   Ring: re-25 (32 MB) as for owl_gc — event volume (~25-30k collections) is
-  #   similar across rungs since the grid (num_sample_pts=100) is fixed.
+  # Wrapper args = "$LOOP $DIM". owl_gc_* use loop=1 and scale the matrix dim; the live
+  # set is off-heap Bigarrays, so read RSS not top_heap. Wall is BLAS-thread-bound.
   macro-owl:
     type: OCamlBenchmarkSuite
     timeout: 900
@@ -668,75 +437,45 @@ suites:
       owl_gc:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
-        # arg = in-process loop count, read by owl_gc.ml as Sys.argv.(1).
-        # Each iteration is ~2.6s on this machine (full O(n²) GW pass),
-        # so arg=6 → ~16s wall.
-        # Requires runtime_events ring `re-25` (32 MB) or larger in the
-        # config string — `re-23` (8 MB default) overflows on 5+
-        # iterations and olly reports lost events plus a corrupted
-        # wall_time.
-        # See ~/macro-benches/README.md §"Iteration counts".
+        # arg = in-process loop count. Needs a ring >= re-25: re-23 overflows on 5+
+        # iterations, olly loses events and wall_time is corrupted.
         args: "6"
-      # Rung walls below are from the Ryzen 9 9950X calibration box.  owl is far
-      # slower on obelisk than that ratio suggests and not by a constant factor:
-      # measured there, owl_gc_default takes 122.6s against ~11s here (11x) and
-      # owl_gc_large 2874.5s against ~124s (23x).  Size a timeout from a
-      # measurement on the machine you are running on, not by scaling these.
-      # owl_gc_small and owl_gc_huge have not been measured on obelisk.
-      owl_gc_small:      # dim 300: ~4s, 95MB off-heap live set
+      # Rung walls are from the 9950X; obelisk is 11-23x slower on owl, so size timeouts
+      # from a measurement on the target machine.
+      owl_gc_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
         args: "1 300"
-      owl_gc_default:    # dim 500: ~11s, 230MB   (obelisk: 122.6s)
+      owl_gc_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
         args: "1 500"
-      owl_gc_large:      # dim 1500: ~124s, 1.9GB (obelisk: 2874.5s, 1.88GB max RSS)
+      owl_gc_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
         args: "1 1500"
-      owl_gc_huge:       # dim 2400: ~320s, ~4.6GB
+      owl_gc_huge:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
         args: "1 2400"
 
-  # ocamlc-self-compile: invoke the variant's own ocamlc on a generated
-  # ~400k-line OCaml workload (concatenated JSOO benchmark sources × 30
-  # replicas, each in a unique module). Single observable OCaml process —
-  # the runtime under test executes ocamlc's code, exercising the
-  # ephemeron tables in typing/btype.ml, Hashtbl, AST allocation, and
-  # Marshal (.cmi writing). Bytecode (`ocamlc`) chosen over native
-  # (`ocamlopt`) so the workload is uniform across flambda/non-flambda
-  # variants — cross-variant deltas reflect runtime perf only.
-  # See ~/macro-benches/README.md §"Benchmark characteristics".
+  # Runs the variant's own ocamlc on a generated ~400k-line workload. Bytecode rather
+  # than ocamlopt so the workload is identical across flambda/non-flambda variants.
   macro-ocamlc-self-compile:
     type: OCamlBenchmarkSuite
     timeout: 300
     programs:
-      # JSOO numeric programs x REPLICAS. Legacy default REPLICAS=30 (~5s, ~1GB
-      # heap) kept for continuity; the refactor "default" rung is REPLICAS=130
-      # (~15s, ~4GB heap) — set OCAMLC_SELF_COMPILE_REPLICAS=130 at build time.
-      # Large monotonic heap, minor-GC-dominated, major GC barely runs.
+      # REPLICAS default 30; OCAMLC_SELF_COMPILE_REPLICAS=130 at build time gives the ~15s/4GB rung.
       ocamlc_self_compile:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-self-compile"
         build_script: "ocamlc-self-compile.build.sh"
         args: ""
-      # Companion different-CHARACTER real workload: ocamlc compiling the real
-      # uucp (Unicode) library (~2s, ~78MB heap). Data/constant-heavy -> small
-      # COLLECTED heap, ACTIVE major GC (154 cycles vs ~13 for JSOO). Opposite
-      # end of the collector from ocamlc_self_compile; see docs/benchmarks/.
+      # ocamlc compiling uucp: small collected heap, active major GC (the opposite of ocamlc_self_compile).
       ocamlc_compile_uucp:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
         build_script: "ocamlc-compile-uucp.build.sh"
         args: ""
-      # Input-size ladder (compiling N replicas of the uucp Unicode library). uucp
-      # is data/constant-heavy with a COLLECTED heap, so scaling it keeps RSS ~flat
-      # (~90-120MB) while major-GC cycles + promotion scale linearly — a cheap
-      # major-GC-throughput ladder, the counterpart to ocamlc_self_compile's
-      # memory-bound (monotonic-heap) compilation. ocamlc-compile-uucp.build.sh
-      # bakes the replica count per rung by output name (N=3/8/25). Measured 5.5.0
-      # / Ryzen 9 9950X: 6s/87MB/377 major, 17s/96MB/771 major, 58s/120MB/1582 major
-      # (promotion 144M->1.36G words). No args.
+      # Replica count (3/8/25) is baked per rung by ocamlc-compile-uucp.build.sh, hence no args.
       ocamlc_compile_uucp_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/ocamlc-compile-uucp"
         build_script: "ocamlc-compile-uucp.build.sh"
@@ -750,18 +489,8 @@ suites:
         build_script: "ocamlc-compile-uucp.build.sh"
         args: ""
 
-  # liquidsoap-lang: parse + typecheck liquidsoap scripts (DSL compiler).
-  # Two knobs (args "$ITERATIONS $UNITS"):
-  #   liq_parse_typecheck   = repetition: 50000 iterations of one fixed ~90-line script.
-  #   liq_parse_typecheck_* = size ladder: 1 iteration, script SIZE via generated unit
-  #     count (argv.2). Each unit is a self-contained recursion+higher-order+list
-  #     block, so the parser builds a bigger AST and the typechecker a bigger type
-  #     environment; RSS/live grow with the count and wall is super-quadratic (the
-  #     env grows and each unit unifies against it). Measured 5.5.0 / Ryzen 9950X:
-  #       small   4000 units   4.7s   261MB   37M words
-  #       default 6500 units   14s    410MB   61M words
-  #       large   12000 units  65s    757MB   113M words
-  #   (huge deferred.) In-process generation — no vendored/generated files.
+  # args = "$ITERATIONS [$UNITS]"; the ladder runs 1 iteration of a generated $UNITS-unit
+  # script (super-quadratic in units).
   macro-liquidsoap-lang:
     type: OCamlBenchmarkSuite
     timeout: 300
@@ -770,37 +499,22 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
         build_script: "liquidsoap-lang.build.sh"
         args: "50000"
-      liq_parse_typecheck_small:      # 1 iter, 4000 units: ~5s, 261MB
+      liq_parse_typecheck_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
         build_script: "liquidsoap-lang.build.sh"
         args: "1 4000"
-      liq_parse_typecheck_default:    # 1 iter, 6500 units: ~14s, 410MB
+      liq_parse_typecheck_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
         build_script: "liquidsoap-lang.build.sh"
         args: "1 6500"
-      liq_parse_typecheck_large:      # 1 iter, 12000 units: ~65s, 757MB
+      liq_parse_typecheck_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liquidsoap-lang"
         build_script: "liquidsoap-lang.build.sh"
         args: "1 12000"
 
-  # merlin: in-process driver replicating merlin's cram bench (the 7
-  # canonical IDE queries against a 51 319-line file). Spawns a typer
-  # domain alongside the main domain — the merlin-domains branch's
-  # parallel-typer feature using OCaml 5 domains and effects. Same
-  # Domain.spawn dance ocamlmerlin_server does in single mode, so we
-  # exercise the production code path. Two domains exactly: main +
-  # typer.
-  # arg = in-process loop count, read by merlin_bench.ml as
-  # Sys.argv.(1). Each iteration runs all 7 queries once. arg=4 → ~16s
-  # wall on obelisk after the first iteration's typer warmup.
-  #
-  # Requires OCaml 5.5+. The merlin-domains branch ships its own copy
-  # of OCaml's typer (src/ocaml/typing/) targeted at OCaml_5_5_0; on
-  # 5.4.1 and earlier the vendored typer trips an internal assertion
-  # because data-structure invariants differ across compiler
-  # versions. For multi-version sweeps, the user should override
-  # `benchmarks.macro-merlin: []` when 5.4 / earlier is in the matrix
-  # to avoid known-failing cells.
+  # In-process replica of merlin's cram bench (7 IDE queries, main + typer domain);
+  # arg = loop count. Requires OCaml 5.5+: the merlin-domains vendored typer asserts on
+  # 5.4.1 and earlier, so set `benchmarks.macro-merlin: []` in multi-version sweeps.
   macro-merlin:
     type: OCamlBenchmarkSuite
     timeout: 180
@@ -810,28 +524,9 @@ suites:
         build_script: "merlin.build.sh"
         args: "4"
 
-  # js_of_ocaml: compile the runtime's ocamlc.byte (~3.5 MB of bytecode,
-  # version-matched per runtime by construction) to JavaScript. Exercises
-  # jsoo's bytecode parser, SSA / IR pipeline, optimisation passes, and
-  # JS output. Wall ~8-10s per invocation.
-  #
-  # Vendored from the `ocaml-5.6` branch of jsoo (PR ocsigen/js_of_ocaml#2227)
-  # rather than the 6.2.0 release, because 6.2.0 hard-rejects OCaml >= 5.5.
-  # The branch supports 4.13 ≤ x < 5.7 — covers all our matrix runtimes.
-  # Requires Cmdliner 2.0+ (vendored via setup-monorepo.sh as v2.1.0).
-  # Size axis = input BYTECODE size. jsoo is a whole-program compiler (holds the
-  # whole IR in memory), so RSS/live grow with the input — a genuine footprint
-  # ladder (unlike the per-module compiler benches). But cost tracks program
-  # STRUCTURE not raw bytes (thousands of tiny closures are pathological), so
-  # the rung inputs are REAL code: the 20 JSOO benchmark sources wrapped in
-  # modules × R replicas, compiled to a per-runtime .byte by jsoo.build.sh
-  # (generated + gitignored). The rung arg (small/default/large) selects the
-  # workload; empty = legacy ocamlc.byte. Measured 5.5.0 / Ryzen 9950X:
-  #   jsoo (ocamlc.byte 3.66MB) ~3.7s  0.27GB   (legacy anchor, repetition-ish)
-  #   small   30 reps  5.6MB  ~5s   0.5GB
-  #   default 80 reps  14MB   ~16s  1.7GB
-  #   large   200 reps 36MB   ~50s  7.8GB
-  # (huge deferred.)
+  # Compiles the runtime's own ocamlc.byte (arg "") or a generated per-runtime .byte
+  # (arg small/default/large, built by jsoo.build.sh). Vendored from jsoo's `ocaml-5.6`
+  # branch (ocsigen/js_of_ocaml#2227): 6.2.0 rejects OCaml >= 5.5. Needs Cmdliner 2.0+.
   macro-jsoo:
     type: OCamlBenchmarkSuite
     timeout: 300
@@ -840,97 +535,57 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
         build_script: "jsoo.build.sh"
         args: ""
-      jsoo_small:      # 30 reps, 5.6MB bytecode: ~5s, 0.5GB
+      jsoo_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
         build_script: "jsoo.build.sh"
         args: "small"
-      jsoo_default:    # 80 reps, 14MB bytecode: ~16s, 1.7GB
+      jsoo_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
         build_script: "jsoo.build.sh"
         args: "default"
-      jsoo_large:      # 200 reps, 36MB bytecode: ~50s, 7.8GB
+      jsoo_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/js_of_ocaml"
         build_script: "jsoo.build.sh"
         args: "large"
 
-  # liq-video-frames: synthetic reproduction of the GC-pacer / heap-growth
-  # pattern from ocaml/ocaml#13123 + #14533 (custom_major_ratio regression).
-  # Allocates three Bigarrays per iteration (Y/U/V planes at 1280×720 YUV420,
-  # ~1.32 MiB total) matching mm/Image.YUV420.create. Persistent OCaml-heap
-  # "deadweight" simulates liquidsoap's loaded stdlib + script graph
-  # (LIQ_DW_MB, default 100). Headline metrics are max_rss_kb and
-  # minor:major collection counts; wall_time captures the GC-pacer effect.
-  #
-  # POOL=1 + TOUCH=full: AVFrame-style refcounted-pool semantics — the
-  # canonical reproduction of toots' ocaml#14533 free-lunch shape. Under
-  # M=250 this variant shows the dramatic CPU drop with no RSS growth.
-  # See ~/macro-benches/benchmarks/liq-video-frames/liq_video_frames.ml
-  # for the full env-knob catalogue (LIQ_POOL, LIQ_CHURN, LIQ_PACE_FPS).
-  # arg = number of iterations; arg=30000 ≈ 4–20s wall.
+  # Reproducer for the ocaml/ocaml#13123 / #14533 pacer pattern (custom_major_ratio):
+  # pooled off-heap YUV420 Bigarray frames plus LIQ_DW_MB of heap deadweight. Env knobs
+  # (LIQ_POOL, LIQ_CHURN, LIQ_PACE_FPS) are documented in liq_video_frames.ml.
   macro-liq-video-frames:
     type: OCamlBenchmarkSuite
     timeout: 300
     programs:
-      # args = "n_frames [width height]".
-      #   liq_video_frames_pool   = the frozen #14533 repro: 30000 720p frames.
-      #   liq_video_frames_pool_* = size ladder: frame RESOLUTION (width/height) at a
-      #     fixed 15000 frames. A bigger frame scales the per-frame off-heap
-      #     Bigarray, so caml_alloc_custom_mem tells the pacer about more off-heap
-      #     bytes and forces proportionally MORE major cycles (the #14533 pacer
-      #     regime) — major-cycle count and wall grow ~with pixels^2. RSS grows
-      #     only modestly (shared pool buffer; off-heap not counted in RSS/top_heap
-      #     — lean on the collection counts). Measured 5.5.0 / Ryzen 9950X:
-      #       small   1080p  5.6s   108MB   1104 majorGC
-      #       default 4K     22s    118MB   4413 majorGC
-      #       large   8K     101s   154MB   16837 majorGC
-      #   (huge deferred.)
+      # args = "n_frames [width height]"; the ladder fixes 15000 frames and scales the
+      # resolution. Off-heap: read major-cycle counts, not RSS/top_heap.
       liq_video_frames_pool:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
         args: "30000"
-      liq_video_frames_pool_small:      # 15000 frames, 1080p: ~5.6s, 1104 majorGC
+      liq_video_frames_pool_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
         args: "15000 1920 1080"
-      liq_video_frames_pool_default:    # 15000 frames, 4K: ~22s, 4413 majorGC
+      liq_video_frames_pool_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
         args: "15000 3840 2160"
-      liq_video_frames_pool_large:      # 15000 frames, 8K: ~101s, 16837 majorGC
+      liq_video_frames_pool_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/liq-video-frames"
         build_script: "liq-video-frames.build.sh"
         args: "15000 7680 4320"
 
-  # pplacer: phylogenetic placement (bioinformatics).
   macro-pplacer:
     type: OCamlBenchmarkSuite
-    # Raised 120 -> 600 (2026-08-23): on obelisk BOTH pplacer_like_default and
-    # _large lost all 20 invocations to the 120s cap, so this suite had no
-    # measured wall time at all there. pplacer_like_default is estimated >=140s
-    # (ref 15s on the 9950X x the ~9x fleet factor); pplacer_like_large carries
-    # its own longer timeout in the benchmarks block below.
+    # Sized for obelisk (~9x slower than the 9950X reference).
     timeout: 600
     programs:
       pplacer_testsuite:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
         build_script: "pplacer.build.sh"
-        # arg = in-process loop count, passed to tests.exe as
-        # PPLACER_TEST_LOOP. The whole suite runs in one OCaml process so
-        # olly observes everything. Each iteration is ~3.5s on this machine,
-        # so arg ≈ N × 3.5s wall. arg=5 → ~17s (well in envelope on slower
-        # hardware; comfortably above noise floor on faster CI machines).
-        # See ~/macro-benches/README.md §"Iteration counts" for the pattern.
+        # arg = loop count (PPLACER_TEST_LOOP); the whole suite runs in one process.
         args: "5"
-      # Input-size likelihood ladder (working set = alignment length, n_sites).
-      # pplacer.build.sh builds like_bench.exe (pplacer's Felsenstein likelihood
-      # hot path) and emits a wrapper that replicates the reference alignment's
-      # columns argv.1 times and runs a fixed 40-point ML pendant-branch scan per
-      # edge. The larger inputs grow the generalized likelihood vectors (Glv, GSL-backed
-      # OFF-HEAP Bigarrays): top_heap stays ~2-8 MB while RSS spans 0.2-2.2 GB, so
-      # read this ladder by RSS/allocated_words (off-heap caveat), like owl. The
-      # per-edge scan lifts wall to owl-like bands. Measured 5.5.0 / Ryzen 9
-      # 9950X: mult 8 ~4.7s/0.22GB, 25 ~15s/0.65GB, 85 ~50s/2.2GB (allocated_words
-      # 2.1->22.4G, minor GC 8k->86k, major 147->646). argv.1 = replication factor.
+      # arg = alignment replication factor. Likelihood vectors are off-heap (GSL), so read
+      # RSS/allocated_words rather than top_heap.
       pplacer_like_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/pplacer"
         build_script: "pplacer.build.sh"
@@ -944,45 +599,12 @@ suites:
         build_script: "pplacer.build.sh"
         args: "85"
 
-  # lavyek: multicore key-value store on Eio + kcas + io_uring (single
-  # OCaml process, multi-domain).  DaCapo-style fixed-work driver; the
-  # 4-domain cell is the calibrated target (~8s wall on monolith).  All
-  # 4 cells share the same nb=10_000_000 op budget so wall times reflect
-  # parallel scaling rather than work-budget differences.  Per-domain
-  # measurements on monolith with nb=10M:
-  #     1d ~25s   2d ~14s   4d ~8s   8d ~6s
-  # WAL files live under benchmarks/lavyek/wal/<name>/ and the driver
-  # cleans up after each invocation; an interrupted run may leave
-  # leftovers, so wal/ is gitignored.
-  #
-  # CPU pinning: lavyek_bench.ml pins each worker domain to its own
-  # physical core via `ocaml-processor` (Processor.Affinity.set_cpus
-  # → pthread_setaffinity_np), keyed off id_domain.  This is what
-  # makes the 1d/2d/4d/8d wall times comparable run-to-run — without
-  # it the kernel migrates domains within whatever mask was inherited.
-  # The pin_lavyek modifier confines the process to one hardware thread
-  # per physical core to also fence the few helper threads (first
-  # iou-wrk + Eio setup) that spawn before pinning runs.  The CPU list is
-  # derived per machine, not hardcoded, and the command is `taskset -c`
-  # on Linux and `cpuset -l` on FreeBSD, which has no taskset at all.
-  # See benchmarks/lavyek/lavyek_bench.ml.
-  #
-  # Requires md=8 and a smaller per-domain ring (re=22).  Wired via
-  # the re_par / md_par modifiers — see the modifiers section below.
-  #
-  # *** REQUIRED CONFIG-STRING MODIFIERS ***
-  # Any config that enables this suite MUST add `|re_par-22|md_par-8|pin_lavyek`
-  # to its config-string entries (the values are required — bare `re_par|md_par`
-  # tokens render to the literal `e={0}` / `d={0}` and break OCAMLRUNPARAM).
-  # Without these, lavyek runs with olly's default 8 MB per-domain ring, which
-  # overflows on the 10M-op multi-domain workload and silently drops
-  # runtime_events.  Lost begin events make olly fall back to `now - boot_time`
-  # for the per-domain wall, producing negative top-level wall_time on the
-  # order of -4.7M seconds.  See the file-header note.
-  #
-  # The `required_modifiers:` field below is documentation today (running-ng
-  # ignores unknown suite kwargs); leaving it machine-readable so a future
-  # config-validator can pick it up.
+  # Multi-domain KV store (Eio + io_uring); all cells share one 10M-op budget. Worker
+  # domains pin themselves via ocaml-processor; pin_lavyek fences the helper threads.
+  # Enabling it needs |re_par-22|md_par-8|pin_lavyek in every config string (bare
+  # re_par/md_par render `e={0}`/`d={0}` and break OCAMLRUNPARAM), else the default
+  # ring overflows and wall_time goes negative. required_modifiers is documentation
+  # only; running-ng does not check it.
   macro-lavyek-monorepo:
     type: OCamlBenchmarkSuite
     timeout: 120
@@ -1005,9 +627,7 @@ suites:
         build_script: "lavyek.build.sh"
         args: "8 100 10000000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/lavyek/wal/lavyek_wal_8d"
 
-# =============================================================================
 # Modifiers
-# =============================================================================
 modifiers:
   time_stats:
     type: Wrapper
@@ -1015,28 +635,10 @@ modifiers:
   gc_verbose:
     type: OCamlRunParam
     val: "v=0x400"
-  # Runtime events ring buffer size (log2 words per domain).  Bigger ring
-  # reduces "Lost N events" from olly on GC-heavy workloads.
-  #
-  # Two separate (re, md) pairs — sequential macros vs the parallel
-  # lavyek suite — because md must be >= the actual domain count and the
-  # events file size = md * 2^e * 8 bytes:
-  #   - sequential: re-25|md-2  -> 512 MB file, 256 MB/domain ring
-  #     (owl needs >= re-25 — see owl_gc comment; re-23 already overflows)
-  #   - lavyek:     re-22|md-8  -> 256 MB file,  32 MB/domain ring
-  #     (md-8|re-25 would be 2 GB, right at the ftruncate boundary)
-  # Routing is via `excludes`: re/md skip lavyek; re_par/md_par skip
-  # everything else.  The anchor &non_lavyek_excludes is shared by
-  # re_par and md_par so the long suite list lives in one place.
-  #
-  # *** Including configs MUST list all five of re-N|md-M|re_par-22|md_par-8|
-  #     pin_lavyek when lavyek is enabled. ***  re/md alone leaves lavyek with
-  #     olly's default 8 MB ring; the resulting event loss surfaces as negative
-  #     top-level wall_time (~ -4.7M s, system uptime).  The `_par` modifiers
-  #     REQUIRE explicit values (`re_par-22`, `md_par-8`) — the bare token
-  #     `re_par` renders to the literal `e={0}` and breaks OCAMLRUNPARAM.
-  #     `pin_lavyek` is a Wrapper with no value.  See file-header note and
-  #     2026-05-16-full-s-o-sweep-monolith.md §Methodology.
+  # runtime_events ring: e = log2 words per domain, d = max domains; file size is
+  # d * 2^e * 8 bytes. re/md apply to sequential suites, re_par/md_par to lavyek only
+  # (routed by the shared excludes anchors). re-25|md-2 is 512MB; lavyek uses
+  # re-22|md-8 (md-8|re-25 would be 2GB, at the ftruncate boundary).
   re:
     type: OCamlRunParam
     val: "e={0}"
@@ -1050,11 +652,8 @@ modifiers:
     type: OCamlRunParam
     val: "d={0}"
     excludes: *lavyek_only_excludes
-  # MMTk plan / GC-thread count as NAME-VALUE modifiers (plan-Bactrian, threads-1)
-  # so the contract records gc_plan / gc_threads dimensions and each plan gets a
-  # distinct config_id — Bactrian vs LXR vs GenImmix plot as separate series.
-  # (Prefer these over the old flag modifiers mmtk_bactrian/mmtk_lxr, which the
-  # config_id drops.)
+  # Name-value modifiers so gc_plan/gc_threads reach the contract and each plan gets
+  # its own config_id (the old flag modifiers mmtk_bactrian/mmtk_lxr do not).
   plan:
     type: EnvVar
     var: "MMTK_PLAN"
@@ -1063,7 +662,7 @@ modifiers:
     type: EnvVar
     var: "MMTK_THREADS"
     val: "{0}"
-  # Parallel-suite counterparts: only applied to lavyek programs.
+  # Lavyek-only counterparts of re/md.
   re_par:
     type: OCamlRunParam
     val: "e={0}"
@@ -1091,71 +690,23 @@ modifiers:
     type: OCamlRunParam
     val: "d={0}"
     excludes: *non_lavyek_excludes
-  # Process-level CPU mask for the lavyek suite — belt-and-braces on top
-  # of the per-domain pinning that lavyek_bench.ml does internally via
-  # ocaml-processor (each worker domain locks itself to a distinct
-  # physical core, cores 0..N-1).  A handful of Eio/io_uring helper
-  # threads spawn before the bench's pinning runs and would otherwise
-  # inherit the process default mask (every logical CPU); this wrapper
-  # confines them to the same physical-core set the workers use.
-  #
-  # CpuPin derives the CPU list from the running machine instead of
-  # hardcoding it.  The policy is unchanged (one hardware thread per
-  # physical core), and on the AMD Ryzen 9 9950X box this suite is
-  # calibrated on it still resolves on Linux to exactly the
-  # "taskset -c 0-15" that used to be written out by hand, so
-  # existing lavyek numbers stay comparable.  It is now also correct on
-  # a box with a different core count, on Intel parts where logical CPUs
-  # alternate physical/sibling, and on FreeBSD (cpuset -l, and a
-  # different sibling enumeration for the same policy).
-  #
-  # `val` is the number of whole physical cores handed to olly and the
-  # counter tool instead of the benchmark.  0 keeps the historical
-  # behaviour: the benchmark gets every physical core.  What does change
-  # at 0 is that olly and the counter tool are now confined to the SMT
-  # siblings rather than floating across every CPU, so they can no
-  # longer preempt a worker.  Raise it to give the observers whole cores
-  # of their own, but only between sweeps: it takes cores away from the
-  # benchmark and so changes what is being measured.
-  #
-  # Lavyek-only via the shared anchor; sequential macros stay unmasked.
-  # `one_node` confines the benchmark to one NUMA node and hands the others
-  # to olly and the counter tool.  Exactly a no-op on a single-socket box
-  # (monolith), so it changes nothing here; on a 2-socket box it keeps the
-  # benchmark's memory traffic off the interconnect, which for GC work is a
-  # large source of run-to-run variance, and gives the observers a whole
-  # socket instead of the benchmark's own SMT siblings.
+  # Confines lavyek's helper threads (spawned before the bench pins its own domains) to
+  # the worker cores. CpuPin derives CPUs from the machine: one hardware thread per
+  # physical core, taskset -c on Linux, cpuset -l on FreeBSD. val = physical cores
+  # taken from the benchmark for olly and the counter tool (0: they get the SMT
+  # siblings); changing it changes the measurement. one_node: one NUMA node (no-op
+  # on a single socket).
   pin_lavyek:
     type: CpuPin
     val: "0"
     one_node: true
     excludes: *non_lavyek_excludes
-  # Pin a single-threaded benchmark to one core of the set reserved for
-  # benchmark work.  Where the machine isolates cores (Linux `isolcpus=`, with
-  # a matching `irqaffinity=` putting the interrupts elsewhere) that is the
-  # isolated set, and the observers go to the housekeeping cores; otherwise it
-  # is the topology policy CpuPin already applied.  Either way the CPU numbers
-  # come from the running machine, so this is correct on a different core
-  # count, on FreeBSD, and on ARM.
-  #
-  # Why one core and not the whole set: a single-threaded benchmark only ever
-  # uses one, and naming it makes the placement identical across runs.  On an
-  # 8-core Xeon booted `nosmt isolcpus=4,6,8,10,12,14 irqaffinity=0,2`,
-  # sedlex_tokenize_default over six alternating runs:
-  #
-  #     unpinned (housekeeping cores 0,2)   51.46s mean, 25.84s spread
-  #     pinned to one isolated core         46.47s mean,  0.33s spread
-  #
-  # The unpinned runs sat at ~46.5s four times and then hit 50.19s and 72.29s:
-  # the noise is occasional and large, not gaussian, which is the shape most
-  # likely to read as a regression in a single cell.
-  #
-  # NOT applied to multi-domain benchmarks.  The scheduler does not balance
-  # among isolated CPUs, so an unpinned multi-domain benchmark handed that set
-  # puts every domain on one of them: infer measured 168% CPU on the two
-  # housekeeping cores and 100% on the six isolated ones, 72% slower.  lavyek
-  # is exempt because it pins its own domains (pin_lavyek gives it the set);
-  # infer is exempt until it does the same.
+  # Pins a single-threaded benchmark to one core of the benchmark set (the isolcpus=
+  # set where the machine isolates cores, else CpuPin's topology policy); one named
+  # core makes placement identical across runs (sedlex spread 26s -> 0.3s). Not for
+  # multi-domain benchmarks: the scheduler does not balance among isolated CPUs, so an
+  # unpinned multi-domain process collapses onto one (infer: 72% slower). lavyek and
+  # infer use pin_lavyek / pin_bench_mc instead.
   pin_bench:
     type: CpuPin
     bench_cores: "1"
@@ -1169,23 +720,10 @@ modifiers:
         - infer_small
         - infer_default
         - infer_large
-  # The multi-domain counterpart of pin_bench: the whole benchmark core set
-  # rather than one core of it.  Scoped with `includes` because it belongs to a
-  # named handful of benchmarks; the same thing said as an exclude list would
-  # mean naming every other benchmark and keeping that list current (see
-  # non_lavyek_excludes, which is 19 suites and 29 programs and already stale).
-  #
-  # ONLY for a benchmark that places its own domains.  The scheduler does not
-  # balance among isolated CPUs, so handing this set to one that does not pin
-  # confines every domain to a single CPU -- infer measured 100% CPU that way
-  # against 168% on two shared cores.  infer pins its domains from the
-  # inherited mask (macro-benches scripts/vendor-infer.sh patches
-  # DomainPool.child), which is what makes this set usable: 5.5-5.8 cores of 6
-  # through its analysis phase.
-  #
-  # lavyek is NOT here: it pins its own domains too, but from the machine
-  # topology rather than the inherited mask, so it takes its cores through
-  # pin_lavyek and ignores whatever mask it is given.
+  # Whole benchmark core set, for benchmarks that place their own domains from the
+  # inherited mask (infer: vendor-infer.sh patches DomainPool.child). Uses `includes`
+  # to avoid a second copy of non_lavyek_excludes. lavyek pins from the machine
+  # topology instead, so it goes through pin_lavyek.
   pin_bench_mc:
     type: CpuPin
     includes:
@@ -1196,148 +734,40 @@ modifiers:
   perf_grp1:
     type: PerfAndOllyAttach
     val: "task-clock,page-faults,cycles,instructions"
-    # hwpmc vocabulary; used instead of `val` on FreeBSD. See the
-    # PerfAndOllyAttach docstring for why both live here rather than
-    # in a parallel _freebsd config file.
+    # hwpmc event names, used instead of val on FreeBSD.
     val_freebsd: "instructions,unhalted-cycles,PAGE_FAULT.ALL"
   perf_grp2:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,stalled-cycles-frontend,stalled-cycles-backend"
-    # hwpmc vocabulary; used instead of `val` on FreeBSD. See the
-    # PerfAndOllyAttach docstring for why both live here rather than
-    # in a parallel _freebsd config file.
     val_freebsd: "instructions,unhalted-cycles,idq_uops_not_delivered.core,resource_stalls.any"
   perf_grp3:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,cache-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses"
-    # hwpmc vocabulary; used instead of `val` on FreeBSD. See the
-    # PerfAndOllyAttach docstring for why both live here rather than
-    # in a parallel _freebsd config file.
     val_freebsd: "instructions,unhalted-cycles,longest_lat_cache.miss,mem_load_uops_retired.l3_miss,dtlb_load_misses.walk_completed,itlb_misses.walk_completed"
-  # --- FreeBSD event groups (hwpmc via pmcstat) ---
-  #
-  # The groups above cannot allocate on FreeBSD: of their event names only
-  # `instructions` resolves as a PMC. `task-clock`, `page-faults`, `cycles`,
-  # `branch-misses` and `cache-misses` do not. And pmcstat is all-or-nothing:
-  # one unresolvable name makes it exit 71 and write nothing, so the whole
-  # group yields no counters rather than a partial set. Hence separate groups
-  # rather than per-OS substitution inside the modifier: the config string is
-  # the provenance for a set of numbers, so it should say which events ran.
-  #
-  # Verified as complete groups (not merely event by event) on a Xeon E5-2640
-  # v4 (Broadwell-EP) under FreeBSD 15.1, against a real GC-heavy OCaml
-  # workload: 2/2, 4/4 and 6/6 counters non-zero respectively.
-  #
-  # Hard ceiling: 7 events, being 3 fixed-function plus 4 programmable. Four,
-  # not eight, because SMT is enabled. An 8th event fails `Invalid argument`.
-  # `instructions` and `unhalted-cycles` land on fixed-function counters, so
-  # grp3's four dotted events fill every programmable slot: it is AT the
-  # ceiling. The only event addable to grp3 is the remaining fixed-function
-  # counter, `cpu_clk_unhalted.ref_tsc`; anything else needs a grp4.
-  #
-  # Unlike perf, hwpmc never multiplexes. Over-subscribe and it hard-fails
-  # instead of time-slicing and scaling, so a FreeBSD count is always an
-  # unscaled true count. Both platforms' groups fit within the programmable
-  # counters SMT leaves, so neither is scaling today, but a future addition
-  # will be refused here where Linux would quietly start estimating.
-  #
-  # These are counting PMCs, not sampling ones: `pmcstat -p` allocates a
-  # process-mode counting PMC, and the harness passes none of the sampling
-  # flags (-P/-S/-n/-D/-g). `-C` makes the running total cumulative and `-w`
-  # only sets how often it is printed, so the final row is the exact total
-  # rather than an extrapolation. (This is also why `inst_retired.prec_dist`
-  # is not used even though it resolves: its purpose is PEBS sampling.)
-  #
-  # `page-faults` IS available, as the soft PMC PAGE_FAULT.ALL (see grp1).
-  # `task-clock` is not, and is dropped rather than substituted: CLOCK.STAT is
-  # the nearest soft event but counts stat-clock ticks at ~127 Hz, so it would
-  # be a coarse estimate wearing the name of a Linux exact one, and olly's
-  # `cpu_time` already covers what task-clock was wanted for. So a FreeBSD run
-  # is missing the `task_clock` contract metric and nothing else. The
-  # per-invocation record still carries user_time, system_time, minor_faults,
-  # major_faults and context-switch counts from getrusage, but rusage is not a
-  # contract source, so those do not appear as contract metrics.
-  #
-  # Alias spellings are deliberate: `instructions` and `unhalted-cycles`
-  # rather than `inst_retired.any` / `cpu_clk_unhalted.thread`, though all
-  # four resolve. PmcStatBackend.EVENT_ALIASES canonicalises
-  # `unhalted-cycles` to `cycles`, so the recorded names come out as
-  # `instructions` / `cycles`, identical to Linux perf's, keeping the two
-  # platforms in one result schema. Only these two reach the contract
-  # vocabulary on either platform; every dotted event below is archival in
-  # the raw sidecar, exactly as Linux's stalled-cycles-* and *-misses are.
-  #
-  # Group 1: baseline IPC plus page faults. Direct equivalent of perf_grp1
-  # apart from task-clock.
-  #
-  # PAGE_FAULT.ALL is a SOFT PMC (pmc.soft(3)), not a hardware one. hwpmc
-  # defines page_fault all/read/write in sys/amd64/amd64/trap.c and fires them
-  # from the page-fault handler; hwpmc_soft.c increments a readable counter
-  # whenever the allocated PMC is not in sampling mode, which is our case.
-  # Soft PMCs live in their own class with their own 16 rows, so this costs NO
-  # programmable hardware counter. It is aliased onto perf's `page-faults`, so
-  # it reaches the `page_faults` contract metric with no vocabulary change.
-  #
-  # PAGE_FAULT.READ and PAGE_FAULT.WRITE also exist and have no Linux
-  # equivalent. Worth a look for GC work, since write faults are where
-  # copy-on-write and first-touch of freshly-mapped major-heap pages show up.
-  #
-  # Verified on a Xeon E5-2640 v4 under FreeBSD 15.1: allocates alongside
-  # hardware PMCs in one group, and read 60,636 against rusage's 62,357,
-  # within 2.8%. READ and WRITE sum exactly to ALL (20 + 60,616), and on GC
-  # workloads write faults are ~99.97% of the total, which is the first-touch
-  # signature of a growing major heap.
+  # FreeBSD groups: pmcstat is all-or-nothing (one unresolvable name exits 71 with no
+  # output) and only `instructions` of the Linux names resolves, so separate groups
+  # keep the config string honest about what ran. Ceiling is 7 events (3 fixed + 4
+  # programmable with SMT on) and hwpmc never multiplexes, it fails instead.
+  # task-clock has no exact equivalent and is dropped (olly cpu_time covers it);
+  # page-faults maps to the soft PMC PAGE_FAULT.ALL, which costs no hardware counter.
+  # PmcStatBackend.EVENT_ALIASES canonicalises `unhalted-cycles` to `cycles`.
   perf_grp1_freebsd:
     type: PerfAndOllyAttach
     val: "instructions,unhalted-cycles,PAGE_FAULT.ALL"
-  # Group 2: pipeline stalls. APPROXIMATIONS, not equivalents: perf's
-  # stalled-cycles-frontend/backend are derived events with specific umasks,
-  # so these numbers are NOT comparable with Linux's. Directionally useful
-  # within FreeBSD.
+  # Approximations of perf's stalled-cycles-*; not comparable with Linux numbers.
   perf_grp2_freebsd:
     type: PerfAndOllyAttach
     val: "instructions,unhalted-cycles,idq_uops_not_delivered.core,resource_stalls.any"
-  # Group 3: cache and TLB hierarchy.
-  #
-  #   cache-misses     -> longest_lat_cache.miss
-  #       Linux's cache-misses is PERF_COUNT_HW_CACHE_MISSES, all-request LLC
-  #       misses (loads, stores and prefetches), which is exactly this event.
-  #   LLC-load-misses  -> mem_load_uops_retired.l3_miss
-  #       Closest available, but it counts RETIRED LOAD UOPS where Linux
-  #       counts requests, so speculative loads that never retire and
-  #       prefetches are excluded. NOT numerically comparable with a Linux
-  #       figure. The measured split corroborates the shape: 12.27M load
-  #       misses within 77.61M total LLC misses on an allocation-heavy run.
-  #   dTLB/iTLB-load-misses -> *.walk_completed
-  #       Completed page walks, the conventional perf mapping. Alternatives if
-  #       a different flavour is ever wanted: *.miss_causes_a_walk (walks
-  #       started), *.walk_duration, *.stlb_hit, page_walker_loads.itlb_l*.
-  #
-  # DO NOT add `llc-misses`: it is the SAME counter as longest_lat_cache.miss
-  # (measured 77,610,381 against 77,610,362 in one run, and 48,445,804
-  # against 48,445,767 in another). Adding both would burn one of only four
-  # programmable slots on a duplicate.
-  #
-  # `instructions` here is a deliberate addition that Linux's grp3 lacks. It
-  # costs no programmable slot, being fixed-function, and makes
-  # per-instruction normalisation possible.
+  # mem_load_uops_retired.l3_miss counts retired load uops, not requests: not comparable
+  # with Linux LLC-load-misses. Do not add llc-misses: same counter as
+  # longest_lat_cache.miss and it would burn one of four programmable slots (group is at the ceiling).
   perf_grp3_freebsd:
     type: PerfAndOllyAttach
     val: "instructions,unhalted-cycles,longest_lat_cache.miss,mem_load_uops_retired.l3_miss,dtlb_load_misses.walk_completed,itlb_misses.walk_completed"
-  # memtrace: unlike perf/olly, this requires the traced binary to call
-  # Memtrace.trace_if_requested () at startup — macro-benches only patches
-  # this in for test_decompress today (see macro-benches commit adding
-  # memtrace to macro-bench-decompress). Scoped to that one benchmark via
-  # excludes (Modifier.excludes is exclusion-only — there's no allowlist
-  # mechanism).
-  #
-  # Note this list is belt-and-braces, not a guard: excludes makes
-  # attach_modifiers skip the modifier silently, so adding memtrace_grp1 to an
-  # unpatched benchmark is NOT an error — it just exports MEMTRACE to a binary
-  # that ignores it and produces no trace. runbms warns when that happens
-  # ("memtrace was requested but the benchmark produced no trace"), which is
-  # the real safety net; a benchmark added to a *new* suite won't be in this
-  # list at all. Keep the list in sync when patching more benchmarks.
+  # Needs the binary to call Memtrace.trace_if_requested (); macro-benches patches only
+  # test_decompress. excludes is not a guard: an unpatched benchmark silently produces
+  # no trace (runbms warns "memtrace was requested but the benchmark produced no trace").
+  # Keep the list in sync when patching more benchmarks.
   memtrace_grp1:
     type: MemtraceAttach
     excludes: &non_decompress_excludes
@@ -1364,35 +794,16 @@ modifiers:
       macro-pplacer: [pplacer_testsuite]
       macro-lavyek-monorepo: [lavyek_kv_1d, lavyek_kv_2d, lavyek_kv_4d, lavyek_kv_8d]
 
-# =============================================================================
-# Benchmarks — all programs enabled
-# =============================================================================
-# Per-benchmark timeout overrides use the dict form
-# `{name: X, bm_name: X, timeout: N}` — this is the ONLY per-program timeout
-# mechanism for OCamlBenchmarkSuite. A `timeout:` placed inside a suite's
-# `programs:` entry is silently DROPPED (the suite constructor copies a fixed
-# key list that has no `timeout`; see suite.py OCamlBenchmarkSuite.__init__),
-# so it looks like it works and does nothing.
-#
-# The overrides below were added 2026-08-23 after the 5.5.0-fp-flambda run on
-# obelisk (Xeon E5-2667 v2) lost 268 of 760 invocations — 35%, across 15 of 38
-# benchmarks — to timeouts sized against the Ryzen 9 9950X reference box.
-# A killed invocation is recognisable in the olly sidecars by a NEGATIVE
-# wall_time (olly reads a zero end-timestamp when the process is SIGKILLed
-# before its runtime_events flush) with perf task-clock pinned at the cap.
-# Estimates marked "ref ratio" are obelisk's measured `_default` rung scaled by
-# the large/default wall ratio of the 9950X figures in the suite comments above;
-# that estimator validated to within ~6% on the five tools where both rungs
-# completed on obelisk (it is unreliable for owl, -15%, and menhir, -63%, so
-# those two use directly measured numbers instead). Values are ~2x the estimate.
-# NOTE obelisk was running the `ondemand` cpufreq governor (cores at 1.2-1.9GHz
-# on a 3.3GHz part) for that run, which inflates every figure here.
+# Benchmarks. Per-program timeouts use the dict form {name, bm_name, timeout}; a
+# `timeout:` inside a suite's programs: entry is silently dropped. Large-rung timeouts
+# are sized for obelisk (Xeon E5-2667 v2, 5-9x slower than the 9950X reference); a
+# timed-out invocation shows a negative wall_time in the olly sidecar.
 benchmarks:
   macro-menhir-monorepo:
     - menhir_ocamly
     - menhir_sql_parser
     - menhir_sysver
-    - {name: menhir_sysver_canonical, bm_name: menhir_sysver_canonical, timeout: 1200}   # measured 505-540s on -flambda/-fp-flambda, capped at 600 on stock/-fp
+    - {name: menhir_sysver_canonical, bm_name: menhir_sysver_canonical, timeout: 1200}
 
   macro-cpdf-monorepo:
     - cpdf_merge
@@ -1401,7 +812,7 @@ benchmarks:
     - cpdf_squeeze
     - cpdf_squeeze_small
     - cpdf_squeeze_default
-    - {name: cpdf_squeeze_large, bm_name: cpdf_squeeze_large, timeout: 900}   # est 350s (obelisk default 115s x ref ratio 3.06)
+    - {name: cpdf_squeeze_large, bm_name: cpdf_squeeze_large, timeout: 900}
 
   macro-alt-ergo-monorepo:
     - alt_ergo_fill
@@ -1416,13 +827,13 @@ benchmarks:
     - frama_c_eva_sqlite
     - frama_c_eva_sqlite_small
     - frama_c_eva_sqlite_default
-    - {name: frama_c_eva_sqlite_large, bm_name: frama_c_eva_sqlite_large, timeout: 2400}   # est 946s (obelisk default 137s x ref ratio 6.89)
+    - {name: frama_c_eva_sqlite_large, bm_name: frama_c_eva_sqlite_large, timeout: 2400}
 
   macro-goblint-monorepo:
     - goblint
     - goblint_gen_small
     - goblint_gen_default
-    - {name: goblint_gen_large, bm_name: goblint_gen_large, timeout: 900}   # est 375s (obelisk default 128s x ref ratio 2.94)
+    - {name: goblint_gen_large, bm_name: goblint_gen_large, timeout: 900}
 
   macro-infer-monorepo:
     - infer_small
@@ -1448,31 +859,31 @@ benchmarks:
     - irmin_mem_rw
     - irmin_mem_rw_small
     - irmin_mem_rw_default
-    - {name: irmin_mem_rw_large, bm_name: irmin_mem_rw_large, timeout: 900}   # est 393s (obelisk default 114s x ref ratio 3.47)
+    - {name: irmin_mem_rw_large, bm_name: irmin_mem_rw_large, timeout: 900}
 
   macro-ocamlformat:
     - ocamlformat_rocq
     - ocamlformat_rocq_small
     - ocamlformat_rocq_default
-    - {name: ocamlformat_rocq_large, bm_name: ocamlformat_rocq_large, timeout: 1200}   # measured 591-596s on -flambda, capped at 600 on the other three
+    - {name: ocamlformat_rocq_large, bm_name: ocamlformat_rocq_large, timeout: 1200}
 
   macro-decompress:
     - test_decompress
     - test_decompress_small
     - test_decompress_default
-    - {name: test_decompress_large, bm_name: test_decompress_large, timeout: 1200}   # est 501s (obelisk default 127s x ref ratio 3.94)
+    - {name: test_decompress_large, bm_name: test_decompress_large, timeout: 1200}
 
   macro-eio:
     - eio_fiber_stream
     - eio_conc_small
     - eio_conc_default
-    - {name: eio_conc_large, bm_name: eio_conc_large, timeout: 600}   # est 290s (obelisk default ~119s x ref ratio 2.44)
+    - {name: eio_conc_large, bm_name: eio_conc_large, timeout: 600}
 
   macro-sedlex:
     - sedlex_tokenize
     - sedlex_tokenize_small
     - sedlex_tokenize_default
-    - {name: sedlex_tokenize_large, bm_name: sedlex_tokenize_large, timeout: 900}   # est 380s (obelisk default 116s x ref ratio 3.29)
+    - {name: sedlex_tokenize_large, bm_name: sedlex_tokenize_large, timeout: 900}
 
   macro-yojson:
     - ydump_repeat
@@ -1491,7 +902,7 @@ benchmarks:
     - owl_gc
     - owl_gc_small
     - owl_gc_default
-    - {name: owl_gc_large, bm_name: owl_gc_large, timeout: 7200}   # measured 2875s on obelisk (stock 5.5.0, one core)
+    - {name: owl_gc_large, bm_name: owl_gc_large, timeout: 7200}
     - owl_gc_huge
 
   macro-ocamlc-self-compile:
@@ -1499,21 +910,16 @@ benchmarks:
     - ocamlc_compile_uucp
     - ocamlc_compile_uucp_small
     - ocamlc_compile_uucp_default
-    - {name: ocamlc_compile_uucp_large, bm_name: ocamlc_compile_uucp_large, timeout: 900}   # est 421s (obelisk default 124s x ref ratio 3.41)
+    - {name: ocamlc_compile_uucp_large, bm_name: ocamlc_compile_uucp_large, timeout: 900}
 
   macro-liquidsoap-lang:
     - liq_parse_typecheck
     - liq_parse_typecheck_small
     - liq_parse_typecheck_default
-    - {name: liq_parse_typecheck_large, bm_name: liq_parse_typecheck_large, timeout: 1200}   # est 488s (obelisk default 105s x ref ratio 4.64)
+    - {name: liq_parse_typecheck_large, bm_name: liq_parse_typecheck_large, timeout: 1200}
 
-  # macro-merlin: DISABLED pending upstream fix to a race in
-  # merlin-domains' typer-domain handoff. The vendored typer hits an
-  # `Invalid -> assert false` in `Types.rev_log` non-deterministically
-  # at N>=2 iterations of the cram-bench workload (see
-  # benchmarks/merlin/UPSTREAM_BUG.md for details). Re-enable by
-  # uncommenting the `- merlin_bench` line below once the race is
-  # fixed in the merlin-domains branch.
+  # Disabled: merlin-domains typer race (`Invalid -> assert false` in Types.rev_log at
+  # N>=2 iterations); see benchmarks/merlin/UPSTREAM_BUG.md.
   macro-merlin: []
     # - merlin_bench
 
@@ -1527,73 +933,30 @@ benchmarks:
     - liq_video_frames_pool
     - liq_video_frames_pool_small
     - liq_video_frames_pool_default
-    - {name: liq_video_frames_pool_large, bm_name: liq_video_frames_pool_large, timeout: 1200}   # est 556s (obelisk default 121s x ref ratio 4.59)
+    - {name: liq_video_frames_pool_large, bm_name: liq_video_frames_pool_large, timeout: 1200}
 
   macro-pplacer:
     - pplacer_testsuite
     - pplacer_like_small
     - pplacer_like_default
-    - {name: pplacer_like_large, bm_name: pplacer_like_large, timeout: 1200}   # est 467s; obelisk default was itself capped, so this is a lower bound
+    - {name: pplacer_like_large, bm_name: pplacer_like_large, timeout: 1200}
 
-  # macro-lavyek-monorepo: DISABLED — the lavyek library lives in a PRIVATE
-  # repo (github.com/tarides/lavyek), so builds without access to it cannot
-  # vendor the suite. Skipped here the same way macro-merlin is: the suite
-  # definition, modifier `excludes`, and tags above stay intact, only the
-  # enabled-program list is emptied. The clone + test-build are likewise
-  # skipped in macro-benches/scripts/setup-monorepo.sh. Re-enable by
-  # uncommenting the four cells below (and the clone + test-build lines in
-  # setup-monorepo.sh) once you have lavyek access. NB: when re-enabled,
-  # config-strings must add |re_par-22|md_par-8|pin_lavyek (see file header).
+  # Disabled: lavyek is a private repo (github.com/tarides/lavyek). Re-enabling also
+  # needs the clone in macro-benches setup-monorepo.sh and |re_par-22|md_par-8|pin_lavyek
+  # in every config string.
   macro-lavyek-monorepo: []
     # - lavyek_kv_1d
     # - lavyek_kv_2d
     # - lavyek_kv_4d
     # - lavyek_kv_8d
 
-# =============================================================================
-# Tags — runtime-feature classification of benchmarks
-# =============================================================================
-# Tags map each benchmark to the specific OCaml runtime mechanism(s) it
-# exercises on the *hot path* of its workload.  Source-grounded: every
-# `exercised_by:` claim is backed by a file:line citation under
-# `verified_at:` from the vendored sources (~/macro-benches/duniverse/,
-# vendor/) or from the OCaml compiler-libs.  See macro-benches/README.md
-# §"Runtime-feature coverage matrix" for the prose version.
-#
-# Schema (per tag):
-#   <tag-name>:
-#     description: <one-paragraph explanation of the runtime mechanism>
-#     exercised_by:                # hot-path programs (selected by RUNNING_TAG)
-#       <suite-name>: [<programs>]
-#     cold:                        # optional — present-but-cold uses (doc only;
-#       <suite-name>: [<programs>] # NOT selected by RUNNING_TAG)
-#     verified_at:                 # source citations
-#       - <repo-relative path>:<line> — <brief note>
-#     gap:                         # optional — required if exercised_by is empty
-#       <text explaining why no benchmark exercises this>
-#
-# Usage:
-#   # run only the benchmarks that exercise Weak.Make on the hot path:
-#   RUNNING_TAG=weak_refs \
-#     CONFIG_FILE=src/running/config/experiments/macrobenchmarks_monorepo.yml \
-#     bash run_ocaml_bench_gc_sweep.sh
-#
-#   # union of two tags (any program with either tag):
-#   RUNNING_TAG=weak_refs,effects ...
-#
-# Filter semantics: union across the named tags, intersected with the
-# experiment's `benchmarks:` block (so disabled benches like
-# macro-merlin stay disabled).  Coverage-gap tags (empty `exercised_by:`)
-# fail loudly — `RUNNING_TAG=ephemerons` exits with a `gap:` message
-# rather than silently running nothing.
-# =============================================================================
+# Tags: runtime-feature classification, selected with RUNNING_TAG=<tag>[,<tag>] (union,
+# intersected with benchmarks:). A bare run applies default_run. Per tag: description,
+# exercised_by (hot path, selected), cold (doc only), verified_at (source citations),
+# gap (required when exercised_by is empty; makes RUNNING_TAG fail loudly).
 tags:
 
-  # ---------------------------------------------------------------------
-  # Input-size ladder tags — select which rung of each tool to run.
-  # A bare run (no RUNNING_TAG) auto-applies `default_run`. Other sizes,
-  # the legacy benches, and everything-at-once are opt-in via RUNNING_TAG.
-  # ---------------------------------------------------------------------
+  # Input-size ladder tags
   default_run:
     description: |
       Input-size ladder — the DEFAULT rung of every tool. This is the tag a bare run
@@ -1929,12 +1292,7 @@ tags:
         - pplacer_like_default
         - pplacer_like_large
 
-
-
-  # ---------------------------------------------------------------------
-  # Coverage gaps — no benchmark currently exercises these on the hot
-  # path.  Kept as named tags so the gap is discoverable + closable.
-  # ---------------------------------------------------------------------
+  # Coverage gaps: no benchmark exercises these on the hot path
 
   ephemerons:
     description: |
@@ -1973,10 +1331,7 @@ tags:
       benchmark in the suite.  A standalone benchmark wrapping kcas
       directly (e.g. a kcas_data.Hashtbl workload) would close this.
 
-  # ---------------------------------------------------------------------
-  # Single-feature tags — each maps to a specific runtime mechanism.
-  # Highest diagnostic precision: "I changed X, run RUNNING_TAG=X."
-  # ---------------------------------------------------------------------
+  # Single-feature tags
 
   weak_refs:
     description: |
@@ -2112,11 +1467,7 @@ tags:
       - "benchmarks/liq-video-frames/pool_stubs.c:34 — caml_alloc_custom_mem(&pool_ops, sizeof(intnat), sz)"
       - "ocaml/ocaml#14533 — the issue this benchmark reproduces"
 
-  # ---------------------------------------------------------------------
-  # Allocation-shape tags — cross-cutting allocator-pattern tags.  Lower
-  # precision than single-feature tags (4–6 benchmarks each) but useful
-  # for FFI / custom-block regressions.
-  # ---------------------------------------------------------------------
+  # Allocation-shape tags
 
   custom_block_finalisation:
     description: |
@@ -2127,12 +1478,12 @@ tags:
       workspaces (via Gc.finalise).  Distinct from `bigarrays` (a
       proper subset — Bigarray IS one kind of custom block).
     exercised_by:
-      macro-zarith: [zarith_pi]                              # Z.t custom block; caml_alloc_custom + ml_z_custom_ops
-      macro-owl: [owl_gc]                                    # Bigarray.Array2 custom blocks
-      macro-liq-video-frames: [liq_video_frames_pool]        # Bigarray planes + pool_stubs.c caml_alloc_custom_mem
-      macro-decompress: [test_decompress]                    # Bigstringaf-backed Bigarrays
-      macro-devkit: [devkit_gzip]                            # z_stream custom block via camlzip C stubs
-      macro-pplacer: [pplacer_testsuite]                     # GSL Vector/Matrix + sqlite3 handles, Gc.finalise registered
+      macro-zarith: [zarith_pi]
+      macro-owl: [owl_gc]
+      macro-liq-video-frames: [liq_video_frames_pool]
+      macro-decompress: [test_decompress]
+      macro-devkit: [devkit_gzip]
+      macro-pplacer: [pplacer_testsuite]
     verified_at:
       - "duniverse/Zarith/caml_z.c:323-324 — caml_alloc_custom + ml_z_custom_ops"
       - "benchmarks/liq-video-frames/pool_stubs.c:34 — caml_alloc_custom_mem"
@@ -2148,10 +1499,10 @@ tags:
       tag because Bigarray-specific regressions hit a narrower code
       path.
     exercised_by:
-      macro-owl: [owl_gc]                                    # 100×100 Float64 Array2, hot
-      macro-liq-video-frames: [liq_video_frames_pool]        # 1280×720 YUV420 Array1 char planes
-      macro-decompress: [test_decompress]                    # Bigstringaf I/O buffers
-      macro-ocamlc-self-compile: [ocamlc_self_compile]       # bytecode emit buffer
+      macro-owl: [owl_gc]
+      macro-liq-video-frames: [liq_video_frames_pool]
+      macro-decompress: [test_decompress]
+      macro-ocamlc-self-compile: [ocamlc_self_compile]
     verified_at:
       - "compiler-libs bytecomp/emitcode.ml:53 — `Bigarray.Array1.create Bigarray.Char Bigarray.c_layout` for the emit buffer"
       - "benchmarks/owl/owl_gc.ml:79 — Bigarray.Array2.create Bigarray.Float64"
@@ -2164,22 +1515,18 @@ tags:
       (caml_enter_blocking_section / caml_leave_blocking_section
       round-trips, argument marshaling).
     exercised_by:
-      macro-owl: [owl_gc]                                    # OpenBLAS GEMM per Mat.dot
-      macro-zarith: [zarith_pi]                              # GMP per arithmetic op
-      macro-pplacer: [pplacer_testsuite]                     # GSL + sqlite3
-      macro-devkit: [devkit_gzip]                            # zlib via camlzip C stubs
+      macro-owl: [owl_gc]
+      macro-zarith: [zarith_pi]
+      macro-pplacer: [pplacer_testsuite]
+      macro-devkit: [devkit_gzip]
     cold:
-      macro-decompress: [test_decompress]                    # pure-OCaml zlib — explicitly an FFI-free counterpart to devkit_gzip
+      macro-decompress: [test_decompress]   # pure-OCaml zlib, the FFI-free counterpart to devkit_gzip
     verified_at:
       - "benchmarks/owl/owl_gc.ml:13 — Mat.dot dispatches to OpenBLAS GEMM"
       - "duniverse/Zarith/caml_z.c — every Z.{add,mul,div} is a GMP stub"
       - "duniverse/gsl-ocaml/src/*.ml + duniverse/sqlite3-ocaml/lib/sqlite3_stubs.c"
 
-  # ---------------------------------------------------------------------
-  # Eio / multicore tags — overlap with `effects` and `domains`, but
-  # narrower (e.g. io_uring isolates the kernel-side ring path; eio_fibers
-  # excludes plain user-defined Effect handlers).
-  # ---------------------------------------------------------------------
+  # Eio / multicore tags
 
   eio_fibers:
     description: |

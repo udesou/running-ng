@@ -48,24 +48,11 @@ class Runtime(object):
         return "{}-{}".format(type(self).__name__.lower(), self.name)
 
     def get_command_prefix(self) -> List[str]:
-        """Tokens prepended to every benchmark *build* and *run* command.
-
-        Default is empty.  A runtime whose processes need a launcher wrapper
-        (e.g. OCamlMMTk needs ``setarch -R`` to disable ASLR for MMTk's
-        fixed-address metadata mmap) overrides this, so the requirement is
-        carried by the runtime itself rather than a bespoke launch script.
-        """
+        """Tokens prepended to every benchmark build and run command (e.g. a setarch wrapper)."""
         return []
 
     def get_build_env_overrides(self) -> Dict[str, str]:
-        """Env-var overrides for the benchmark *build* environment.
-
-        Applied last (after the suite's build_env), so they take effect; a
-        runtime that wants to preserve an existing/explicit value should fold
-        it in itself (by reading the environment).  Default is empty.  See
-        OCamlMMTk, which uses this to give the build a generous fixed MMTk heap
-        and to put libmmtk_ocaml.a on LIBRARY_PATH.
-        """
+        """Env-var overrides for the benchmark build environment, applied after the suite's build_env."""
         return {}
 
 class DummyRuntime(Runtime):
@@ -243,53 +230,22 @@ class OCaml(Runtime):
     RELOCATABLE_REPO = "git+https://github.com/dra27/opam-repository.git#relocatable"
     _opam_bin: Optional[str] = None
 
-    # Pinned so switch provisioning is reproducible over time.  Installing an
-    # unconstrained `dune` made the toolchain a function of *when* the switch
-    # was created: switches provisioned before 2026-07 got dune 3.22.x, while
-    # any created later resolved dune >= 3.24, which deleted the `coq`
-    # language extension that macro-benches' vendored rocq declared
-    # (`(using coq 0.8)`) — a parse error, so every benchmark build in the new
-    # switch failed, not just the Coq one.
-    #
-    # macro-benches setup patches 19/20 strip those dead `coq` declarations, so
-    # the >= 3.24 ceiling is gone and the workspace parses under both.
-    #
-    # 3.24.0 rather than 3.22.1 because 3.22.1 **cannot bootstrap against 5.6
-    # trunk**.  The install failed, and the old code merely warned and let the
-    # build fall through to whatever dune the tools switch had — which defeated
-    # the pin in the one place it matters most.  A single 5.5.0-vs-trunk
-    # comparison built its two sides with *different* dune versions (3.22.1 from
-    # the 5.5.0 switch, 3.24.0 from the tools switch), making the build tool a
-    # confound in the measurement.  Worse, the tools switch installs `dune`
-    # unconstrained, so the fallback silently swapped a pinned build tool for an
-    # unpinned one, and a machine with no tools switch had no dune at all.
-    #
-    # Validated on this pin: 3.24.0 installs cleanly into both a 5.5.0 and a
-    # 5.6.0+dev trunk switch, and builds all 31 macro benchmarks on both.
-    #
-    # Before raising it again: (a) build all benchmarks on the candidate dune,
-    # not just a few; (b) confirm it bootstraps on trunk, not only on the current
-    # release; and (c) make sure every checkout has rerun `make setup`, since an
-    # already-populated duniverse/ keeps the old dune-project until then.
-    # Override per-runtime with `dune_version:` in the runtime's YAML block.
+    # Pinned so switches provisioned at different times, or compared within
+    # one run, get the same build tool. 3.22.1 cannot bootstrap on 5.6 trunk.
+    # Before raising: build all macro benchmarks on the candidate and confirm
+    # it bootstraps on trunk. Override per runtime with `dune_version:`.
     DUNE_VERSION = "3.24.0"
 
-    # Switches provisioned during *this* process.  A switch left over from an
-    # earlier run may have been built with a different compiler source or a
-    # different (then-current) dune, and nothing records which — so by default
-    # a stale switch is wiped and rebuilt rather than silently reused.  Set
-    # RUNNING_REUSE_SWITCHES=1 to keep the old reuse-if-present behaviour,
-    # which matters for long sweeps: recreating a switch recompiles the
-    # compiler from source (~10-20 min each).
+    # Switches provisioned by this process. Nothing records what built a
+    # leftover switch, so by default it is wiped and rebuilt (~10-20 min);
+    # RUNNING_REUSE_SWITCHES=1 reuses it instead.
     _switches_created_this_run: Set[str] = set()
 
-    # The switch that was active before this run provisioned anything, so it
-    # can be re-selected afterwards (see restore_active_switch).
+    # Active switch before this run touched anything; re-selected on exit.
     _original_switch: Optional[str] = None
     _original_switch_captured: bool = False
 
-    # Open handle on the opam root's running-ng lock, held for the lifetime of
-    # the run (see _acquire_opam_lock).
+    # Held for the lifetime of the run.
     _opam_lock_fh: Optional[Any] = None
     LOCK_BASENAME = "running-ng.lock"
 
@@ -312,11 +268,7 @@ class OCaml(Runtime):
 
     @staticmethod
     def _find_opam() -> str:
-        """Find the best available opam binary.
-
-        Prefers the newest version to avoid compatibility issues when
-        ~/.opam was initialised by a newer opam.
-        """
+        """Newest available opam binary (~/.opam may have been initialised by a newer opam)."""
         if OCaml._opam_bin is not None:
             return OCaml._opam_bin
         import shutil
@@ -358,29 +310,17 @@ class OCaml(Runtime):
 
     @staticmethod
     def _acquire_opam_lock() -> None:
-        """Serialise runs that share an opam root, or fail loudly.
+        """Lock the opam root for the run, or fail loudly.
 
-        Two concurrent runs sharing an opam root can corrupt each other: the
-        second one's delete-and-recreate would wipe a switch the first is
-        actively building or benchmarking against.  There is no way to make
-        that safe after the fact, so we refuse to start instead.
-
-        The lock is taken **exclusively** by a run that may delete switches
-        (the default) and **shared** by one running with
-        RUNNING_REUSE_SWITCHES=1, which mutates nothing.  So any number of
-        reuse-mode runs may overlap, but a destructive run will neither start
-        alongside them nor let one start alongside it.
-
-        Held for the lifetime of the process and released by
-        :meth:`release_opam_lock`.  ``flock`` is released by the kernel when
-        the process dies, so a crashed or killed run never wedges the lock.
+        Exclusive for a run that may delete switches, shared under
+        RUNNING_REUSE_SWITCHES=1 (mutates nothing). flock is released by the
+        kernel on death, so a killed run never wedges it.
         """
         if OCaml._opam_lock_fh is not None:
             return
         shared = OCaml._reuse_stale_switches()
         opam_root = OCaml._get_opam_root()
-        # `opam var root` reports the configured path whether or not it exists
-        # yet, so on a machine with no opam root the open() below would fail.
+        # `opam var root` reports the configured path even if it does not exist yet.
         opam_root.mkdir(parents=True, exist_ok=True)
         lock_path = opam_root / OCaml.LOCK_BASENAME
         fh = lock_path.open("a+")
@@ -413,7 +353,7 @@ class OCaml(Runtime):
 
     @staticmethod
     def release_opam_lock() -> None:
-        """Release the opam-root lock, if this run holds one.  Idempotent."""
+        """Release the opam-root lock if held. Idempotent."""
         fh = OCaml._opam_lock_fh
         if fh is None:
             return
@@ -431,12 +371,8 @@ class OCaml(Runtime):
 
     @staticmethod
     def _save_active_switch() -> None:
-        """Record the switch that was active before we touched anything.
-
-        Called lazily, immediately before the first mutation, so that runs
-        which never provision a switch (or non-OCaml runtimes) don't shell out
-        to opam at all.  Restored by :meth:`restore_active_switch`.
-        """
+        """Record the active switch, lazily before the first mutation so runs
+        without opam runtimes never shell out to opam."""
         if OCaml._original_switch_captured:
             return
         OCaml._original_switch_captured = True
@@ -451,14 +387,7 @@ class OCaml(Runtime):
 
     @staticmethod
     def restore_active_switch() -> None:
-        """Re-select whatever switch was active before this run.
-
-        ``opam switch remove`` on the active switch leaves the root with no
-        switch selected, and ``opam compiler create`` selects the switch it
-        builds — either way the user's shell would be left pointing somewhere
-        they didn't ask for.  Idempotent and never fatal: a run that already
-        succeeded must not fail in cleanup.
-        """
+        """Re-select the switch that was active before this run. Idempotent, never fatal."""
         original = OCaml._original_switch
         if original is None:
             return
@@ -486,11 +415,7 @@ class OCaml(Runtime):
 
     @staticmethod
     def _switch_prefix(switch_name: str) -> Optional[Path]:
-        """Filesystem prefix of ``switch_name``, or None if opam won't say.
-
-        Asked of opam rather than assumed to be ``$OPAMROOT/<name>``, so local
-        (path-based) switches resolve correctly too.
-        """
+        """Filesystem prefix of ``switch_name`` (asked of opam, so local switches resolve), or None."""
         opam = OCaml._find_opam()
         result = subprocess.run(
             [opam, "var", "prefix", "--switch={}".format(switch_name)],
@@ -503,20 +428,9 @@ class OCaml(Runtime):
 
     @staticmethod
     def _assert_switch_usable(switch_name: str) -> None:
-        """Refuse to reuse a switch that isn't a working compiler.
-
-        A switch is *registered* by opam before its compiler finishes building,
-        so an interrupted provisioning (Ctrl-C, a timeout, a killed CI job)
-        leaves the name present with no compiler behind it.  A normal run heals
-        that on its own, because it removes and rebuilds a stale switch anyway.
-        Reuse mode does not: it would hand the empty shell to the build scripts,
-        which fail much later and far from the cause — a missing ``ocamlc``
-        surfaces as a benchmark build error, not as "your switch is broken".
-
-        Rebuilding it here is deliberately *not* the answer.  Reuse mode holds
-        only a **shared** opam lock, precisely because it is supposed to mutate
-        nothing; deleting a switch under that lock could pull it out from under
-        a concurrent reuse-mode run.  So refuse, and say exactly what to do.
+        """Refuse to reuse a switch with no working compiler (an interrupted
+        provisioning leaves the name registered). Not rebuilt here: reuse mode
+        holds only a shared lock and must not mutate.
         """
         prefix = OCaml._switch_prefix(switch_name)
         ocamlc = prefix / "bin" / "ocamlc" if prefix else None
@@ -540,14 +454,8 @@ class OCaml(Runtime):
 
     @staticmethod
     def _claim_switch(switch_name: str) -> bool:
-        """Decide whether ``switch_name`` still needs to be created.
-
-        A switch provisioned earlier in *this* process is reused.  One left
-        over from an earlier run is wiped first: nothing records which
-        compiler source or dune version built it, so reusing it silently
-        makes the toolchain a function of run history.  Returns True when the
-        caller must go on to create the switch.
-        """
+        """True when the caller must create ``switch_name``; a switch from an
+        earlier run is wiped first unless reuse mode is on."""
         if switch_name in OCaml._switches_created_this_run:
             logging.info(
                 "Reusing opam switch '%s' (provisioned earlier in this run)",
@@ -555,9 +463,7 @@ class OCaml(Runtime):
             return False
         from running.suite import is_dry_run
         if not is_dry_run():
-            # Before touching anything: claim the opam root, or refuse to run.
-            # Taken here rather than at startup so that runs with no opam
-            # runtimes (JVM, JS) never need opam to exist at all.
+            # Taken here, not at startup, so runs without opam runtimes never need opam.
             OCaml._acquire_opam_lock()
         if not OCaml._switch_exists(switch_name):
             return True
@@ -626,17 +532,7 @@ class OCaml(Runtime):
 
     @staticmethod
     def _ensure_switch(kwargs: Dict[str, Any], switch_name: str):
-        """Create an opam switch via ``opam compiler create`` if needed.
-
-        A switch left over from an earlier run is removed and rebuilt first —
-        see :meth:`_claim_switch`.
-
-        After building the compiler from source, the dra27 relocatable
-        overlay repo is added to the switch so that ``dune`` and
-        ``ocamlfind`` are installed as relocatable binaries.  This allows
-        the switch to be copied for satellite switches without hardcoded
-        paths breaking.
-        """
+        """Create an opam switch via ``opam compiler create`` if needed, then install dune and ocamlfind."""
         if not OCaml._claim_switch(switch_name):
             return
 
@@ -656,28 +552,9 @@ class OCaml(Runtime):
         logging.info("Creating opam switch '%s' from source '%s'", switch_name, source)
         OCaml._run_checked(cmd)
 
-        # The dra27 relocatable overlay repo is opt-in per runtime
-        # (`relocatable: true`), and scoped to this switch alone.
-        #
-        # It used to be added to every switch with `--set-default`, which wrote
-        # it into the opam *root's* default repository set at priority 1.  Two
-        # consequences, both bad: running one benchmark permanently
-        # reconfigured the user's opam installation, and from then on the fork
-        # shadowed opam.ocaml.org for every switch they created afterwards —
-        # including switches that have nothing to do with benchmarking.  Where
-        # a version number exists in both repos (e.g. 5.5.0) the fork won,
-        # silently substituting a development snapshot for the official
-        # release.  That broke a third party's unrelated merlin install
-        # (ocaml/merlin#2108) and this repo's own tools switch, which acquired
-        # `ocaml-base-compiler.5.5.0` = a 2025-04-28 snapshot of 5.5 lacking
-        # `Ptyp_functor`, so ppxlib's `ast_505.ml` no longer type-checked
-        # against it.
-        #
-        # Relocatable support is upstreamed, so nothing here needs the overlay:
-        # its only purpose is relocatable dune/ocamlfind for *satellite*
-        # switches (`_ensure_satellite_switch` copies a switch directory, which
-        # requires binaries with no hardcoded paths), and no shipped config
-        # uses those.  Enable it explicitly if you revive that path.
+        # The relocatable overlay repo (needed only for satellite switches) is
+        # opt-in and scoped to this switch. Never add it with --set-default:
+        # it shadows opam.ocaml.org for every later switch (ocaml/merlin#2108).
         if kwargs.get("relocatable"):
             logging.info("Adding relocatable overlay repo to switch '%s' "
                          "(relocatable: true)", switch_name)
@@ -686,22 +563,8 @@ class OCaml(Runtime):
                 "--switch={}".format(switch_name),
             ])
 
-        # Install dune and ocamlfind.  dune is version-pinned (see DUNE_VERSION)
-        # so that two switches provisioned months apart — and, just as
-        # importantly, two switches compared within one run — get the same build
-        # tool.
-        #
-        # A failure here is fatal.  It used to warn and fall through to whatever
-        # dune the tools switch happened to have on PATH, which quietly undid the
-        # pin: the tools switch installs `dune` unconstrained, so the fallback
-        # substituted an unpinned build tool for a pinned one, and it kicked in
-        # exactly where reproducibility matters most (a trunk switch, whose dune
-        # is the one most likely to fail to bootstrap).  A 5.5.0-vs-trunk run
-        # built its two sides with different dune versions and said nothing but a
-        # WARNING.  A machine with no tools switch got no dune at all.
-        #
-        # If a compiler genuinely needs a different dune, say so explicitly with
-        # `dune_version:` on that runtime rather than relying on a fallback.
+        # A failure here is fatal: falling back to the tools switch's unpinned
+        # dune would silently undo the pin. Use `dune_version:` instead.
         dune_pkg = "dune.{}".format(
             kwargs.get("dune_version", OCaml.DUNE_VERSION))
         try:
@@ -735,19 +598,10 @@ class OCaml(Runtime):
 
     @staticmethod
     def _ensure_satellite_switch(base_switch: str, satellite_name: str):
-        """Create a per-benchmark satellite switch by copying the base switch.
-
-        1. Creates an empty opam switch (so opam registers it properly).
-        2. Replaces its contents with a copy of the base switch's directory,
-           skipping heavyweight build artifacts (sources/, build/).
-
-        This requires the base switch's runtime to have been declared with
-        ``relocatable: true``, so that its dune/ocamlfind carry no hardcoded
-        paths and keep working after the directory is copied.  Without it the
-        copy inherits binaries pointing at the base switch's path.  (The
-        overlay used to be added to every switch unconditionally; see
-        :meth:`_ensure_switch` for why that had to stop.)
-        ``opam env --switch=<satellite>`` regenerates the correct PATH.
+        """Create a per-benchmark satellite switch: an empty registered switch
+        whose contents are replaced by a copy of the base switch. Requires the
+        base runtime to be declared ``relocatable: true``, or the copied
+        dune/ocamlfind point at the base switch's path.
         """
         if OCaml._switch_exists(satellite_name):
             logging.info("Reusing existing satellite switch '%s'", satellite_name)
@@ -765,7 +619,6 @@ class OCaml(Runtime):
                 "Base switch directory not found at {}".format(base_dir)
             )
 
-        # Step 1: Let opam create an empty, properly registered switch.
         logging.info(
             "Creating satellite switch '%s' (copying from '%s')",
             satellite_name, base_switch,
@@ -775,11 +628,10 @@ class OCaml(Runtime):
             "--empty", "--no-switch",
         ])
 
-        # Step 2: Replace the empty switch contents with the base switch copy.
         shutil.rmtree(str(satellite_dir))
 
         def _ignore_heavy(directory: str, contents: List[str]) -> set:
-            """Skip sources/ and build/ inside .opam-switch to save ~300MB."""
+            """Skip sources/ and build/ (~300MB)."""
             if os.path.basename(directory) == ".opam-switch":
                 return {c for c in contents if c in ("sources", "build")}
             return set()
@@ -798,7 +650,7 @@ class OCaml(Runtime):
 
         executable = kwargs.get("executable")
         if executable:
-            # Legacy mode: pre-built executable, no switch management.
+            # pre-built executable, no switch management
             self.executable = Path(str(executable)).absolute()
             self._switch_name: Optional[str] = None
             if not self.executable.exists():
@@ -813,11 +665,9 @@ class OCaml(Runtime):
                 raise ValueError("Use either `version` or `commit`/`hash`, not both.")
 
             self._switch_name = "{}-{}".format(self.SWITCH_PREFIX, self.name)
-            # Dispatch via type(self) so subclasses (e.g. OCamlMMTk) can
-            # override how the switch is built.
+            # type(self): subclasses override how the switch is built
             type(self)._ensure_switch(kwargs, self._switch_name)
 
-            # Resolve the executable from the switch's bin directory.
             opam = OCaml._find_opam()
             result = subprocess.run(
                 [opam, "var", "bin", "--switch={}".format(self._switch_name)],
@@ -836,11 +686,11 @@ class OCaml(Runtime):
         return self.executable
 
     def get_switch_name(self) -> Optional[str]:
-        """Return the opam switch name, or None for legacy executable mode."""
+        """Opam switch name, or None in executable mode."""
         return self._switch_name
 
     def get_switch_env(self) -> Dict[str, str]:
-        """Return an environment dict with the runtime's opam switch activated."""
+        """Environment with the runtime's opam switch activated."""
         if self._switch_name is None:
             env = os.environ.copy()
             exe_dir = str(self.executable.parent)
@@ -849,12 +699,7 @@ class OCaml(Runtime):
         return OCaml._parse_opam_env(self._switch_name)
 
     def ensure_benchmark_switch(self, benchmark_name: str) -> str:
-        """Create (or reuse) a per-benchmark satellite switch.
-
-        Returns the satellite switch name.  The satellite is a copy of the
-        runtime's base switch (compiler binaries + stdlib + opam metadata)
-        with its own independent opam package root for isolated installs.
-        """
+        """Create or reuse a per-benchmark satellite switch; returns its name."""
         if self._switch_name is None:
             raise RuntimeError(
                 "Cannot create satellite switches in legacy executable mode"
@@ -869,20 +714,17 @@ class OCaml(Runtime):
         return satellite
 
     def get_benchmark_switch_env(self, benchmark_name: str) -> Dict[str, str]:
-        """Return an environment dict with a per-benchmark satellite switch activated."""
+        """Environment with the benchmark's satellite switch activated."""
         satellite = self.ensure_benchmark_switch(benchmark_name)
         return OCaml._parse_opam_env(satellite)
 
     def get_benchmark_switch_name(self, benchmark_name: str) -> Optional[str]:
-        """Return the satellite switch name for a benchmark, or None if not created."""
+        """Satellite switch name for a benchmark, or None if not created."""
         return self._satellite_switches.get(benchmark_name)
 
     def get_cache_key(self) -> str:
-        # The cache key must uniquely identify the compiler being used — two
-        # runtimes that build from the same version but with different
-        # configure_args (e.g. --enable-frame-pointers vs --enable-flambda)
-        # produce different binaries and must not share a binary cache entry.
-        # Use the runtime's config-file name which is always unique.
+        # Includes the runtime name: same version with different configure_args
+        # must not share a cache entry.
         if self.commit:
             return "ocaml-commit-{}-{}".format(
                 self._safe_key(self.name), self._safe_key(self.commit)
@@ -909,7 +751,7 @@ class OCaml(Runtime):
         return False
 
     def get_major_version(self) -> int:
-        """Return the OCaml major version as an integer (e.g. 5 for '5.4.0')."""
+        """OCaml major version as an integer."""
         if self.version:
             try:
                 return int(str(self.version).split(".")[0])
@@ -933,80 +775,42 @@ class OCaml(Runtime):
 
 @register(Runtime)
 class OCamlMMTk(OCaml):
-    """OCaml built against MMTk (udesou/ocaml-mmtk).
+    """OCaml built against MMTk (fplaunchpad/ocaml-mmtk).
 
-    Identical to OCaml for build/switch purposes, but unlike stock OCaml the
-    MMTk runtime has a *fixed* heap whose size is set at run time via the
-    ``MMTK_HEAP_SIZE_MB`` environment variable.  That makes minheap binary
-    search well-defined (stock OCaml grows its heap on demand and never OOMs
-    on a fixed budget, which is why the base OCaml runtime is excluded from
-    minheap measurement).
+    The heap is fixed, sized at run time by ``MMTK_HEAP_SIZE_MB`` (so minheap
+    is well defined); the plan is chosen by ``MMTK_PLAN`` via an EnvVar
+    modifier. Every MMTk process runs under ``setarch -R``, or the
+    fixed-address metadata mmap fails with "failed to mmap meta memory: File exists".
 
-    The collector itself is chosen separately via ``MMTK_PLAN`` (Immix /
-    StickyImmix for native code) — supply it as an EnvVar modifier in the
-    config; minheap depends on the plan, so measure per plan.
-
-    NOTE: every MMTk process must run with ASLR disabled (``setarch -R``);
-    otherwise MMTk's fixed-address metadata mmap flakes with
-    "failed to mmap meta memory: File exists".  Launch the whole pipeline
-    (runbms / minheap) under setarch -R so all children inherit it.
-
-    Config forms::
-
-        # built + managed by running-ng (recommended, reproducible):
-        mmtk:
-          type: OCamlMMTk
-          commit: "<sha or branch, e.g. 5.5+mmtk>"   # repo defaults to the fork
-
-        # pre-built tree (no switch management):
-        mmtk:
-          type: OCamlMMTk
-          executable: "/path/to/_install/bin/ocaml"
+    Config: ``type: OCamlMMTk`` with ``commit:`` (repo defaults to the fork)
+    or ``executable:`` (pre-built tree).
     """
 
-    DEFAULT_REPO = "https://github.com/udesou/ocaml-mmtk.git"
+    DEFAULT_REPO = "https://github.com/fplaunchpad/ocaml-mmtk.git"
 
     def __init__(self, **kwargs):
-        # For commit/version-based builds, default the repo to the MMTk fork
-        # (stock OCaml's default repo would be wrong).  Executable mode needs
-        # no repo.
         if not kwargs.get("executable") and "repo" not in kwargs:
             kwargs["repo"] = OCamlMMTk.DEFAULT_REPO
         super().__init__(**kwargs)
 
     def get_command_prefix(self) -> List[str]:
-        # Every MMTk process (benchmark build AND run) must run with ASLR
-        # disabled, else MMTk's fixed-address metadata mmap flakes
-        # ("failed to mmap meta memory: File exists").  Carrying this on the
-        # runtime means the stock launch scripts work unchanged — no setarch
-        # wrapper needed.  (The compiler build handles ASLR separately, via
-        # opam's wrap-build-commands; see _ensure_switch.)
+        # ASLR off for every MMTk process; the compiler build handles it via
+        # opam's wrap-build-commands (see _ensure_switch).
         return ["setarch", os.uname().machine, "-R"]
 
-    # Fixed MMTk heap for benchmark builds.  MMTK_HEAP_SIZE_MB is unset during
-    # builds (config modifiers apply only at run time), so MMTk would use a
-    # small default heap and large tools (alt-ergo, frama-c) OOM while being
-    # compiled/run during their build.  setdefault, so an explicit export or
-    # build_env value still wins.
+    # Config modifiers apply only at run time, so builds need their own
+    # heap size or large tools OOM while being compiled.
     BUILD_HEAP_SIZE_MB = "16384"
 
     def get_build_env_overrides(self) -> Dict[str, str]:
-        # An explicit MMTK_HEAP_SIZE_MB export still wins.
         overrides = {
             "MMTK_HEAP_SIZE_MB": os.environ.get(
                 "MMTK_HEAP_SIZE_MB", OCamlMMTk.BUILD_HEAP_SIZE_MB
             )
         }
-        # MMTk puts a bare `-lmmtk_ocaml` (no -L) into ocamlc -config's
-        # {bytecomp,native}_c_libraries.  Third-party dune-configurator feature
-        # probes (lwt's pthread detect, ctypes' machdep, owl's cblas) link a
-        # test program with those c_libraries but WITHOUT the compiler's stdlib
-        # -L, so `ld` can't find -lmmtk_ocaml, the probe "fails", and the
-        # library mis-detects the feature -> the real build then hits a
-        # #error / missing symbol.  libmmtk_ocaml.a lives in the compiler's
-        # stdlib dir, so putting that on LIBRARY_PATH lets ld resolve it.
-        # (The proper fix belongs upstream in ocaml-mmtk: don't emit a bare
-        # -lmmtk_ocaml in c_libraries — carry its -L or use an absolute path.)
+        # ocamlc -config lists a bare `-lmmtk_ocaml` without -L, so
+        # dune-configurator probes (lwt, ctypes, owl) fail to link and
+        # mis-detect features. LIBRARY_PATH lets ld find libmmtk_ocaml.a.
         stdlib = self.executable.parent.parent / "lib" / "ocaml"
         if (stdlib / "libmmtk_ocaml.a").exists():
             existing = os.environ.get("LIBRARY_PATH", "")
@@ -1016,35 +820,24 @@ class OCamlMMTk(OCaml):
         return overrides
 
     def get_heapsize_modifier(self, size: int) -> Modifier:
-        # `size` is in MB (minheap's binary search works in MB units, matching
-        # the "{}M" labels it prints).  MMTK_HEAP_SIZE_MB takes MB directly.
+        # `size` is in MB, as MMTK_HEAP_SIZE_MB expects.
         return EnvVar(
             name="mmtk_heap_{}M".format(size),
             var="MMTK_HEAP_SIZE_MB",
             val=str(size),
         )
 
-    # opam build/install command wrappers.  Two MMTk-specific needs vs stock
-    # OCaml drive these:
-    #   1. cargo fetches crates DURING `make`, but opam's default wrapper
-    #      (sandbox.sh) uses `--unshare-net` -> no network.  Replacing it with a
-    #      plain `setarch` wrapper drops bubblewrap, so cargo can reach the net.
-    #   2. MMTk's fixed-address metadata mmap flakes under ASLR.  Wrapping the
-    #      build *command itself* with `setarch -R` is required because:
-    #        - opam RESETS the no-randomize personality when it spawns builds
-    #          (so wrapping the outer `opam` process is useless), and
-    #        - bubblewrap also resets the personality to 0,
-    #      so the no-randomize bit must be (re)applied on the actual build
-    #      command, which is exactly what a wrap-build-commands wrapper does.
+    # Replacing opam's sandbox wrapper with `setarch -R` does two things: drops
+    # bubblewrap's --unshare-net so cargo can fetch crates during make, and
+    # re-applies no-randomize on the build command itself (opam and bubblewrap
+    # both reset the personality, so wrapping the outer opam is useless).
     _WRAP_KEYS = ("wrap-build-commands", "wrap-install-commands")
 
     @staticmethod
     def _set_opam_wrappers(opam: str, value: Optional[str],
                            saved: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
-        """Set the global build/install wrappers to *value* (an opam list
-        literal), returning a snapshot of the previous values.  Pass
-        ``value=None`` with the snapshot to restore the originals exactly
-        (including the ``{os = ...}`` filter)."""
+        """Set the global build/install wrappers to *value* (an opam list literal),
+        returning a snapshot; ``value=None`` with the snapshot restores them."""
         if value is not None:
             snap: Dict[str, str] = {}
             for k in OCamlMMTk._WRAP_KEYS:
@@ -1068,15 +861,9 @@ class OCamlMMTk(OCaml):
 
     @staticmethod
     def _ensure_switch(kwargs: Dict[str, Any], switch_name: str):
-        """Build the MMTk compiler switch via ``opam compiler create``.
-
-        Temporarily replaces opam's build/install wrappers with
-        ``["setarch" "<arch>" "-R"]`` for the duration of the build (see
-        ``_WRAP_KEYS`` for why), then restores them.
-
-        dune/ocamlfind are intentionally NOT installed into the switch: the
-        macro monorepo and micro builds use dune from the tools switch on PATH
-        and the mmtk compiler (first on PATH) from this switch.
+        """Build the MMTk compiler switch with opam's wrappers temporarily set
+        to ``setarch -R`` (see ``_WRAP_KEYS``). dune/ocamlfind are deliberately
+        not installed here; builds use the tools switch's dune.
         """
         if not OCaml._claim_switch(switch_name):
             return
@@ -1115,21 +902,11 @@ class OCamlMMTk(OCaml):
 
 @register(Runtime)
 class OxCaml(OCaml):
-    """OxCaml (Jane Street's OCaml fork) runtime.
-
-    Only the default repo differs from OCaml: provisioning goes through the
-    same `opam compiler create` path, which handles the bootstrap compiler,
-    the build switch and the build dependencies itself.
-
-    Config fields are OCaml's (repo, commit/version, executable, cache_dir,
-    jobs, configure_args).
-    """
+    """OxCaml (Jane Street's OCaml fork): OCaml with a different default repo."""
 
     DEFAULT_REPO = "https://github.com/oxcaml/oxcaml.git"
 
     def __init__(self, **kwargs):
-        # Default to OxCaml repo if not specified, then delegate to OCaml's
-        # switch-based build via opam compiler create.
         if "repo" not in kwargs:
             kwargs["repo"] = OxCaml.DEFAULT_REPO
         super().__init__(**kwargs)

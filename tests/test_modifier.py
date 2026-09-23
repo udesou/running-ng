@@ -5,8 +5,7 @@ from running.modifier import *
 from running.config import Configuration
 from running.runtime import OCaml
 
-#: A real, existing no-op binary. NOT "/bin/true": FreeBSD has it at
-#: /usr/bin/true, and BinaryBenchmark asserts program.exists().
+#: Not "/bin/true": FreeBSD has it at /usr/bin/true, and BinaryBenchmark asserts program.exists().
 TRUE_BIN = shutil.which("true")
 
 
@@ -124,12 +123,9 @@ def test_ocaml_benchmark_with_ocaml_modifiers():
     runtime = OCaml(name="ocaml-local", executable="/usr/bin/ocaml")
     cmd = b.to_string(runtime)
     assert "-domain-count 4" in cmd
-    # smart_quote quotes the value because it contains a comma, which a
-    # shell would otherwise not treat as one word.
+    # quoted because the value contains a comma
     assert 'OCAMLRUNPARAM="s=262144,o=80"' in cmd
 
-
-# --- includes scoping -----------------------------------------------------------
 
 from pathlib import Path  # noqa: E402
 from running.benchmark import BinaryBenchmark  # noqa: E402
@@ -150,7 +146,6 @@ def test_includes_scopes_to_the_listed_programs():
 
 
 def test_includes_skips_everything_else():
-    # Including its own suite: naming one program is the whole scope.
     m = Wrapper(name="w", type="Wrapper", val="taskset -c 4",
                 includes={"suiteA": ["wanted"]})
     assert _wrapped("suiteA", "other", m) == []
@@ -163,12 +158,8 @@ def test_no_includes_leaves_existing_behaviour_alone():
 
 
 def test_combining_includes_and_excludes_subtracts_the_whole_suite():
-    # Not the composition you would expect, and the reason to use one or the
-    # other.  The existing excludes handling drops a modifier for EVERY program
-    # of a suite it names, not only the listed ones, so excluding "wanted" also
-    # removes "also".  Documented rather than fixed: pin_lavyek, re_par and
-    # md_par in macro_base.yml each name 18 partially-excluded suites and are
-    # lavyek-only *because* of this behaviour.
+    # excludes drops the modifier for every program of a suite it names, so
+    # excluding "wanted" also removes "also"; documented rather than fixed.
     m = Wrapper(name="w", type="Wrapper", val="taskset -c 4",
                 includes={"suiteA": ["wanted", "also"]},
                 excludes={"suiteA": ["wanted"]})

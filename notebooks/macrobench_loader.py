@@ -1,28 +1,15 @@
-"""Load running-ng benchmark logs into a tidy pandas DataFrame.
+"""Load running-ng benchmark logs into a tidy pandas DataFrame, one row per invocation.
 
 Filename scheme::
 
     <benchmark>.<iter>.<sub_iter>.ocaml-<ocaml>
         .perf_grp<N>.re-<R>.md-<M>
-        [.<gc_key>-<gc_val>]*   # zero or more GC sweep params, any order
-        [.macro-<repo>]         # optional: macro-bench repository label
+        [.<gc_key>-<gc_val>]*   # GC sweep params, any order
+        [.macro-<repo>]         # optional
         .log
 
-GC sweep tokens (``s``, ``o``, ``M``, ``m``, ...) appear in whatever order
-``runbms`` emits them. Known keys land in dedicated columns; unknown keys
-are preserved in ``gc_params_extra`` as a dict so future axes don't need
-a loader change.
-
-The ``<ocaml>`` segment embeds dots (e.g. ``5.4.1-flambda``) and an
-optional trailing flag combo drawn from ``{fp, flambda, fp-flambda}``;
-absent → ``flags = "baseline"``. Anything else in ``<ocaml>`` (including
-plain git SHAs, branch names, release tags) is preserved verbatim as
-``version``.
-
-Each ``*.log`` typically has two NDJSON sidecars, ``olly_*.json`` and
-``perf_*.json``, with one line per invocation. The loader emits **one
-DataFrame row per invocation**, indexed by ``invocation_idx`` within
-the (benchmark, version, flags, iter, sub_iter) group.
+Known GC keys get dedicated columns, unknown ones land in ``gc_params_extra``.
+``<ocaml>`` may end in ``fp``, ``flambda`` or ``fp-flambda`` (else ``flags = "baseline"``).
 """
 from __future__ import annotations
 
@@ -44,29 +31,20 @@ FILENAME_RE = re.compile(
     r"\.(?P<sub_iter>\d+)"
     r"\.ocaml-(?P<ocaml>[\w.-]+?)"
     r"\.perf_grp(?P<perf_grp>\d+)"
-    # ``re``/``md`` are only present when the run enabled the lavyek
-    # modifier set (|re_par|md_par|pin_lavyek). Runs without it (e.g. the
-    # PR-14571 sweeps) carry no re-/md- tokens, so both are optional.
+    # re/md are present only when the run used the lavyek modifier set
     r"(?:\.re-(?P<re>\d+))?"
     r"(?:\.md-(?P<md>\d+))?"
-    # Modifier tokens after re/md: gc params with values (e.g. re_par-22),
-    # plus value-less wrapper modifiers (e.g. pin_lavyek). Allow underscores
-    # in the key and the trailing -<digits> is optional.
+    # gc params with values (re_par-22) and value-less modifiers (pin_lavyek)
     r"(?P<gc_params>(?:\.[A-Za-z][A-Za-z0-9_]*(?:-\d+)?)*)"
     r"(?:\.macro-(?P<macro_repo>[a-z0-9-]+))?"
     r"\.log$"
 )
 
-# Same shape as the gc_params slot in FILENAME_RE: optional -<digits>.
-# Value-less modifiers (e.g. pin_lavyek) get val=None and are ignored
-# by _parse_gc_params, which only emits integer-valued params.
 GC_PARAM_RE = re.compile(r"\.(?P<key>[A-Za-z][A-Za-z0-9_]*)(?:-(?P<val>\d+))?")
 
 KNOWN_FLAG_SUFFIXES = ("fp-flambda", "flambda", "fp")
 
-# GC sweep keys with a dedicated column. Extend this tuple when a new
-# axis becomes part of routine sweeps; unknown keys still load into
-# ``gc_params_extra`` and won't break older notebooks.
+# GC sweep keys with a dedicated column.
 KNOWN_GC_PARAMS: tuple[str, ...] = ("s", "o", "M", "m")
 
 
@@ -79,11 +57,7 @@ def _split_ocaml(ocaml: str) -> tuple[str, str]:
 
 
 def _parse_gc_params(gc_params: str) -> tuple[dict[str, int], dict[str, int]]:
-    """Split the GC-param token soup into (known, extra) integer maps.
-
-    Value-less modifier tokens (e.g. pin_lavyek) are ignored — they're
-    wrappers, not numeric params worth a column.
-    """
+    """Split GC-param tokens into (known, extra) integer maps; value-less tokens are ignored."""
     known: dict[str, int] = {}
     extra: dict[str, int] = {}
     for m in GC_PARAM_RE.finditer(gc_params):
@@ -214,18 +188,12 @@ def _load_rows(log_path: Path) -> list[dict]:
 
 
 def load_macro_dataframe(logs_dir: str | Path) -> pd.DataFrame:
-    """Load every ``*.log`` in ``logs_dir`` into a tidy DataFrame.
-
-    One row per invocation. Rows with unparseable filenames are skipped
-    with a warning; missing sidecars leave metric columns as NaN.
-    """
+    """Load every ``*.log`` in ``logs_dir``, one row per invocation; unparseable
+    filenames are skipped with a warning, missing sidecars leave NaN."""
     logs_dir = Path(logs_dir)
     log_files = sorted(logs_dir.glob("*.log"))
     if not log_files:
-        # Sidecar-only dir: the raw *.log text is never read for metrics
-        # (it only serves as a naming key for the olly_*/perf_* NDJSON
-        # sidecars), so committed sidecar-only result sets are supported
-        # by synthesising the log keys from the sidecars themselves.
+        # Sidecar-only dir: the .log is only a naming key, so synthesise it.
         bases: set[str] = set()
         for p in logs_dir.glob("*.json"):
             name = p.name[: -len(".json")]
@@ -267,11 +235,7 @@ def load_macro_dataframe(logs_dir: str | Path) -> pd.DataFrame:
 
 
 def _resolve_baseline(df: pd.DataFrame, baseline: dict | None) -> dict:
-    """Return a baseline dict that is guaranteed to match at least one row.
-
-    If the explicit ``baseline`` is absent from ``df``, warn and pick the
-    alphabetically-first ``variant`` available.
-    """
+    """A baseline dict matching at least one row; falls back (with a warning) to the first variant."""
     if baseline is not None:
         mask = pd.Series(True, index=df.index)
         for k, v in baseline.items():
@@ -295,16 +259,8 @@ def baseline_normalize(
     group_cols: Iterable[str] = ("benchmark",),
     center: str = "median",
 ) -> pd.DataFrame:
-    """Return a copy of ``df`` with a ``{metric}_vs_baseline`` column.
-
-    The baseline's central value (median by default; ``mean`` allowed) is
-    computed per group and used as the denominator. Median is the default
-    because sample sizes at this stage are too small for the central
-    limit theorem to apply cleanly.
-
-    If ``baseline`` does not match any row, a warning is issued and the
-    alphabetically-first variant is used as a fallback.
-    """
+    """Copy of ``df`` with a ``{metric}_vs_baseline`` column, normalised by the
+    baseline's per-group median (or ``mean``)."""
     if center not in ("median", "mean"):
         raise ValueError("center must be 'median' or 'mean'")
     effective = _resolve_baseline(df, baseline if baseline is not None
@@ -333,13 +289,8 @@ def aggregate_invocations(
     group_cols: Iterable[str] = ("benchmark", "variant"),
     center: str = "median",
 ) -> pd.DataFrame:
-    """Collapse invocations into one row per group with IQR.
-
-    For each metric, produces ``{metric}_{center}``, ``{metric}_iqr_lo``
-    (25th percentile), ``{metric}_iqr_hi`` (75th percentile), and
-    ``{metric}_n``. A single ``single_invocation`` boolean column marks
-    groups where every metric had ``n == 1``.
-    """
+    """One row per group with ``{metric}_{center}``, ``_iqr_lo``, ``_iqr_hi``,
+    ``_n`` columns and a ``single_invocation`` flag."""
     if center not in ("median", "mean"):
         raise ValueError("center must be 'median' or 'mean'")
     center_fn = "median" if center == "median" else "mean"
@@ -371,15 +322,8 @@ def export_for_ministat(
     variant_b: str,
     outdir: str | Path,
 ) -> tuple[Path, Path]:
-    """Write per-invocation values for two variants to newline-separated files.
-
-    Returns the two file paths. Files are named
-    ``{metric}__{benchmark}__{variant}.txt`` with ``/`` in variant
-    replaced by ``_``.
-
-    Raises ``ValueError`` if either variant has fewer than 2
-    measurements; ministat needs at least 2 samples per side.
-    """
+    """Write per-invocation values for two variants to ministat input files;
+    raises ``ValueError`` if either side has fewer than 2 samples."""
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -412,12 +356,8 @@ def instruction_count_deltas(
     warn_threshold_pct: float = 1.0,
     regress_threshold_pct: float = 3.0,
 ) -> pd.DataFrame:
-    """Per-(benchmark, variant) Δ% in instruction counts vs. baseline.
-
-    Uses median across invocations. Returns columns ``benchmark``,
-    ``variant``, ``baseline_instructions``, ``variant_instructions``,
-    ``delta_pct``, ``verdict`` ∈ {improvement, neutral, warn, regression}.
-    """
+    """Per-(benchmark, variant) median instruction-count delta vs. baseline,
+    with a ``verdict`` in {improvement, neutral, warn, regression}."""
     if "perf_instructions" not in df.columns:
         raise KeyError("perf_instructions column missing — check perf group")
 
@@ -451,45 +391,21 @@ def instruction_count_deltas(
     return long.sort_values("delta_pct", ascending=False).reset_index(drop=True)
 
 
-# ---------------------------------------------------------------------------
-# Paired comparisons (Issue 1).
+# --- Paired comparisons ----------------------------------------------------
 #
-# A `comparisons:` block in the runbms YAML declares which runtime pairs the
-# notebook should render. Each block has shape:
-#
-#     - a:     <runtime>    or  [<runtime>, <runtime>, ...]
-#       b:     <runtime>    or  [<runtime>, <runtime>, ...]
-#       mode:  "pairwise" (default) | "cartesian"
-#       label: "free-text label"   (optional)
-#
-# Modes:
-#   pairwise  — zip a and b. A scalar on either side is broadcast to match the
-#               opposite side's length (numpy-style). Lengths must match after
-#               broadcasting; otherwise an error.
-#   cartesian — every (x in a) × (y in b) cross.
-#
-# When `comparisons:` is absent or empty, the default is `BASELINE` vs every
-# other variant in the dataset.
-# ---------------------------------------------------------------------------
+# A `comparisons:` block in the runbms YAML: `a` and `b` are a runtime or a
+# list of runtimes, `mode` is "pairwise" (default; a scalar side broadcasts)
+# or "cartesian", `label` is optional. Absent: BASELINE vs every other variant.
 
 
 class Comparison(NamedTuple):
-    """A resolved comparison block: a label and a list of variant pairs.
-
-    Each pair is ``(a_variant, b_variant)`` where the variant strings are
-    ``"<version>/<flags>"`` matching the ``variant`` column in the loaded
-    DataFrame.
-    """
+    """A resolved comparison block: a label and ``(a_variant, b_variant)`` pairs."""
     label: str
     pairs: List[Tuple[str, str]]
 
 
 def _runtime_name_to_variant(name: str) -> str:
-    """Map a runtime YAML key to the corresponding ``variant`` column value.
-
-    Assumes the running-ng convention ``ocaml-<version>[-<flags>]``. Strips
-    the ``ocaml-`` prefix and applies :func:`_split_ocaml`.
-    """
+    """Map a runtime YAML key (``ocaml-<version>[-<flags>]``) to a ``variant`` value."""
     if name.startswith("ocaml-"):
         rest = name[len("ocaml-"):]
     else:
@@ -548,21 +464,8 @@ def load_comparisons(
     baseline: dict | None = None,
     override: list | None = None,
 ) -> List[Comparison]:
-    """Resolve comparison blocks from ``<logs_dir>/runbms.yml``.
-
-    Returns the user-declared blocks expanded to per-pair variant tuples.
-    When the YAML has no ``comparisons:`` section (or it's empty), returns a
-    single default block: ``baseline`` vs every other variant in the dataset.
-
-    Pairs whose variants are not present in the dataset are dropped with a
-    warning (so partial datasets still produce useful output).
-
-    ``override``: when not ``None``, use this list of comparison blocks
-    instead of reading them from ``runbms.yml``. Useful for ad-hoc
-    exploration without touching the YAML or re-running benchmarks. The
-    expected shape matches the YAML schema (a list of dicts with ``a``,
-    ``b``, optional ``mode`` and ``label``).
-    """
+    """Resolve comparison blocks from ``<logs_dir>/runbms.yml`` (or ``override``,
+    same shape). Pairs with variants absent from the data are dropped with a warning."""
     logs_dir = Path(logs_dir)
     available = set(all_variants)
 
@@ -624,10 +527,7 @@ def load_comparisons(
 
 
 class ComparisonCoverage(NamedTuple):
-    """Diagnostic result for the schema-sanity panel in Notebook A §2.
-
-    All fields are sorted lists of strings.
-    """
+    """Diagnostic result for the schema-sanity panel."""
     declared_runtimes_no_data: List[str]
     data_variants_uncovered: List[str]
     declared_runtimes_total: int
@@ -640,18 +540,8 @@ def audit_comparison_coverage(
     df: pd.DataFrame,
     comparisons: List[Comparison],
 ) -> ComparisonCoverage:
-    """Cross-check ``runbms.yml`` declarations against loaded data and rendered comparisons.
-
-    Returns a :class:`ComparisonCoverage` describing:
-
-    * ``declared_runtimes_no_data`` — runtime keys in ``runbms.yml``'s
-      ``runtimes:`` block whose variant is not present in ``df``. Usually
-      means the runtime was declared but never referenced by ``configs:``,
-      or the run failed for it.
-    * ``data_variants_uncovered`` — variants in ``df`` that no comparison
-      block currently renders. Add a comparison block (or
-      ``COMPARISONS_OVERRIDE``) that mentions them, or accept the omission.
-    """
+    """Cross-check ``runbms.yml`` runtimes against loaded data and rendered
+    comparisons: declared runtimes with no data, and variants no comparison renders."""
     logs_dir = Path(logs_dir)
     runbms = logs_dir / "runbms.yml"
 

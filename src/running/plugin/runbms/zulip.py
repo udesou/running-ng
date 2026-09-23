@@ -69,18 +69,13 @@ class Zulip(RunbmsPlugin):
                 return
         logging.warning("Zulip send_message failed after {} retries".format(max_retries))
 
-    # Progress edits happen inside the benchmark loop (one per config per
-    # invocation), so any waiting here is billed to the run itself: sleeping
-    # out Zulip's rate limit stretched a 195-benchmark sweep by hours
-    # (measured 2026-08-28: ~10s per invocation on otherwise sub-second
-    # benchmarks). Edits are safe to drop instead — every call rebuilds the
-    # full progress string from last_message_content, so the next edit that
-    # does land shows everything the skipped ones would have.
+    # Progress edits run inside the benchmark loop, so never sleep out Zulip's
+    # rate limit here. Dropping an edit is safe: each call rebuilds the full
+    # progress string, so the next edit that lands shows everything.
     MIN_EDIT_INTERVAL = 2.0
 
     def modify_message(self, content):
-        # Update optimistically so subsequent calls build on this content
-        # even if the edit below is skipped or fails
+        # Update even if the edit is skipped, so later calls build on this content.
         self.last_message_content = content
         now = time.monotonic()
         last = getattr(self, "_last_edit_at", None)
@@ -96,9 +91,7 @@ class Zulip(RunbmsPlugin):
                 self._last_edit_at = now
                 return
             if result.get("code") == "RATE_LIMIT_HIT":
-                # Do not sleep in the benchmark path; back off by pretending
-                # this edit succeeded just now, so the next attempts wait out
-                # MIN_EDIT_INTERVAL and the content catches up on its own.
+                # Back off by pretending this edit succeeded now.
                 self._last_edit_at = now
                 logging.info("Zulip rate limited; dropping this progress edit")
                 return

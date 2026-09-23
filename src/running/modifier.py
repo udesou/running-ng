@@ -20,18 +20,11 @@ class Modifier(object):
         self.__original_kwargs = kwargs
         self._kwargs = copy.deepcopy(kwargs)
         self.excludes = kwargs.get("excludes", {})
-        # Narrows the scope: when non-empty the modifier applies ONLY to the
-        # programs listed.  Use one or the other -- naming a suite in excludes
-        # drops the modifier for every program of it, so combining them removes
-        # more than the names suggest (tests/test_modifier.py).  For a modifier that
-        # belongs to one or two benchmarks, listing those is the whole scope;
-        # spelling the same thing as an exclude list means naming every other
-        # benchmark and keeping that list current forever.  macro_base.yml's
-        # non_lavyek_excludes shows how that ends: 19 suites, 29 programs, and
-        # 18 of those suites are missing programs added since.
+        # When non-empty, the modifier applies only to the programs listed.
+        # Use includes or excludes, not both: a suite in excludes drops every
+        # program of it, so combining them removes more than the names suggest.
         self.includes = kwargs.get("includes", {})
         if self.value_opts:  # Neither None nor empty
-            # Expand value opts
             for k, v in kwargs.items():
                 if type(v) is not str:
                     continue
@@ -179,30 +172,15 @@ class Companion(Modifier):
 
 @register(Modifier)
 class PerfAndOllyAttach(Modifier):
-    """Attach both perf stat and olly gc-stats to the benchmark process.
+    """Attach perf stat and olly gc-stats to the benchmark process.
 
-    Uses SIGSTOP/SIGCONT to freeze the child after fork so both tools can
-    attach before any code runs. Requires olly on PATH and perf installed.
+    The child is frozen with SIGSTOP after fork so both tools attach before any
+    code runs. Requires olly on PATH and perf installed.
 
-    Optional `val`: extra perf stat -e events string, e.g. "cycles,instructions".
-
-    Optional `val_freebsd`: the same list in hwpmc's vocabulary, used instead of
-    `val` on FreeBSD. The two backends do not share an event vocabulary, and the
-    difference is not only spelling: `task-clock` has no hwpmc equivalent at all,
-    so the FreeBSD list is legitimately shorter, and the stall/cache groups are
-    approximations whose numbers are NOT comparable with Linux's (see the
-    comments in the base configs).
-
-    Carrying both here rather than in a parallel `_freebsd` config file is
-    deliberate. The alternative was a second copy of every config differing by
-    one line, and those copies drift: all_macro_freebsd_tier1.yml sat for months
-    with a merge error that made it fail to load on EVERY platform, unnoticed
-    precisely because nothing but FreeBSD ever read it. The explicitly-named
-    perf_grp*_freebsd modifiers still exist for a config that wants to pin one
-    platform's events deliberately.
-
-    Same pattern as CpuPin, which derives its CPU list from the running machine
-    rather than being written out per host.
+    `val`: perf stat -e events, e.g. "cycles,instructions".
+    `val_freebsd`: the same list in hwpmc's vocabulary, used instead of `val` on
+    FreeBSD (task-clock has no hwpmc equivalent; stall/cache groups are only
+    approximations of the Linux ones).
     """
     def __init__(self, value_opts=None, **kwargs):
         super().__init__(value_opts, **kwargs)
@@ -217,21 +195,12 @@ class PerfAndOllyAttach(Modifier):
 
 @register(Modifier)
 class MemtraceAttach(Modifier):
-    """Enable memtrace allocation tracing for the benchmark process.
+    """Enable memtrace allocation tracing via the MEMTRACE env var.
 
-    Unlike PerfAndOllyAttach, memtrace has no attach-to-running-process
-    path: tracing only starts if the benchmark's own binary calls
-    `Memtrace.trace_if_requested ()` at startup (linked against the
-    memtrace library), so this modifier only needs to set env vars —
-    the benchmark reads MEMTRACE (output path) on its own.
-
-    Optional `val`: MEMTRACE_RATE sampling-rate override (proportion of
-    allocated words sampled).  memtrace's own default is **1e-6**
-    (`default_sampling_rate` in memtrace's src/memtrace.ml), so a rate is a
-    multiplier on a very sparse baseline: on test_decompress, the default
-    yields ~600 samples per invocation while `val: "0.001"` yields ~590,000
-    (a ~950x increase, and a 6.7 MB raw trace for a ~1.7 s run).  Budget disk
-    accordingly — traces are per-invocation, not per-config.
+    memtrace cannot attach to a running process: the binary must call
+    `Memtrace.trace_if_requested ()` itself.
+    `val`: MEMTRACE_RATE sampling rate (memtrace's default is 1e-6; traces are
+    per invocation, so higher rates need disk budget).
     """
     def __init__(self, value_opts=None, **kwargs):
         super().__init__(value_opts, **kwargs)
@@ -243,49 +212,22 @@ class MemtraceAttach(Modifier):
 
 @register(Modifier)
 class CpuPin(Modifier):
-    """Confine the benchmark to one hardware thread per physical core.
+    """Pin the benchmark to one hardware thread per physical core, with the
+    CPU list derived from the running machine (SMT sibling numbering differs
+    between Linux and FreeBSD, so a hand-written taskset mask is not portable).
 
-    The portable replacement for a hand-written `taskset -c 0-15` Wrapper.
-    That mask is correct only on the machine it was measured on: the *policy*
-    ("one thread per physical core") is stable, but the CPU numbers realising
-    it are not.  On one Ryzen 9 9950X, Linux enumerates SMT siblings as
-    (0,16),(1,17)... so the policy is 0-15, while FreeBSD on the same silicon
-    typically enumerates (0,1),(2,3)... so it is 0,2,4,...,30.  So the list is
-    derived from the running machine instead of written down.
+    `val`: physical cores handed to olly/perf instead of the benchmark
+    (default 0: observers land on the benchmark's SMT siblings). Changing it
+    mid-sweep changes what is measured.
+    `one_node`: confine the benchmark to one NUMA node, observers on the
+    others; a no-op on single-node machines.
+    `bench_cores`: how many benchmark CPUs to use (default all). Use 1 for
+    single-threaded benchmarks: the scheduler does not balance among isolcpus
+    CPUs, so a smaller set makes placement deterministic. Unpinned
+    multi-domain benchmarks must be excluded: on an isolated set every domain
+    is confined to one CPU.
 
-    Optional `val`: whole physical cores to hand to olly and the counter tool
-    instead of the benchmark.  Default 0, which reproduces the historical
-    behaviour exactly: the benchmark gets every physical core and the
-    observers land on its SMT siblings.  Raising it improves isolation but
-    takes cores away from the benchmark, so it changes what is being measured;
-    do not change it partway through a sweep meant to be comparable.
-
-    Optional `one_node`: confine the benchmark to a single NUMA node and give
-    the others to the observers.  On a multi-socket machine this is usually
-    the better trade than `val`, because the benchmark keeps a whole node's
-    cores with no SMT contention at all instead of giving cores up, and its
-    memory traffic stops crossing the interconnect.  Exactly a no-op on a
-    single-node machine, so it is safe to leave on in a shared config.
-
-    Optional `bench_cores`: how many of the benchmark's CPUs this benchmark may
-    actually use, default all of them.  Set it to 1 for a single-threaded
-    benchmark: it only ever needs one core, and confining it to one makes which
-    core deterministic across runs.  That matters most where the reserved set
-    is isolated (Linux `isolcpus=`), because the scheduler does not balance
-    among isolated CPUs -- a single-threaded benchmark handed six of them lands
-    on whichever one it is first placed on, so the extra five buy nothing and
-    only make the placement vary.  Measured on an 8-core Xeon, sedlex_tokenize
-    over six runs: unpinned on the housekeeping cores 51.46s mean with a 25.8s
-    spread, pinned to one isolated core 46.47s mean with a 0.33s spread.
-
-    A multi-domain benchmark wants the whole set, but only if it pins its own
-    domains the way lavyek_bench.ml does.  Handing an unpinned multi-domain
-    benchmark an isolated set confines every domain to one CPU: infer went from
-    168% CPU on two housekeeping cores to 100% on six isolated ones, 72%
-    slower.  Leave such benchmarks out of the modifier until they self-pin.
-
-    Contributes nothing where the OS cannot pin (macOS), so a config carrying
-    it stays portable rather than failing.
+    A no-op where the OS cannot pin (macOS).
     """
 
     def __init__(self, value_opts=None, **kwargs):
@@ -297,8 +239,7 @@ class CpuPin(Modifier):
             raise ValueError(
                 "CpuPin modifier {}: val must be a whole number of reserved "
                 "cores, got {!r}".format(self.name, raw))
-        # YAML may hand this over as a bool or as a string, depending on how
-        # it was quoted.
+        # YAML may hand this over as a bool or a string, depending on quoting.
         node_raw = self._kwargs.get("one_node", False)
         if isinstance(node_raw, str):
             node_raw = node_raw.strip().lower()
@@ -331,18 +272,9 @@ class CpuPin(Modifier):
                     "CpuPin modifier %s asks for %d cores but only %d are "
                     "available for the benchmark; using all of them",
                     self.name, self.bench_cores, len(self.benchmark_cpus))
-            # The cores this benchmark does not take are left IDLE rather than
-            # given to the observers.  They are the set reserved for benchmark
-            # work -- on a machine using isolcpus they are the isolated ones --
-            # and putting olly on them would undo the separation the pinning
-            # exists to create.
-            #
-            # Taken from the far end of the set: where the machine declares
-            # nothing (no isolcpus, no irqaffinity) the whole list is handed to
-            # the benchmark and the front of it is CPU 0, which is the busiest
-            # core on most machines.  Where it does declare a split this makes
-            # no difference to quality, and it keeps the benchmark as far from
-            # the housekeeping cores as the machine allows.
+            # Unused benchmark cores stay idle (not given to observers) so the
+            # isolation the pinning creates is kept. Take from the far end:
+            # without isolcpus the front of the list is CPU 0, the busiest core.
             self.benchmark_cpus = self.benchmark_cpus[-self.bench_cores:]
         self.val = osinfo.pin_command(self.benchmark_cpus)
         if not self.val:

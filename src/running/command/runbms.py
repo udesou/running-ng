@@ -179,8 +179,7 @@ def get_hfacs(heap_range: int, spread_factor: int, N: int, ns: List[int]) -> Lis
     return [spread(spread_factor, N, n)/divisor + start for n in ns]
 
 
-# Set by run() when the config declares schema_version; read here to emit
-# data-contract artifacts natively during the run (see running.contract.native).
+# Set by run() when the config declares schema_version (see running.contract.native).
 _native_emitter = None
 
 
@@ -191,14 +190,9 @@ def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Opti
         mod_b = mod_b.attach_modifiers([runtime.get_heapsize_modifier(size)])
     if fd:
         prologue = get_log_prologue(runtime, mod_b)
-        # errors="replace": the prologue interpolates the environment and the
-        # CPU model string, neither of which is guaranteed ASCII (a UTF-8 path
-        # in PWD is enough).  A log line that cannot be encoded must not take
-        # the invocation down with it.
+        # The prologue interpolates the environment, which need not be ASCII.
         fd.write(prologue.encode("ascii", errors="replace"))
     output, companion_out, exit_status = mod_b.run(runtime, cwd=runbms_dir, memtrace_path=memtrace_path)
-    # Native contract emission: convert this invocation's {olly, perf} companion
-    # into per-tool contract NDJSON, keyed by identity running-ng already holds.
     if _native_emitter is not None:
         try:
             _native_emitter.record(b, c, companion_out,
@@ -213,10 +207,8 @@ def run_benchmark_with_config(c: str, b: Benchmark, runbms_dir: Path, size: Opti
     if fd:
         epilogue = get_log_epilogue(runtime, mod_b)
         fd.write(epilogue.encode("ascii", errors="replace"))
-    # Split the combined companion JSON into per-tool NDJSON sidecars
-    # (one compact object per invocation, keyed on the tool name).  The
-    # combined form is still embedded in the .log after ***** for human
-    # inspection.
+    # Per-tool NDJSON sidecars, one line per invocation; the combined form
+    # stays in the .log after ***** as well.
     if sidecar_paths and companion_out:
         try:
             import json
@@ -250,24 +242,18 @@ def get_filename(bm: Benchmark, hfac: Optional[float], size: Optional[int], conf
 
 
 def get_tool_json_filename(tool: str, bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> str:
-    """Per-tool NDJSON sidecar — e.g. ``olly_<bm>....json`` or ``perf_<bm>....json``."""
+    """Per-tool NDJSON sidecar, e.g. ``olly_<bm>....json``."""
     return "{}_{}.json".format(tool, get_filename_no_ext(bm, hfac, size, config))
 
 
 def get_memtrace_filename(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str, invocation: int) -> str:
-    """Per-invocation raw trace file — memtrace traces one process lifetime,
-    so (unlike the olly/perf NDJSON sidecars, which append one line per
-    invocation to a single per-config file) each invocation needs its own
-    file."""
+    """Raw trace file; memtrace traces one process lifetime, so one file per invocation."""
     return "memtrace_{}.{}.trace".format(get_filename_no_ext(bm, hfac, size, config), invocation)
 
 
 def get_memtrace_flamegraph_exe(bm: Benchmark, runtime: Runtime) -> Optional[Path]:
-    """Locate the memtrace_flamegraph tool built alongside this benchmark's
-    binary (see e.g. decompress.build.sh) for this runtime. Only benchmarks
-    patched to call Memtrace.trace_if_requested have this; returns None
-    otherwise (e.g. non-OCamlBuiltBinaryBenchmark benchmarks, or ones that
-    haven't been patched/built with it yet)."""
+    """The memtrace_flamegraph tool built alongside this benchmark for this
+    runtime, or None if the benchmark's build script does not produce one."""
     benchmark_dir = getattr(bm, "benchmark_dir", None)
     if benchmark_dir is None:
         return None
@@ -276,8 +262,7 @@ def get_memtrace_flamegraph_exe(bm: Benchmark, runtime: Runtime) -> Optional[Pat
 
 
 def parse_memtrace_flamegraph(text: str) -> List[Dict[str, Any]]:
-    """Parse memtrace_flamegraph's folded-stack-trace output (one aggregated
-    call stack + sample count per line) into JSON-able records."""
+    """Parse memtrace_flamegraph's folded-stack output (stack + sample count per line)."""
     records = []
     for line in text.splitlines():
         line = line.strip()
@@ -293,10 +278,8 @@ def parse_memtrace_flamegraph(text: str) -> List[Dict[str, Any]]:
 
 
 def write_memtrace_json_sidecar(trace_path: Path, bm: Benchmark, runtime: Runtime) -> None:
-    """Convert a raw memtrace trace into a JSON sidecar (folded-stack
-    summary) next to it, via the runtime's own memtrace_flamegraph tool.
-    The raw trace is kept too — this is a cheap, quick-diff summary, not a
-    replacement for the full trace (which memtrace_viewer needs)."""
+    """Write a folded-stack JSON summary next to a raw memtrace trace; the raw
+    trace is kept for memtrace_viewer."""
     flamegraph_exe = get_memtrace_flamegraph_exe(bm, runtime)
     if flamegraph_exe is None:
         return
@@ -324,7 +307,7 @@ def get_filename_completed(bm: Benchmark, hfac: Optional[float], size: Optional[
 def get_filename_completed_candidates(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> List[str]:
     log_filename = get_filename(bm, hfac, size, config)
     gz_filename = "{}.gz".format(log_filename)
-    # Support resume across runs that may have changed compression settings.
+    # Resume across runs that changed the compression setting.
     if compress_logs:
         return [gz_filename, log_filename]
     return [log_filename, gz_filename]
@@ -346,8 +329,7 @@ def hz_to_ghz(hzstr: str) -> str:
     try:
         return "{:.2f} GHz".format(int(hzstr) / 1000 / 1000)
     except ValueError:
-        # An unreadable sysfs node yields "" rather than a number; a missing
-        # frequency line must not abort the run that was about to happen.
+        # unreadable sysfs node
         return "unknown"
 
 
@@ -357,10 +339,7 @@ def get_log_prologue(runtime: Runtime, bm: Benchmark) -> str:
     output += bm.to_string(runtime)
     output += "\n"
     output += "running-ng v{}\n".format(__VERSION__)
-    # Every probe below is informational and runs before *every* invocation, so
-    # all of them go through osinfo.probe, which never raises.  They used to go
-    # through util.system(check=True), where a probe the host does not ship
-    # (vmstat on macOS) aborted the whole sweep on invocation one.
+    # osinfo.probe never raises: a probe the host lacks must not abort the sweep.
     output += osinfo.probe("date") + "\n"
     output += osinfo.probe("w") + "\n"
     for cmd in (osinfo.memory_snapshot_cmd(), osinfo.process_snapshot_cmd()):
@@ -378,12 +357,7 @@ def get_log_prologue(runtime: Runtime, bm: Benchmark) -> str:
 
 
 def cpu_frequency_info() -> str:
-    """Per-core frequency and governor, where the OS exposes them.
-
-    Linux-only: it comes from sysfs cpufreq.  macOS exposes no governor at all
-    and FreeBSD's equivalent (dev.cpu.N.freq / powerd) is per-package rather
-    than per-core, so both return "" until someone needs them.
-    """
+    """Per-core frequency and governor from sysfs cpufreq; "" on non-Linux."""
     if not osinfo.IS_LINUX:
         return ""
     output = ""
@@ -403,21 +377,8 @@ def cpu_frequency_info() -> str:
 
 
 def check_cpu_governor() -> None:
-    """Warn when the CPU frequency governor is not ``performance``.
-
-    A throttling governor (``ondemand``, ``powersave``, ``schedutil``) lets the
-    clock float with load, so a wall-clock difference between two configs stops
-    being a property of the runtime under test.  On a slow machine it also
-    pushes benchmarks past their timeouts, which is how it usually gets noticed:
-    as a pile of killed invocations rather than as a machine-setup problem.
-
-    ``get_hardware_info`` already records the per-CPU governor into every
-    benchmark log, but nothing surfaced it, so a whole multi-day sweep could
-    finish before anyone read one.  Check once, up front, where it is actionable.
-
-    Warn rather than refuse: setting the governor needs root, and a run that
-    only checks builds and exit codes does not care about the clock.  Set
-    ``RUNNING_REQUIRE_PERFORMANCE_GOVERNOR=1`` to make it fatal instead.
+    """Warn once, up front, when the CPU frequency governor is not ``performance``.
+    Set ``RUNNING_REQUIRE_PERFORMANCE_GOVERNOR=1`` to make it fatal.
     """
     governors: Dict[str, int] = {}
     for path in sorted(Path("/sys/devices/system/cpu").glob(
@@ -429,8 +390,7 @@ def check_cpu_governor() -> None:
         if governor:
             governors[governor] = governors.get(governor, 0) + 1
     if not governors:
-        # No cpufreq governors exposed -- a VM, a container, or a driver that
-        # does not publish them.  Nothing to check and nothing to act on.
+        # a VM, a container, or a driver that does not publish governors
         logging.debug(
             "no cpufreq governors under /sys; skipping the governor check")
         return
@@ -547,12 +507,8 @@ def run_one_benchmark(
                     if memtrace_path.exists():
                         write_memtrace_json_sidecar(memtrace_path, bm, runtime)
                     elif bm.attach_modifiers(mods).memtrace_attach is not None:
-                        # Tracing was asked for and MEMTRACE was exported, but
-                        # the process wrote nothing — so its binary never called
-                        # Memtrace.trace_if_requested (). Without this the run
-                        # looks successful and silently yields no trace, which
-                        # is the easy mistake to make when enabling memtrace on
-                        # a benchmark macro-benches hasn't patched yet.
+                        # MEMTRACE was exported but nothing was written: the
+                        # binary never called Memtrace.trace_if_requested ().
                         logging.warning(
                             "%s [%s]: memtrace was requested but the benchmark "
                             "produced no trace at %s. Its binary is probably "
@@ -678,33 +634,14 @@ def run(args):
         global configuration
         configuration = Configuration.from_file(
             Path(os.getcwd()), args.get("CONFIG"))
-        # Cross-check runtimes / configs / comparisons before doing anything
-        # else. Errors here mean a typo or structurally-broken block; better
-        # to fail before benchmarks run.
         configuration.validate()
-        # Machine-setup checks, before the expensive part (switch provisioning,
-        # builds) starts -- a throttling governor invalidates every timing this
-        # run is about to produce, and an untuned machine lets the OS and the
-        # interrupts share the benchmark's cores. Both are reported here rather
-        # than left to be inferred from the variance afterwards, and both are
-        # warnings: the run is still worth having, it is just not comparable
-        # with one taken on a tuned machine.
+        # Machine-setup warnings, before switch provisioning and builds start.
         check_cpu_governor()
         osinfo.warn_if_untuned()
-        # Tag-block validation runs regardless of whether RUNNING_TAG is set
-        # — catches typos in the tags: block (e.g. renamed program) at
-        # config load time, before benchmarks run.
+        # Validated even when RUNNING_TAG is unset.
         configuration.validate_tags()
-        # Tag-based subset selection via RUNNING_TAG env var. Comma-separated
-        # names are union'd; the result intersects with the existing
-        # benchmarks: block (so tags can't re-enable explicitly-disabled
-        # benches like the currently-disabled macro-merlin). See
-        # Configuration.apply_tag_filter for full semantics.
         running_tag = os.environ.get("RUNNING_TAG")
-        # When RUNNING_TAG is unset, fall back to the `default_run` tag if the
-        # config defines one — so a bare run executes the default-size ladder
-        # rungs rather than every rung + legacy bench. Configs without a
-        # `default_run` tag (e.g. micro-benches) are unaffected: no filter.
+        # RUNNING_TAG unset: use the config's `default_run` tag if it defines one.
         if not running_tag:
             tags_block = configuration.get("tags") or {}
             if "default_run" in tags_block:
@@ -723,19 +660,15 @@ def run(args):
                     "RUNNING_TAG=weak_refs,effects."
                 )
             configuration.apply_tag_filter(tag_names)
-        # Save metadata — after the tag filter, so the persisted runbms.yml
-        # reflects what actually ran rather than the pre-filter superset.
+        # After the tag filter, so runbms.yml reflects what actually ran.
         if not is_dry_run():
             with (log_dir / "runbms.yml").open("w") as fd:
                 configuration.save_to_file(fd)
-        # Capture the raw runtime specs (with configure_args) BEFORE resolve_class
-        # replaces them with Runtime objects — the native emitter needs the raw dict.
+        # The native emitter needs the raw dicts, before resolve_class replaces them.
         _raw_runtimes = dict(configuration.get("runtimes") or {})
         configuration.resolve_class()
-        # Native contract emission: if the config declares a schema_version, emit
-        # data-contract artifacts (measurements/{olly,perf}.ndjson + manifest.json)
-        # into <log_dir>/contract as the run proceeds. Absent => legacy output that
-        # the contract-adapter converts after the fact.
+        # With schema_version, contract artifacts go to <log_dir>/contract as the
+        # run proceeds; without it, the contract-adapter converts afterwards.
         global _native_emitter
         _native_emitter = None
         schema_version = configuration.get("schema_version")
@@ -791,8 +724,7 @@ def run(args):
                 p.set_runbms_dir(runbms_dir)
                 p.set_log_dir(log_dir)
 
-        # Pre-build benchmark artifacts per runtime so build/warning logs are not
-        # interleaved with per-invocation progress output.
+        # Pre-build so build logs are not interleaved with progress output.
         runtime_by_config: Dict[str, Runtime] = {}
         for c in configs:
             runtime_by_config[c], _ = parse_config_str(configuration, c)

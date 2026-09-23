@@ -1,0 +1,22 @@
+# The full micro suite on OCaml 5.5.1, 5 invocations: the reference numbers for the
+# current stable compiler. Includes micro_base.yml.
+# Run: RUNNING_BENCH_DIR=~/benches RUNNING_REUSE_SWITCHES=1 CONFIG_FILE=<this file> \
+#      LOG_DIR=$PWD/gc-sweep-logs-micro-5.5.1-$(date +%F) bash run_ocaml_bench_gc_sweep.sh
+
+includes:
+  - "../base/ocaml/micro_base.yml"
+
+invocations: 5
+
+benchmarks:
+  # Needs a `type: OxCaml` runtime; under OCaml it fails its build check every run.
+  oxcaml-prefetch: []
+
+runtimes:
+  ocaml-5.5.1:
+    type: OCaml
+    version: "5.5.1"
+
+configs:
+  # re-25|md-2: the default runtime-events ring overflows on the GC-dense programs.
+  - "ocaml-5.5.1|perf_grp1|re-25|md-2"

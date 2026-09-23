@@ -1,0 +1,31 @@
+# Two builds of one compiler (stock and -fp-flambda) on the macro suite: the shape
+# of a variants experiment, kept to two switches so it is cheap to try.
+# experiments/macro_fp_flambda_5.5.1.yml is the full four-way version.
+# Run: RUNNING_MACRO_BENCH_DIR=~/macro-benches CONFIG_FILE=<this file> \
+#      LOG_DIR=/tmp/baseline_variants bash run_ocaml_bench_gc_sweep.sh
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 3
+
+# Same source, different configure: the runtime name is what tells the builds apart,
+# and it names the switch (running-ng-<name>) and the binary (<bench>-<name>).
+runtimes:
+  ocaml-5.5.1:
+    type: OCaml
+    version: "5.5.1"
+  ocaml-5.5.1-fp-flambda:
+    type: OCaml
+    version: "5.5.1"
+    configure_args: ["--enable-frame-pointers", "--enable-flambda"]
+
+configs:
+  - "ocaml-5.5.1|perf_grp1"
+  - "ocaml-5.5.1-fp-flambda|perf_grp1"
+
+comparisons:
+  - label: "5.5.1: fp+flambda vs stock"
+    a: ocaml-5.5.1
+    b: [ocaml-5.5.1-fp-flambda]

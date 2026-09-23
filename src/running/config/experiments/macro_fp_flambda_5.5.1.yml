@@ -1,0 +1,40 @@
+# OCaml 5.5.1 stock vs -fp / -flambda / -fp-flambda on the full macro suite,
+# 5 invocations: what each configure-time variant costs. Includes macro_base.yml.
+# Four switches, so budget four compiler builds before any measurement starts.
+# Run: RUNNING_MACRO_BENCH_DIR=~/macro-benches RUNNING_REUSE_SWITCHES=1 \
+#      CONFIG_FILE=<this file> RUNNING_TAG=all_benches \
+#      LOG_DIR=$PWD/gc-sweep-logs-macro-fp-flambda-5.5.1-$(date +%F) bash run_ocaml_bench_gc_sweep.sh
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 5
+
+runtimes:
+  ocaml-5.5.1:
+    type: OCaml
+    version: "5.5.1"
+  ocaml-5.5.1-fp:
+    type: OCaml
+    version: "5.5.1"
+    configure_args: ["--enable-frame-pointers"]
+  ocaml-5.5.1-flambda:
+    type: OCaml
+    version: "5.5.1"
+    configure_args: ["--enable-flambda"]
+  ocaml-5.5.1-fp-flambda:
+    type: OCaml
+    version: "5.5.1"
+    configure_args: ["--enable-frame-pointers", "--enable-flambda"]
+
+configs:
+  - "ocaml-5.5.1|perf_grp1"
+  - "ocaml-5.5.1-fp|perf_grp1"
+  - "ocaml-5.5.1-flambda|perf_grp1"
+  - "ocaml-5.5.1-fp-flambda|perf_grp1"
+
+comparisons:
+  - label: "5.5.1 macro: fp / flambda vs stock"
+    a: ocaml-5.5.1
+    b: [ocaml-5.5.1-fp, ocaml-5.5.1-flambda, ocaml-5.5.1-fp-flambda]

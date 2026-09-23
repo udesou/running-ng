@@ -1,0 +1,22 @@
+# Every micro benchmark on the current stable compiler, one invocation each.
+# Run: RUNNING_BENCH_DIR=~/benches CONFIG_FILE=<this file> \
+#      LOG_DIR=/tmp/baseline_micro bash run_ocaml_bench_gc_sweep.sh
+
+includes:
+  - "../base/ocaml/micro_base.yml"
+
+invocations: 1
+
+# A top-level benchmarks: dict updates the base key by key, so this disables one suite.
+benchmarks:
+  # Needs a `type: OxCaml` runtime; under OCaml it fails its build check every run.
+  oxcaml-prefetch: []
+
+runtimes:
+  ocaml-5.5.1:
+    type: OCaml
+    version: "5.5.1"
+
+configs:
+  # re-25|md-2: the default runtime-events ring overflows on the GC-dense programs.
+  - "ocaml-5.5.1|perf_grp1|re-25|md-2"

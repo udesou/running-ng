@@ -1,12 +1,5 @@
-"""Host-OS abstraction: the few places running-ng must ask the kernel directly.
-
-Everything here has a Linux implementation that matches the historical
-behaviour exactly, plus macOS/FreeBSD equivalents and a documented
-degraded mode when a platform offers nothing.  The rule is that a missing
-capability must degrade (return None / empty string), never raise: these
-helpers run once per invocation on the measurement path, and losing a
-multi-thousand-invocation sweep to a probe is far worse than losing the
-probe's output.
+"""Host-OS abstraction (Linux, macOS, FreeBSD). A missing capability must
+degrade (None / empty), never raise: these run on the measurement path.
 """
 import ctypes
 import ctypes.util
@@ -26,11 +19,8 @@ IS_FREEBSD = SYSTEM == "FreeBSD"
 
 # --- process executable lookup ------------------------------------------------
 #
-# Used by the olly attach path to tell the real benchmark apart from the
-# short-lived build tools some benchmark wrapper scripts spawn.  Called in a
-# 10 ms poll loop while the benchmark is starting, so implementations must
-# avoid forking where the platform allows it: a fork per poll would perturb
-# the very process we are about to measure.
+# Called in a 10 ms poll loop while the benchmark starts, so implementations
+# must not fork where the platform allows it.
 
 def _exe_name_proc(pid: int) -> str:
     """Linux: /proc/<pid>/exe."""
@@ -59,7 +49,7 @@ _libproc = _load_libproc()
 
 
 def _exe_name_libproc(pid: int) -> str:
-    """macOS: proc_pidpath(3).  Fork-free, but only for same-uid targets."""
+    """macOS: proc_pidpath(3); same-uid targets only."""
     if _libproc is None:
         raise OSError("libproc unavailable")
     buf = ctypes.create_string_buffer(_PROC_PIDPATHINFO_MAXSIZE)
@@ -70,9 +60,7 @@ def _exe_name_libproc(pid: int) -> str:
     return os.path.basename(buf.value.decode("utf-8", "replace"))
 
 
-# FreeBSD sysctl mib for KERN_PROC_PATHNAME: {CTL_KERN, KERN_PROC,
-# KERN_PROC_PATHNAME, pid}.  Stable ABI, so hard-coding the constants is safe;
-# still guarded, because getting them wrong must degrade rather than crash.
+# FreeBSD sysctl mib for KERN_PROC_PATHNAME (stable ABI).
 _CTL_KERN = 1
 _KERN_PROC = 14
 _KERN_PROC_PATHNAME = 12
@@ -87,7 +75,7 @@ if IS_FREEBSD:
 
 
 def _exe_name_sysctl(pid: int) -> str:
-    """FreeBSD: sysctl(KERN_PROC_PATHNAME).  Fork-free."""
+    """FreeBSD: sysctl(KERN_PROC_PATHNAME)."""
     if _libc is None:
         raise OSError("libc unavailable")
     mib = (ctypes.c_int * 4)(_CTL_KERN, _KERN_PROC, _KERN_PROC_PATHNAME, pid)
@@ -104,8 +92,7 @@ def _pick_exe_name_impl():
     if IS_DARWIN and _libproc is not None:
         return _exe_name_libproc
     if IS_FREEBSD:
-        # procfs is not mounted by default on modern FreeBSD; prefer sysctl and
-        # keep the symlink as a fallback for hosts that do mount it.
+        # procfs is not mounted by default on modern FreeBSD
         if _libc is not None:
             return _exe_name_sysctl
         if os.path.isdir("/proc/self"):
@@ -115,9 +102,7 @@ def _pick_exe_name_impl():
 
 _exe_name_impl = _pick_exe_name_impl()
 
-#: False when this platform offers no way to resolve a PID's executable.
-#: Callers must then fall back to a weaker check rather than rejecting
-#: every PID, which is what the /proc-only implementation used to do.
+#: False when this platform cannot resolve a PID's executable; callers fall back to a weaker check.
 EXE_LOOKUP_SUPPORTED = _exe_name_impl is not None
 
 if not EXE_LOOKUP_SUPPORTED:
@@ -127,13 +112,8 @@ if not EXE_LOOKUP_SUPPORTED:
 
 
 def pid_exe_name(pid: int) -> Optional[str]:
-    """Basename of the executable PID is running, or None.
-
-    None means either "this platform cannot tell us" (see
-    :data:`EXE_LOOKUP_SUPPORTED`) or "the lookup failed for this PID" — a
-    zombie, a process that exited mid-call, or one we may not inspect.
-    Callers that must distinguish the two check the flag.
-    """
+    """Basename of the executable PID is running, or None (platform cannot tell,
+    see :data:`EXE_LOOKUP_SUPPORTED`, or the lookup failed for this PID)."""
     if _exe_name_impl is None:
         return None
     try:
@@ -142,17 +122,10 @@ def pid_exe_name(pid: int) -> Optional[str]:
         return None
 
 
-# --- host description probes --------------------------------------------------
-#
-# Purely informational: these land in the per-invocation log prologue.
+# --- host description probes (for the log prologue) ---------------------------
 
 def probe(cmd: str) -> str:
-    """Run a shell probe for the log prologue.  Never raises, never fails a run.
-
-    Returns "" if the command is missing or errors.  Unlike util.system this
-    deliberately does not check the exit status: a probe that does not exist on
-    this OS is a missing log line, not a failed benchmark.
-    """
+    """Run a shell probe; "" if the command is missing or fails. Never raises."""
     try:
         p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
                            stderr=subprocess.DEVNULL, timeout=30)
@@ -167,8 +140,7 @@ def cpu_model() -> str:
         try:
             with open("/proc/cpuinfo") as f:
                 for line in f:
-                    # x86 says "model name"; arm64 has neither, hence the
-                    # "Model" fallback from /proc/device-tree consumers.
+                    # x86 says "model name"; arm64 may only have "Model"
                     if line.startswith("model name"):
                         return line.split(":", 1)[1].strip()
         except OSError:
@@ -182,7 +154,7 @@ def cpu_model() -> str:
 
 
 def core_count() -> int:
-    """Logical core count.  os.cpu_count() is correct on all three platforms."""
+    """Logical core count."""
     return os.cpu_count() or 0
 
 
@@ -200,7 +172,7 @@ def process_snapshot_cmd() -> str:
     if IS_LINUX:
         return "top -bcn 1 -w512 | head -n 12"
     if IS_DARWIN:
-        # macOS top has no batch flag; -l 1 takes a single sample.
+        # macOS top has no batch flag
         return "top -l 1 -n 12 | head -n 20"
     if IS_FREEBSD:
         return "top -b -n 12"
@@ -209,12 +181,8 @@ def process_snapshot_cmd() -> str:
 
 # --- CPU topology and pinning --------------------------------------------------
 #
-# The pinning *mechanism* is per-OS (taskset on Linux, cpuset on FreeBSD, none
-# on macOS).  The CPU *list* is per-machine and cannot be hardcoded per-OS: on
-# one Ryzen 9 9950X, Linux enumerates SMT siblings as (0,16),(1,17)...(15,31)
-# so one-thread-per-core is 0-15, while FreeBSD on the same silicon typically
-# enumerates (0,1),(2,3)...(30,31) so the same policy is 0,2,4,...,30.  Hence
-# detection at run time rather than a constant in a config file.
+# The CPU list is detected at run time: Linux and FreeBSD enumerate SMT
+# siblings differently on the same silicon.
 
 
 def _linux_sibling_groups() -> List[List[int]]:
@@ -227,10 +195,7 @@ def _linux_sibling_groups() -> List[List[int]]:
              if n.startswith("cpu") and n[3:].isdigit()))
     except OSError:
         return []
-    # Offline CPUs have no readable topology, and the fallback below would
-    # turn each into a phantom single-thread "core" that the benchmark could
-    # then be pinned to.  Seen on an 8-core box with SMT off: all 16 present
-    # CPUs came back as 16 physical cores.
+    # Offline CPUs have no readable topology and would become phantom cores.
     online = set(online_cpus())
     for cpu in entries:
         if cpu in seen:
@@ -242,8 +207,7 @@ def _linux_sibling_groups() -> List[List[int]]:
             with open(path) as f:
                 raw = f.read().strip()
         except OSError:
-            # Offline CPU, or a kernel without topology info: treat it as its
-            # own core rather than dropping it.
+            # no topology info: treat the CPU as its own core
             raw = str(cpu)
         siblings = sorted(_parse_cpu_list(raw)) or [cpu]
         if online:
@@ -254,14 +218,8 @@ def _linux_sibling_groups() -> List[List[int]]:
 
 
 def _freebsd_sibling_groups() -> List[List[int]]:
-    """SMT sibling sets from kern.sched.topology_spec.
-
-    That sysctl emits an XML tree (sys/kern/sched_ule.c:3211-3250) where a
-    group carrying the THREAD (or SMT) flag is exactly one physical core's
-    hardware threads.  Groups without the flag are caches or NUMA nodes, so
-    only the flagged leaves are sibling sets; with SMT off there are none and
-    every CPU is its own core.
-    """
+    """SMT sibling sets from kern.sched.topology_spec: the XML groups flagged
+    THREAD/SMT are one physical core each; unflagged groups are caches or nodes."""
     import xml.etree.ElementTree as ET
     xml = probe("sysctl -n kern.sched.topology_spec")
     if not xml.strip():
@@ -274,9 +232,7 @@ def _freebsd_sibling_groups() -> List[List[int]]:
     groups: List[List[int]] = []
     seen: Set[int] = set()
     for group in root.iter("group"):
-        # Only this group's OWN flags. ElementTree's iter() recurses, so
-        # asking a parent for "flag" would return its children's flags too and
-        # make the whole package look like one SMT sibling set.
+        # find(), not iter(): iter() recurses into children's flags.
         flags_el = group.find("flags")
         flags = ({f.get("name") for f in flags_el.findall("flag")}
                  if flags_el is not None else set())
@@ -290,7 +246,7 @@ def _freebsd_sibling_groups() -> List[List[int]]:
             seen.update(cpus)
             groups.append(cpus)
     if not groups:
-        # No SMT: every online CPU is its own physical core.
+        # no SMT
         groups = [[c] for c in range(core_count())]
     return groups
 
@@ -316,8 +272,7 @@ def _parse_cpu_list(text: str) -> List[int]:
     return out
 
 
-#: sysfs root for CPU topology and the kernel's CPU lists.  A module constant
-#: so tests can point it at a fixture tree instead of the running machine.
+#: sysfs root for CPU topology; tests point it at a fixture tree.
 SYSFS_CPU_BASE = "/sys/devices/system/cpu"
 
 
@@ -333,33 +288,16 @@ def _sysfs_cpu_list(name: str) -> List[int]:
 
 
 def online_cpus() -> List[int]:
-    """Logical CPUs the kernel will schedule on at all.
-
-    Empty where the list is unavailable (non-Linux, or a kernel without the
-    sysfs file), which callers read as "no information, assume every CPU".
-    """
+    """Online logical CPUs; empty where unavailable (callers assume every CPU)."""
     return _sysfs_cpu_list("online")
 
 
 def isolated_cpus() -> List[int]:
-    """Logical CPUs the kernel has removed from scheduler load balancing.
+    """CPUs isolated with `isolcpus=` (Linux only; empty elsewhere).
 
-    Populated by `isolcpus=` on the Linux cmdline (and on some kernels by
-    `nohz_full=`).  Such a CPU still runs work pinned to it, but the scheduler
-    will neither migrate anything onto it nor balance among the isolated set:
-    a mask spanning several of them puts every thread on ONE and leaves it
-    there.  Measured on an 8-core Xeon with isolcpus=4,6,8,10,12,14: six
-    spinners sharing that mask reached 99% CPU, the same six pinned one per
-    CPU reached 599%.
-
-    So an isolated set suits a single-threaded benchmark, or one that pins its
-    own threads (as lavyek_bench.ml does), and nothing else.  partition_cpus
-    hands it to the benchmark; deciding how many of those CPUs a given
-    benchmark may span is the caller's job.
-
-    FreeBSD has no boot-time equivalent -- partitioning there is done at
-    runtime with cpuset(1) -- and macOS cannot pin at all, so this is empty on
-    both, and the topology policy applies unchanged.
+    The scheduler does not balance among isolated CPUs: a mask spanning
+    several puts every thread on one. They suit single-threaded benchmarks
+    or ones that pin their own threads.
     """
     return _sysfs_cpu_list("isolated")
 
@@ -377,21 +315,8 @@ def _parse_cpu_mask(text: str) -> List[int]:
 
 
 def irq_cpus() -> List[int]:
-    """CPUs the kernel routes device interrupts to, where that is a subset.
-
-    /proc/irq/default_smp_affinity is what an `irqaffinity=` boot line sets,
-    and it is the administrator saying "the OS belongs here".  Untuned it
-    covers every CPU, which says nothing, so that case returns empty.
-
-    Interrupt work is not visible in the benchmark's own CPU time but competes
-    with it for the core.  On an 8-core Xeon with `irqaffinity=0,2`, the two
-    housekeeping cores had taken 522M and 425M interrupts against 0.23M on each
-    of the others -- three orders of magnitude, and the reason an unpinned
-    benchmark there showed a 25.8s spread over six runs against 0.33s pinned.
-
-    Linux only: FreeBSD routes interrupts with its own mechanism and macOS
-    cannot pin, so both return empty and the topology policy applies.
-    """
+    """CPUs an `irqaffinity=` boot line routes interrupts to
+    (/proc/irq/default_smp_affinity), or [] when untuned or not Linux."""
     if SYSTEM != "Linux":
         return []
     try:
@@ -402,18 +327,15 @@ def irq_cpus() -> List[int]:
     online = set(online_cpus())
     if online:
         cpus = [c for c in cpus if c in online]
-        # A mask covering everything is the default, not a decision.
+        # a mask covering everything is the default, not a decision
         if len(cpus) >= len(online):
             return []
     return sorted(cpus)
 
 
 def sibling_groups() -> List[List[int]]:
-    """One sorted list of logical CPUs per physical core, cores in order.
-
-    Empty when the platform does not expose topology (macOS), which callers
-    read as "cannot pin here".
-    """
+    """One sorted list of logical CPUs per physical core; empty where the platform
+    exposes no topology (macOS), meaning "cannot pin here"."""
     if IS_LINUX:
         return _linux_sibling_groups()
     if IS_FREEBSD:
@@ -423,16 +345,9 @@ def sibling_groups() -> List[List[int]]:
 
 def split_groups_by_node(groups: List[List[int]]
                          ) -> Tuple[List[List[int]], List[List[int]]]:
-    """Split sibling groups into (one NUMA node's, everything else's).
-
-    Returns (groups, []) unchanged on a single-node machine, or where the
-    platform does not report NUMA topology.  The node kept is the one holding
-    the most sibling groups; ties go to the lowest-numbered node so the choice
-    is stable across runs on one machine.
-
-    A group straddling nodes (which should not happen, but is not worth
-    crashing over) counts as belonging to none and stays with the benchmark.
-    """
+    """Split sibling groups into (largest NUMA node's, everything else's);
+    (groups, []) on a single-node machine. Ties go to the lowest node id so
+    the choice is stable. A group straddling nodes stays with the benchmark."""
     nodes = numa_nodes()
     if len(nodes) <= 1 or not groups:
         return groups, []
@@ -461,69 +376,25 @@ def split_groups_by_node(groups: List[List[int]]
 
 def partition_cpus(reserved_cores: int = 0,
                    one_node: bool = False) -> Tuple[List[int], List[int]]:
-    """Split the machine into (benchmark CPUs, observer CPUs).
+    """Split the machine into (benchmark CPUs, observer CPUs); ([], []) without topology.
 
-    The benchmark gets one hardware thread per physical core, which is the
-    policy `pin_lavyek` used to encode by hand.
+    The benchmark gets one hardware thread per physical core. `reserved_cores`
+    whole cores go to the observers instead (default 0: observers land on the
+    benchmark's SMT siblings). `one_node` keeps the benchmark on one NUMA node
+    and gives the other nodes to the observers, leaving the benchmark's
+    siblings idle; a no-op on single-node machines. An `isolcpus=` split, or
+    failing that an `irqaffinity=` one, takes precedence over topology, with
+    the two options then applying within the isolated set.
 
-    `reserved_cores` hands that many whole physical cores (both threads) to
-    the observers instead.  The default of 0 reproduces the historical
-    behaviour: the benchmark gets every physical core and the observers land
-    on its SMT siblings, which is weaker isolation than it looks since
-    siblings share execution resources with the benchmark threads.  Reserving
-    costs the benchmark cores, so it changes what is being measured: not a
-    mid-sweep decision.
-
-    `one_node` confines the benchmark to a single NUMA node and gives every
-    other node to the observers.  On a multi-socket machine that is usually
-    the best arrangement available: the benchmark keeps a whole node's cores
-    and the observers get a whole node of their own, rather than either giving
-    cores up.  It also stops the benchmark's own memory traffic crossing the
-    interconnect, which for GC work is a large source of run-to-run variance.
-    No effect on a single-node machine, so a config carrying it stays
-    portable.
-
-    When it does take effect the benchmark's own SMT siblings are left IDLE
-    rather than handed to the observers: with a whole spare node available the
-    siblings buy nothing and would contend for the same physical cores.  So
-    `one_node` genuinely means no SMT contention, whereas the default (where
-    the siblings are the only spare CPUs there are) does not.
-
-    Note `cpuset -l` sets CPU affinity but not the NUMA memory domain, so
-    observer allocations can still land on either node.  `cpuset -n` is the
-    knob if that ever matters.
-
-    `reserved_cores` still applies within the chosen node if both are given,
-    which is what you want when there is only one node to give.
-
-    Where the kernel reports isolated CPUs (Linux `isolcpus=`), that split
-    wins: the benchmark gets the isolated cores and the observers get the rest,
-    with `reserved_cores` and `one_node` then applying within the isolated set.
-    See isolated_cpus() for the load-balancing caveat that comes with it.
-
-    Failing that, a restricted interrupt affinity (`irqaffinity=`) is the same
-    statement in a weaker form and is used the same way: the cores serving
-    interrupts go to the observers and the rest to the benchmark.  Only the
-    isolated case stops the scheduler moving other work in, but both keep the
-    benchmark off the cores the OS was told to use.
-
-    Returns ([], []) where topology is unavailable.
+    `cpuset -l` sets CPU affinity but not the NUMA memory domain (`cpuset -n`).
     """
     groups = refine_groups(sibling_groups())
     if not groups:
         return [], []
     if reserved_cores < 0:
         raise ValueError("reserved_cores must be >= 0")
-    # An `isolcpus=` boot line is the administrator having already drawn this
-    # exact split: those cores are for the workload, the rest run the OS and
-    # the interrupts (usually with a matching `irqaffinity=`).  Honour it in
-    # preference to the topology policy, which knows about SMT but not about
-    # which cores were set aside.
-    #
-    # Note what this does NOT fix: the scheduler does not balance among
-    # isolated CPUs, so handing a multi-threaded benchmark this set confines
-    # it to one of them unless it pins its own threads.  Choosing how many of
-    # these CPUs to give a particular benchmark is the caller's decision.
+    # isolcpus= is the administrator's own split; it wins over topology.
+    # How many isolated CPUs a benchmark may span is the caller's decision.
     housekeeping: List[List[int]] = []
     isolated = set(isolated_cpus())
     if isolated:
@@ -537,10 +408,7 @@ def partition_cpus(reserved_cores: int = 0,
                 "as it would leave the OS and the observers nowhere to run",
                 format_cpu_list(sorted(isolated)))
     if not housekeeping:
-        # No isolation, but an `irqaffinity=` line says the same thing in a
-        # weaker form: these cores serve the interrupts, so the benchmark
-        # belongs on the others.  Without this the benchmark can be pinned to
-        # CPU 0, which is the busiest core on most machines.
+        # irqaffinity= is the same statement in a weaker form.
         irq = set(irq_cpus())
         if irq:
             irq_groups = [g for g in groups if any(c in irq for c in g)]
@@ -550,7 +418,6 @@ def partition_cpus(reserved_cores: int = 0,
     off_node: List[List[int]] = []
     if one_node:
         groups, off_node = split_groups_by_node(groups)
-    # Never hand away so many cores that the benchmark has none left.
     reserved = min(reserved_cores, max(0, len(groups) - 1))
     if reserved != reserved_cores:
         logging.warning(
@@ -562,20 +429,11 @@ def partition_cpus(reserved_cores: int = 0,
     bench = [g[0] for g in bench_groups]
     observers: List[int] = []
     # The benchmark's SMT siblings go to the observers only when there is
-    # nothing better to give them. With a whole spare node available they buy
-    # nothing and cost real contention, so they are left idle instead, and
-    # that is what makes one_node's "no SMT contention" claim hold. Measured
-    # on a 2-socket Xeon before this: every one of the benchmark's 10 cores
-    # had its sibling in the observer set, which is precisely the interference
-    # the physical-core split exists to avoid.
+    # nothing better; otherwise they stay idle to avoid contention.
     if not off_node and not housekeeping:
         observers += [c for g in bench_groups for c in g[1:]]
     observers += [c for g in observer_groups for c in g]
-    # Whole nodes the benchmark gave up go to the observers.
     observers += [c for g in off_node for c in g]
-    # Non-isolated cores are where the OS already is, so the observers belong
-    # there too.  They are also strictly better than the benchmark's own SMT
-    # siblings, which is why the donation above is skipped when we have them.
     observers += [c for g in housekeeping for c in g]
     return sorted(bench), sorted(observers)
 
@@ -645,14 +503,7 @@ def _freebsd_numa_nodes() -> List[List[int]]:
 
 
 def numa_nodes() -> List[List[int]]:
-    """CPUs per NUMA node, or [] where the platform does not say.
-
-    Kernel-derived, so unlike the socket data from ocaml-processor this is
-    available without any optional tool.  A benchmark CPU set that straddles a
-    node boundary pays cross-socket memory traffic, which for GC work shows up
-    as run-to-run variance; recording the boundary is the first step to being
-    able to see that in the results.
-    """
+    """CPUs per NUMA node, or [] where the platform does not say."""
     if IS_LINUX:
         return _linux_numa_nodes()
     if IS_FREEBSD:
@@ -678,12 +529,8 @@ def format_cpu_list(cpus: Sequence[int]) -> str:
 
 
 def pin_command(cpus: Sequence[int]) -> List[str]:
-    """Command prefix confining a process to `cpus`, or [] if we cannot.
-
-    macOS deliberately returns []: it exposes no CPU affinity API that binds a
-    process to a core (only thread affinity *hints*, which the scheduler is
-    free to ignore), so there is nothing honest to emit.
-    """
+    """Command prefix confining a process to `cpus`, or [] if we cannot
+    (macOS has no binding CPU affinity API, only hints)."""
     if not cpus:
         return []
     listing = format_cpu_list(cpus)
@@ -700,24 +547,15 @@ def can_pin() -> bool:
 
 # --- optional refinement via ocaml-processor -----------------------------------
 #
-# https://github.com/haesbaert/ocaml-processor ships `ocaml-processor-dump`,
-# which knows two things the kernel interfaces above do not surface uniformly:
-# whether a core is a P-core or an E-core (hybrid Intel, Apple Silicon), and
-# which socket it is on.  Pinning a benchmark across a P/E boundary or across
-# sockets makes a nonsense of the measurement, so where that tool is present we
-# use it to *narrow* the kernel's CPU set.
-#
-# Deliberately narrowing only, never replacing.  Its own README says that on
-# anything but AMD64 and Apple it builds a fake topology where "each CPU will
-# be its own core", and that its AMD64 path (pin the caller, run CPUID per CPU)
-# is accurate only "as long as the process doesn't start in an already
-# restricted affinity".  Both failure modes are silent.  Narrowing makes them
-# harmless: a faked topology reports one socket and no E-cores, so it filters
-# nothing and the kernel's view stands.
+# https://github.com/haesbaert/ocaml-processor's `ocaml-processor-dump` knows
+# P/E core kind and socket, which the kernel does not surface uniformly. It is
+# only ever used to narrow the kernel's CPU set, never replace it: on
+# unsupported hardware it silently reports a fake flat topology, which then
+# filters nothing.
 
 PROCESSOR_DUMP = "ocaml-processor-dump"
 
-#: Set to a falsey value ("0", "no") to ignore ocaml-processor-dump entirely.
+#: Set to "0"/"no" to ignore ocaml-processor-dump.
 PROCESSOR_REFINE_ENV_VAR = "RUNNING_NG_USE_OCAML_PROCESSOR"
 
 _CPU_LINE = re.compile(
@@ -726,11 +564,7 @@ _CPU_LINE = re.compile(
 
 
 def parse_processor_dump(text: str) -> List[Dict[str, Any]]:
-    """Parse `ocaml-processor-dump` into one dict per logical CPU.
-
-    Ignores the leading summary counters and anything unrecognised, so a new
-    field or a new summary line upstream cannot break us.
-    """
+    """Parse `ocaml-processor-dump` into one dict per logical CPU, ignoring unrecognised lines."""
     cpus = []
     for line in text.splitlines():
         m = _CPU_LINE.match(line.strip())
@@ -763,13 +597,8 @@ def _is_efficiency(kind: str) -> bool:
 def refine_groups(groups: List[List[int]],
                   cpus: Optional[List[Dict[str, Any]]] = None
                   ) -> List[List[int]]:
-    """Narrow sibling groups to one socket's performance cores.
-
-    Returns `groups` unchanged when the extra topology says nothing useful
-    (one socket, no E-cores), which is also what a faked topology looks like.
-    Never returns empty: if filtering would remove everything, the unfiltered
-    groups are better than no pinning at all.
-    """
+    """Narrow sibling groups to one socket's performance cores; never returns
+    empty, and returns `groups` unchanged when there is nothing to narrow."""
     if not groups:
         return groups
     if cpus is None:
@@ -786,7 +615,7 @@ def refine_groups(groups: List[List[int]],
     def keep(group: List[int], socket: Optional[int]) -> bool:
         info = [by_id.get(c) for c in group]
         if any(i is None for i in info):
-            # A CPU the tool did not describe: keep it rather than guess.
+            # undescribed CPU: keep rather than guess
             return True
         if has_ecores and all(_is_efficiency(i["kind"]) for i in info):  # type: ignore[index]
             return False
@@ -796,8 +625,7 @@ def refine_groups(groups: List[List[int]],
 
     chosen_socket = None
     if len(sockets) > 1:
-        # Prefer the socket carrying the most performance cores; ties go to the
-        # lowest id so the choice is stable across runs on one machine.
+        # most performance cores; ties to the lowest id for stability
         def score(sock: int) -> Tuple[int, int]:
             n = sum(1 for c in cpus
                     if c["socket"] == sock and not _is_efficiency(c["kind"]))
@@ -819,26 +647,9 @@ def refine_groups(groups: List[List[int]],
 
 
 def isolation_tier() -> str:
-    """How well this machine can keep other work off the benchmark's cores.
-
-    One of:
-
-      "isolcpus"     the administrator set `isolcpus=`, so the scheduler will
-                     not migrate anything onto those cores. The strongest
-                     available, and the only one that also keeps the OS off.
-      "irqaffinity"  `irqaffinity=` confines interrupts, which is the largest
-                     single source of interference, but ordinary kernel and
-                     user work can still land on a benchmark core.
-      "topology"     neither is set. The benchmark gets one thread per physical
-                     core and the observers get the SMT siblings of those SAME
-                     cores, so they share execution resources, and nothing
-                     keeps the OS away at all.
-      "none"         the platform exposes no topology to pin with (macOS).
-
-    Recorded in the run manifest because it changes what a number means: two
-    results are only comparable if they were measured at the same tier. On an
-    8-core Xeon the difference between tuned and untuned was a 25.8s spread
-    over six runs against 0.33s.
+    """How well this machine keeps other work off the benchmark's cores:
+    "isolcpus", "irqaffinity", "topology" (SMT split only) or "none" (cannot pin).
+    Recorded in the manifest; results at different tiers are not comparable.
     """
     if not sibling_groups():
         return "none"
@@ -849,18 +660,11 @@ def isolation_tier() -> str:
     return "topology"
 
 
-#: Printed at most once per process; a per-invocation warning would be noise.
 _warned_untuned = False
 
 
 def warn_if_untuned() -> None:
-    """Say so, once, when the machine cannot keep other work off the cores.
-
-    Not fatal: an untuned machine still produces usable coverage data, and
-    tuning it needs root and a reboot. But a sweep whose numbers will carry
-    interference should say so while it is starting, not leave it to be
-    inferred from the variance afterwards.
-    """
+    """Warn once per process when the machine is not tuned for isolation."""
     global _warned_untuned
     if _warned_untuned:
         return
@@ -889,12 +693,7 @@ def warn_if_untuned() -> None:
 
 
 def machine_topology_summary() -> Dict[str, Any]:
-    """Topology facts worth recording alongside a result.
-
-    Provenance only, so it is filled in as far as each source allows and stays
-    silent about what it cannot determine.  Works on macOS too, where we can
-    describe the machine but cannot pin on it.
-    """
+    """Topology facts recorded alongside a result; omits what cannot be determined."""
     summary: Dict[str, Any] = {"cpu_isolation": isolation_tier()}
     groups = sibling_groups()
     if groups:
@@ -902,7 +701,6 @@ def machine_topology_summary() -> Dict[str, Any]:
         widths = {len(g) for g in groups}
         if len(widths) == 1:
             summary["threads_per_core"] = widths.pop()
-    # Kernel-derived, so present even without ocaml-processor installed.
     nodes = numa_nodes()
     if nodes:
         summary["numa_nodes"] = len(nodes)
@@ -912,7 +710,6 @@ def machine_topology_summary() -> Dict[str, Any]:
             summary["sockets"] = sockets
     cpus = processor_topology()
     if cpus:
-        # ocaml-processor knows sockets directly; prefer it where present.
         summary["sockets"] = len({c["socket"] for c in cpus})
         kinds: Dict[str, int] = {}
         for c in cpus:

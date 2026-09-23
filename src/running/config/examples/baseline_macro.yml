@@ -1,0 +1,22 @@
+# Every macro benchmark on the current stable compiler, one invocation each.
+# Without RUNNING_TAG this measures the default_run rung of each tool (21 programs).
+# Run: RUNNING_MACRO_BENCH_DIR=~/macro-benches CONFIG_FILE=<this file> \
+#      RUNNING_TAG=all_benches \
+#      LOG_DIR=/tmp/baseline_macro bash run_ocaml_bench_gc_sweep.sh
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+# invocations is a scalar macro_base sets, so it changes here: redeclaring it at
+# top level is a combine() TypeError.
+overrides:
+  invocations: 1
+
+runtimes:
+  ocaml-5.5.1:
+    type: OCaml
+    version: "5.5.1"
+
+configs:
+  # The ring sizes live in macro_base's suites, so the config string needs no re/md.
+  - "ocaml-5.5.1|perf_grp1"

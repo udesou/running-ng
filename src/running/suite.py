@@ -385,9 +385,7 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
         self.always_build_default = always_build_default_raw
         self.programs: Dict[str, Dict[str, Any]]
         self.programs = {}
-        # Suite-level OCAMLRUNPARAM default (e.g. "e=25" for a suite whose event
-        # rate overflows the default runtime_events ring); a program may override
-        # it with its own `ocamlrunparam`.
+        # Suite-level OCAMLRUNPARAM default; a program's own `ocamlrunparam` overrides it.
         suite_ocamlrunparam = str(kwargs.get("ocamlrunparam", "") or "")
         for k, v in programs.items():
             build_env_raw = v.get("build_env", {})
@@ -404,13 +402,10 @@ class OCamlBenchmarkSuite(BenchmarkSuite):
                 "args": split_quoted(os.path.expandvars(v.get("args", ""))),
                 "build_args": split_quoted(v.get("build_args", "")),
                 "build_env": {str(env_k): str(env_v) for env_k, env_v in build_env_raw.items()},
-                # Per-benchmark OCAMLRUNPARAM ("e=18,d=128"), overriding config-string
-                # re/md for this benchmark only (see Benchmark.attach_modifiers).
+                # Overrides the config string's re/md for this benchmark only.
                 "ocamlrunparam": os.path.expandvars(str(v.get("ocamlrunparam", suite_ocamlrunparam))),
                 "always_build": always_build_raw,
-                # Exit code a successful run returns; 0 unless the workload's
-                # by-design outcome is a non-zero exit (see
-                # Benchmark._exit_is_expected).
+                # Exit code a successful run returns, for workloads that exit non-zero by design.
                 "expected_exit": int(v.get("expected_exit", 0)),
             }
             if "build_script" in v:
@@ -499,12 +494,7 @@ class OCamlMulticoreBenchmarkSuite(OCamlBenchmarkSuite):
 
 @register(BenchmarkSuite)
 class OCamlOxcamlBenchmarkSuite(OCamlMulticoreBenchmarkSuite):
-    """Like OCamlMulticoreBenchmarkSuite but requires an OxCaml runtime.
-
-    Benchmarks in this suite use OxCaml-specific APIs (e.g. Domain.Safe,
-    prefetch intrinsics) that are not available in stock OCaml. Builds will
-    fail with a clear error if the runtime is not 'type: OxCaml'.
-    """
+    """Like OCamlMulticoreBenchmarkSuite but requires a 'type: OxCaml' runtime."""
 
     def get_benchmark(self, bm_spec: Union[str, Dict[str, Any]]) -> 'OCamlBenchmark':
         bm = super().get_benchmark(bm_spec)
@@ -517,13 +507,9 @@ class OCamlOxcamlBenchmarkSuite(OCamlMulticoreBenchmarkSuite):
 
 @register(BenchmarkSuite)
 class OCamlMacroBenchmarkSuite(OCamlBenchmarkSuite):
-    """OCaml macrobenchmark suite with per-benchmark opam switch isolation.
-
-    Each benchmark gets its own satellite opam switch (cloned from the
-    runtime's base switch) so that ``opam install`` in one benchmark's
-    build script cannot conflict with another's.  The runtime handles
-    the cloning strategy: relocatable compiler cloning for released
-    versions, ocaml-system fallback for commits and OxCaml.
+    """OCaml macrobenchmark suite: each benchmark builds in its own satellite
+    opam switch cloned from the runtime's, so build scripts' ``opam install``
+    cannot conflict.
     """
 
     def get_benchmark(self, bm_spec: Union[str, Dict[str, Any]]) -> 'OCamlBenchmark':

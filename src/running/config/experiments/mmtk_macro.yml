@@ -1,80 +1,51 @@
-# =============================================================================
-# MMTk macro-benches — ocaml-mmtk vs the stock OCaml it forks from
-# =============================================================================
-# Canonical MMTk config.  Both runtimes pinned by commit:
-#   - ocaml-mmtk-cbc66e3 : fplaunchpad/ocaml-mmtk @ 5.5+mmtk tip (the canonical
-#     upstream repo, set via `repo:`), built by running-ng (type: OCamlMMTk ->
-#     opam compiler create; the MMTk build quirks — cargo network + `setarch -R`
-#     for ASLR — are handled automatically).
-#   - ocaml-5.5.0-rc1    : the stock commit the fork is based on (4090d6db).
-#
-# MMTk specifics, all carried by the OCamlMMTk runtime (no launch wrapper):
-#   - Default plan is now **GenImmix** (generational, stock-faithful). Native
-#     plans: GenImmix / Immix / StickyImmix / ConcurrentImmix / Bactrian (RQ7:
-#     generational + concurrent) / LXR (reference counting). Selected via the
-#     MMTK_PLAN EnvVar modifiers below.
-#   - Heap is **dynamic by default** (MemBalancer grows with the live set, ~memory
-#     parity with vanilla). The run configs below leave MMTK_HEAP_SIZE_MB UNSET, so
-#     they use the dynamic heap — matching the upstream "performance quick panel".
-#     Setting MMTK_HEAP_SIZE_MB (the `mmtk_heap` modifier) pins a FIXED heap, used
-#     only for the `minheap` search / fixed-heap repro.
-#   - Every MMTk process runs ASLR-disabled: running-ng prefixes each build/run
-#     command with `setarch -R` (Runtime.get_command_prefix).
-#   - No olly/perf: MMTk doesn't emit the stock runtime_events GC counters.
-#     Use MMTK_VERBOSE=1 to see plan/heap/GC activity instead.
-#
-# Build all:
-#   cd ~/running-ng
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-#   CONFIG_FILE=src/running/config/experiments/mmtk_macro.yml \
-#     bash build_ocaml_binaries_gc_sweep.sh
-#
-# Build + run (timing; dynamic heap, best-of-N via invocations):
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-#   CONFIG_FILE=src/running/config/experiments/mmtk_macro.yml \
-#   LOG_DIR=/tmp/mmtk_macro \
-#     bash run_ocaml_bench_gc_sweep.sh
-#
-# Fixed-heap minheap search (uses mmtk_heap; base runtime auto-skipped):
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches PYTHONPATH=src \
-#     python3 -m running minheap \
-#       src/running/config/experiments/mmtk_macro.yml /tmp/mmtk_minheap.yml -a 2
-# =============================================================================
-
+# MMTk LXR and Bactrian (MMTK_THREADS=1) vs stock 5.5.0-rc1 under perf_grp1, 27
+# benchmarks, 5 invocations. Includes macro_base.yml (schema_version is inherited;
+# redeclaring it is a combine() TypeError). Under MMTk olly gives wall/cpu/max_rss only.
+# Run with run_ocaml_bench_gc_sweep.sh (RUNNING_MACRO_BENCH_DIR set).
 includes:
   - "../base/ocaml/macro_base.yml"
 
-# Inherits the full `benchmarks:` set from macro_base.
-# best-of-N: take the min wall time across invocations (panel style).
-overrides:
-  invocations: 3
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
 
-# Bounds for `minheap` (ignored by runbms/buildbms).
+overrides:
+  invocations: 5
+  benchmarks:
+    macro-menhir-monorepo: [menhir_ocamly, menhir_sql_parser, menhir_sysver]
+    macro-cpdf-monorepo: [cpdf_merge, cpdf_blacktext, cpdf_scale, cpdf_squeeze]
+    macro-alt-ergo-monorepo: [alt_ergo_fill, alt_ergo_yyll, alt_ergo_unsat_smt2]
+    macro-frama-c-monorepo: [frama_c_eva_t, frama_c_eva_sqlite]
+    macro-coq-monorepo: [coqc_corelib_stress]
+    macro-devkit: [devkit_stre, devkit_network, devkit_gzip]
+    macro-irmin: [irmin_mem_rw]
+    macro-ocamlformat: [ocamlformat_rocq]
+    macro-decompress: [test_decompress]
+    macro-eio: [eio_fiber_stream]
+    macro-yojson: [ydump_repeat]
+    macro-zarith: [zarith_pi]
+    macro-owl: [owl_gc]
+    macro-ocamlc-self-compile: [ocamlc_self_compile]
+    macro-liquidsoap-lang: [liq_parse_typecheck]
+    macro-jsoo: [jsoo]
+    macro-pplacer: [pplacer_testsuite]
+
 maxheap: 8192
 attempts: 2
 
-modifiers:
-  # Fixed-heap pin (dynamic heap is the default when this is omitted). Used by
-  # `minheap` / fixed-heap repro only — NOT in the dynamic-heap run configs below.
-  mmtk_heap:
-    type: EnvVar
-    var: "MMTK_HEAP_SIZE_MB"
-    val: "16384"
 
 runtimes:
   ocaml-mmtk-cbc66e3:
     type: OCamlMMTk
-    repo: "https://github.com/fplaunchpad/ocaml-mmtk.git"
     commit: "cbc66e3efd8f9200f3e84f791a6b6dfc36efce8c"
   ocaml-5.5.0-rc1:
     type: OCaml
     commit: "4090d6db952ecae1cd0c3493c16d89cacc2bf8c6"
 
-# Dynamic heap (no mmtk_heap). Plans: GenImmix (default), Immix, Bactrian
-# (generational + concurrent, RQ7), LXR (reference counting), vs stock.
 configs:
-  - "ocaml-mmtk-cbc66e3|time_stats|plan-GenImmix"
-  - "ocaml-mmtk-cbc66e3|time_stats|plan-Immix"
-  - "ocaml-mmtk-cbc66e3|time_stats|plan-Bactrian"
-  - "ocaml-mmtk-cbc66e3|time_stats|plan-LXR"
-  - "ocaml-5.5.0-rc1|time_stats"
+  - "ocaml-mmtk-cbc66e3|perf_grp1|plan-LXR|threads-1"
+  - "ocaml-mmtk-cbc66e3|perf_grp1|plan-Bactrian|threads-1"
+  - "ocaml-5.5.0-rc1|perf_grp1"

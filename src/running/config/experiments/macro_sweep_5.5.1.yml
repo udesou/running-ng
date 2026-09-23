@@ -1,0 +1,36 @@
+# 3x3 (s, o) GC sweep on OCaml 5.5.1 over the full macro suite, 5 invocations.
+# Includes macro_base.yml. The grid matches examples/baseline_sweep.yml.
+# 9 cells x 5 invocations x 21 default_run programs is already ~950 runs; with
+# RUNNING_TAG=all_benches it is ~4300. Dry-run (-d) the expansion first.
+# Run: RUNNING_MACRO_BENCH_DIR=~/macro-benches RUNNING_REUSE_SWITCHES=1 \
+#      CONFIG_FILE=<this file> \
+#      LOG_DIR=$PWD/gc-sweep-logs-macro-sweep-5.5.1-$(date +%F) bash run_ocaml_bench_gc_sweep.sh
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 5
+
+runtimes:
+  ocaml-5.5.1:
+    type: OCaml
+    version: "5.5.1"
+
+# macro_base ships no OCAMLRUNPARAM knobs (they are micro_base's), so a macro sweep
+# declares the ones it varies.
+modifiers:
+  s:
+    type: OCamlRunParam
+    val: "s={0}"
+  o:
+    type: OCamlRunParam
+    val: "o={0}"
+
+configs:
+  - "ocaml-5.5.1|perf_grp1"
+
+# Defaults are s=262144 and o=120, so each axis brackets the default.
+config_sweep:
+  s: [131072, 262144, 524288]
+  o: [80, 120, 200]

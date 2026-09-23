@@ -1,8 +1,4 @@
-"""Tests for the host-OS abstraction and the two call sites step 1 fixed.
-
-The point of most of these is the *non-Linux* behaviour, which CI cannot
-exercise natively, so they simulate it by patching running.osinfo.
-"""
+"""Tests for the host-OS abstraction; non-Linux behaviour is simulated by patching running.osinfo."""
 import os
 import shutil
 import subprocess
@@ -10,8 +6,7 @@ import sys
 
 import pytest
 
-#: `true` lives in /bin on Linux and /usr/bin on FreeBSD and macOS, so the
-#: path is looked up rather than written down.
+#: /bin/true on Linux, /usr/bin/true on FreeBSD and macOS.
 TRUE_BIN = shutil.which("true")
 
 from running import osinfo
@@ -19,11 +14,8 @@ from running.benchmark import pid_alive, pid_is_benchmark
 from running.command import runbms
 
 
-# --- osinfo probes ------------------------------------------------------------
-
 def test_probe_returns_empty_for_missing_command():
-    # The whole point: a probe the host does not ship must not raise.  This is
-    # what aborted every run on macOS, where `vmstat` does not exist.
+    # a probe the host does not ship must not raise (vmstat on macOS)
     assert osinfo.probe("running-ng-definitely-not-a-command") == ""
 
 
@@ -45,12 +37,9 @@ def test_exactly_one_platform_flag():
 
 
 def test_snapshot_commands_are_strings():
-    # "" is the documented "no equivalent on this OS" value; callers skip it.
     assert isinstance(osinfo.memory_snapshot_cmd(), str)
     assert isinstance(osinfo.process_snapshot_cmd(), str)
 
-
-# --- PID -> executable --------------------------------------------------------
 
 @pytest.mark.skipif(not osinfo.EXE_LOOKUP_SUPPORTED,
                     reason="platform has no PID->exe lookup")
@@ -70,11 +59,9 @@ def test_pid_exe_name_resolves_a_known_child():
 
 
 def test_pid_exe_name_returns_none_for_bogus_pid():
-    # 2**31-1 is above every platform's pid_max, so it can never be live.
+    # above every platform's pid_max
     assert osinfo.pid_exe_name(2 ** 31 - 1) is None
 
-
-# --- pid_is_benchmark ---------------------------------------------------------
 
 def test_pid_is_benchmark_rejects_dead_pid():
     assert not pid_is_benchmark(2 ** 31 - 1)
@@ -99,30 +86,19 @@ def test_pid_is_benchmark_accepts_non_build_tool(monkeypatch):
 
 
 def test_pid_is_benchmark_rejects_unreadable_exe_where_lookup_works(monkeypatch):
-    """A lookup that *could* work but failed means zombie/transient: reject.
-
-    This is the behaviour the /proc implementation had, and it must survive
-    the refactor: accepting here lets dying subshells win the race.
-    """
+    """A failed lookup where lookups work means zombie/transient: reject, or dying subshells win the race."""
     monkeypatch.setattr(osinfo, "EXE_LOOKUP_SUPPORTED", True)
     monkeypatch.setattr(osinfo, "pid_exe_name", lambda pid: None)
     assert not pid_is_benchmark(os.getpid())
 
 
 def test_pid_is_benchmark_degrades_to_alive_check_without_lookup(monkeypatch):
-    """The regression this whole step exists for.
-
-    On a platform with no PID->exe lookup the old code rejected every PID,
-    so the olly attach never fired and each invocation burned its full
-    deadline producing no GC data.  Alive must now be enough.
-    """
+    """Without a PID->exe lookup, alive must be enough, or the olly attach never fires."""
     monkeypatch.setattr(osinfo, "EXE_LOOKUP_SUPPORTED", False)
     monkeypatch.setattr(osinfo, "pid_exe_name", lambda pid: None)
     assert pid_is_benchmark(os.getpid())
     assert not pid_is_benchmark(2 ** 31 - 1)
 
-
-# --- log prologue -------------------------------------------------------------
 
 def test_hz_to_ghz_handles_unreadable_node():
     assert runbms.hz_to_ghz("") == "unknown"
@@ -149,12 +125,7 @@ def test_log_prologue_runs_on_this_host():
 
 
 def test_log_prologue_survives_a_host_with_no_probes(monkeypatch):
-    """Simulates an OS where every probe is missing.
-
-    The prologue runs before *every* invocation, so anything that raises here
-    kills the sweep rather than one benchmark.  Previously `vmstat` alone did
-    exactly that on macOS.
-    """
+    """An OS where every probe is missing must not raise in the prologue."""
     monkeypatch.setattr(osinfo, "IS_LINUX", False)
     monkeypatch.setattr(osinfo, "memory_snapshot_cmd", lambda: "")
     monkeypatch.setattr(osinfo, "process_snapshot_cmd", lambda: "")
@@ -164,18 +135,8 @@ def test_log_prologue_survives_a_host_with_no_probes(monkeypatch):
     assert "number of cores: " in out
 
 
-# --- import hygiene ------------------------------------------------------------
-
 def test_benchmark_and_suite_import_in_either_order():
-    """running.benchmark and running.suite import each other.
-
-    suite does `from running.benchmark import JavaBenchmark, ...`, so it needs
-    those names to exist; benchmark used to import suite back at module level,
-    which meant `import running.benchmark` on its own failed with "cannot
-    import name 'JavaBenchmark' from partially initialized module" while
-    `import running.suite` worked. Either order must work, so neither is a
-    trap for whoever writes the next focused test.
-    """
+    """running.benchmark and running.suite import each other; either order must work."""
     for first in ("running.benchmark", "running.suite"):
         second = "running.suite" if first == "running.benchmark" else "running.benchmark"
         code = "import {}; import {}".format(first, second)

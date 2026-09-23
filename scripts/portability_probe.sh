@@ -1,13 +1,7 @@
 #!/bin/sh
-# portability_probe.sh - report what running-ng can and cannot do on this host.
-#
-# Safe and read-only apart from a Python venv it creates under /tmp. Runs no
-# benchmarks. Intended for a machine running-ng has never run on, to separate
-# "the harness plumbing works here" from "the performance counters work here".
-#
-# Usage:  sh scripts/portability_probe.sh
-#
-# POSIX sh on purpose: FreeBSD has no bash in the base system.
+# Report what running-ng can and cannot do on this host (read-only apart from a venv
+# under /tmp; runs no benchmarks). Usage: sh scripts/portability_probe.sh
+# POSIX sh: FreeBSD base has no bash.
 
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -35,10 +29,7 @@ else
     echo "(not FreeBSD, skipping)"
 fi
 
-# The detection section below needs no third-party packages: running.osinfo and
-# running.counters import only the standard library. So it runs on the system
-# python with PYTHONPATH set, and a missing venv or pytest costs us the test
-# run but not the report.
+# running.osinfo/counters are stdlib-only, so detection runs on the system python; a missing venv costs only the test run.
 PY=python3
 export PYTHONPATH="$ROOT/src"
 
@@ -91,10 +82,8 @@ else
 fi
 
 say "live pmcstat attach: harness sequence"
-# Reproduces what the harness actually does: start the child BLOCKED on a
-# pipe, attach pmcstat to the blocked PID, then release it. Attaching to an
-# already-running, spinning process instead is only ~20% reliable and reports
-# working event names as broken, which is exactly the wrong conclusion.
+# Mirrors the harness: attach pmcstat to a child blocked on a pipe, then release it.
+# Attaching to a spinning process is ~20% reliable and misreports working events as broken.
 if have pmcstat; then
     for EV in instructions unhalted-cycles cycles; do
         OUT="/tmp/running-ng-probe-$EV.txt"
@@ -130,7 +119,6 @@ PYEOF2
         else
             printf '  event %-18s FAILED: %s\n' "$EV" "$(head -1 "$ERR" 2>/dev/null)"
         fi
-        # Each event keeps its own file, so all of them survive to be printed.
         echo "--- raw output for $EV (this is what the parser must handle):"
         cat "$OUT" 2>/dev/null || echo "(none produced)"
         echo "--- end"

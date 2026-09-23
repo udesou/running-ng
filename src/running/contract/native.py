@@ -1,11 +1,6 @@
-"""Native contract emission for running-ng (used when a config sets schema_version).
-
-Builds data-contract measurement + manifest artifacts *during* a run, in pure
-Python, from the vocabulary generated out of the OCaml contract. Unlike the
-adapter, identity comes from running-ng's in-memory knowledge (the runtime spec
-in the merged config, the applied config string, the invocation counter) rather
-than from filenames — the raw olly/perf sidecars stay as archival, referenced by
-nothing here (they remain in the log dir). OCaml only verifies the result.
+"""Native contract emission (when a config sets schema_version): measurement
+and manifest artifacts are written during the run from in-memory identity
+rather than parsed from filenames.
 """
 import datetime
 import json
@@ -22,8 +17,6 @@ from running.contract import emit, vocab
 
 
 def _machine():
-    # Annotated: the values are a mix of str and int, and an unannotated literal
-    # would be inferred as dict[str, str].
     m = {"hostname": socket.gethostname()}  # type: Dict[str, Any]
     try:
         m["kernel"] = os.uname().release
@@ -32,24 +25,16 @@ def _machine():
     c = osinfo.core_count()
     if c:
         m["cores"] = c
-    # Via osinfo so the manifest carries a CPU model on macOS and FreeBSD too;
-    # the /proc/cpuinfo read this used to do inline left the field absent there.
     model = osinfo.cpu_model()
     if model:
         m["cpu_model"] = model
-    # Topology provenance: physical cores and threads/core from the kernel,
-    # sockets and P/E core counts from ocaml-processor-dump when installed.
-    # Two results from the same cpu_model are not comparable if one ran on a
-    # hybrid part's E-cores or spanned sockets, and nothing else in the
-    # manifest would show it. Recorded even on macOS, where we can describe
-    # the machine but cannot pin on it.
+    # Topology matters for comparability (E-cores, multiple sockets); nothing
+    # else in the manifest would show it.
     m.update(osinfo.machine_topology_summary())
     return m
 
 
 def _tool_version(cmd):
-    # extract a version number (e.g. "6.17.13") from `<tool> --version` output;
-    # returns None if the tool has no --version (e.g. olly prints usage instead).
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         text = (out.stdout or "") + "\n" + (out.stderr or "")
@@ -64,18 +49,14 @@ def _iso_now():
 
 
 def _olly_version():
-    # Version of the olly that running-ng ACTUALLY runs. olly is invoked as `olly`
-    # on PATH, so shutil.which("olly") from inside this process resolves the exact
-    # binary — no OLLY_DIR/env reliance, so a per-runtime/per-switch olly build is
-    # reflected. olly has no --version flag, so derive the version from whatever
-    # owns that binary: the opam switch it lives in, or the git checkout it was
-    # built from.
+    # olly has no --version flag: derive the version from whatever owns the
+    # binary on PATH (its opam switch, or the git checkout it was built from).
     w = shutil.which("olly")
     if not w:
         return None
     real = Path(os.path.realpath(w))
     parts = real.parts
-    # (a) opam switch that owns this binary: .../.opam/<switch>/bin/olly
+    # .../.opam/<switch>/bin/olly
     if ".opam" in parts:
         i = parts.index(".opam")
         if i + 1 < len(parts):
@@ -89,7 +70,6 @@ def _olly_version():
                     return v
             except Exception:
                 pass
-    # (b) git checkout the binary was built from (e.g. an OLLY_DIR/_build install)
     for anc in real.parents:
         if (anc / ".git").exists():
             try:
@@ -108,9 +88,8 @@ class NativeEmitter:
     """Accumulates contract artifacts across a run; finalize() writes the manifest."""
 
     def __init__(self, contract_dir, run_id, runtimes, comparisons=None):
-        # `runtimes`: the raw runtimes dict {name -> {type, version, commit,
-        # configure_args}} captured BEFORE Configuration.resolve_class() turns the
-        # values into Runtime objects. `comparisons`: the config's comparisons block.
+        # `runtimes` is the raw dict captured before Configuration.resolve_class()
+        # turns the values into Runtime objects.
         self.dir = Path(contract_dir)
         self.run_id = run_id
         self.runtimes = runtimes or {}
@@ -120,7 +99,7 @@ class NativeEmitter:
         self._inv = {}            # (bench, config_id) -> next invocation index
         self._cfg_cache = {}      # config_str -> descriptor
         (self.dir / "measurements").mkdir(parents=True, exist_ok=True)
-        # fresh files (avoid appending to stale output from a prior run in the same dir)
+        # do not append to a prior run's output in the same dir
         for tool in ("olly", "perf"):
             p = self.dir / "measurements" / (tool + ".ndjson")
             if p.exists():
@@ -163,11 +142,8 @@ class NativeEmitter:
         return d
 
     def record(self, bm, config_str, companion_out, ok=True):
-        """One invocation: split the {olly, perf} companion into per-tool NDJSON.
-
-        `ok` is the runner's verdict (exit status == Normal). A crashed/timed-out
-        invocation is dropped wholesale — its partial olly/perf output would
-        otherwise show up as crash-time garbage in the dashboard."""
+        """Record one invocation's {olly, perf} companion as per-tool NDJSON rows.
+        `ok` is the runner's verdict; failed invocations are dropped wholesale."""
         if not companion_out or not ok:
             return
         try:
@@ -182,9 +158,7 @@ class NativeEmitter:
         inv = self._inv.get(key, 0)
         self._inv[key] = inv + 1
         olly_m = emit.olly_metrics(data.get("olly"))
-        # Drop crashed invocations wholesale (both tools): their olly wall_time is
-        # non-positive and their perf counters are a partial-run count — emitting
-        # either pollutes the dashboard with crash-time garbage.
+        # perf counters of a crashed invocation are partial too; drop both tools.
         if emit.crashed(olly_m):
             return
         for tool, metrics in (("olly", olly_m),
@@ -194,11 +168,9 @@ class NativeEmitter:
                 emit.append_ndjson(str(self.dir / "measurements" / (tool + ".ndjson")), m)
 
     def _runtime_selector(self, name):
-        """A normative selector isolating runtime `name` (by version/options/commit
-        — never the advisory _runtime_name). `runtime.options` is pinned ALWAYS,
-        even when empty: a stock build has options=[] and must NOT be matched by
-        its own same-version variants (fp / flambda), whose selectors carry
-        non-empty options. Omitting the empty list under-specifies the selector."""
+        """Selector isolating runtime `name` by version/options/commit. Options are
+        pinned even when empty, so a stock build is not matched by its same-version
+        fp/flambda variants."""
         spec = self.runtimes.get(name, {}) or {}
         sel = {"runtime.version": spec.get("version") or name}
         sel["runtime.options"] = spec.get("configure_args") or []
@@ -208,8 +180,8 @@ class NativeEmitter:
         return sel
 
     def _map_comparisons(self):
-        """running-ng a/b comparison blocks (inter-runtime) -> contract comparisons.
-        A list on `a` (n>1) splits into one comparison per baseline (§4.5)."""
+        """Map a/b comparison blocks to contract comparisons; a list on `a` splits
+        into one comparison per baseline."""
         out = []
         for block in self.comparisons:
             if not isinstance(block, dict) or block.get("a") is None or block.get("b") is None:

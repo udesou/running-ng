@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
-"""Generate a Python contract-vocabulary module from the OCaml-exported vocab.json.
-
-This is the running-ng-side generator (item: "generation sits within running-ng").
-It reads the contract's vocab.json (produced by `dune exec tools/gen_vocab` in the
-bench-contract repo) and emits src/running/contract/vocab.py: the canonical metric
-catalog, raw->canonical field maps, modifier->dimension map, supported tool
-versions, and a config_id() that reproduces the OCaml algorithm bit-for-bit.
-
-When the contract changes, regenerate: bump bench-contract, re-run gen_vocab, then
-run this generator. Structural changes to vocab.json => update this generator.
+"""Generate src/running/contract/vocab.py from bench-contract's vocab.json
+(`dune exec tools/gen_vocab`). Re-run after bumping bench-contract.
 
 Usage: gen_contract_py.py <vocab.json> [out.py]
 """
@@ -16,8 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-# Token-replacement template (NOT str.format — the emitted code contains literal
-# braces like `{}` that would confuse .format).
+# Token replacement, not str.format: the emitted code contains literal braces.
 TEMPLATE = '''\
 # GENERATED from vocab.json by contract-adapter/gen_contract_py.py — DO NOT EDIT.
 # Regenerate when the contract (bench-contract) changes.
@@ -59,7 +50,6 @@ def config_id(kind, version, commit, options, dimensions):
 
 
 def pyliteral(obj):
-    # json is valid Python for our dicts (str keys; str/int/list values)
     return json.dumps(obj, indent=4, ensure_ascii=False)
 
 
@@ -74,7 +64,7 @@ def main():
     subs = {
         "@@SCHEMA_VERSION@@": vocab["schema_version"],
         "@@CFG_PREFIX@@": cfg["prefix"],
-        # escape control char (unit separator) into a Python-source-safe form
+        # the field separator is a control character
         "@@CFG_FS@@": cfg["field_separator"].encode("unicode_escape").decode("ascii"),
         "@@CFG_LS@@": cfg["list_separator"],
         "@@METRIC_CATALOG@@": pyliteral(vocab["metric_catalog"]),

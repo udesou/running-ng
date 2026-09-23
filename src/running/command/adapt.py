@@ -1,17 +1,6 @@
-"""`running adapt` — legacy → data-contract adaptation (3a).
-
-Runs the contract-adapter (contract-adapter/bin/adapter) on a legacy run
-directory to emit data-contract artifacts (<run>/contract/{manifest,measurements}.json)
-for the ingestor / dashboard.
-
-The config's ``schema_version`` is the switch:
-  * unset/null -> legacy runner -> run the adapter (this command)
-  * set        -> a versioned runner emits contract natively -> adapter skipped
-
-Also performs the cross-boundary version check: it compares the schema version
-the adapter was built against (``adapter --schema-version``) with the
-``bench-contract`` opam package available in the switch, and warns if the adapter
-is out of date (rebuild via contract-adapter/build.sh).
+"""`running adapt`: run contract-adapter on a legacy run directory to emit
+<run>/contract/{manifest,measurements}.json. Skipped when the config sets
+``schema_version`` (the runner then emits the contract natively).
 """
 import logging
 import os
@@ -44,7 +33,6 @@ def _find_adapter(explicit) -> Path:
     env = os.environ.get("RUNNING_CONTRACT_ADAPTER")
     if env:
         candidates.append(Path(env))
-    # repo default: <repo>/contract-adapter/bin/adapter
     repo_root = Path(__file__).resolve().parents[3]
     candidates.append(repo_root / "contract-adapter" / "bin" / "adapter")
     for c in candidates:
@@ -97,7 +85,6 @@ def run(args) -> bool:
 
     run_dir = args["RUN_DIR"]
 
-    # schema_version switch: a versioned runner emits contract natively.
     if args.get("config"):
         cfg_path = args["config"]
         cfg = Configuration.from_file(cfg_path.parent, cfg_path.name)
@@ -118,10 +105,8 @@ def run(args) -> bool:
     out = args.get("out") or (run_dir / "contract")
     cmd = [str(adapter), str(run_dir), str(out)]
 
-    # Resolve runbms.yml's runtime identity here, in Python, where PyYAML handles
-    # anchors/merge keys that the OCaml YAML reader rejects. Hand the adapter a
-    # clean JSON so it gets authoritative runtime identity (configure_args etc.)
-    # rather than falling back to filename parsing.
+    # Pre-resolve runbms.yml to JSON here: PyYAML handles anchors/merge keys
+    # that the adapter's OCaml YAML reader rejects.
     runbms = run_dir / "runbms.yml"
     tmps = []
     if runbms.exists():
