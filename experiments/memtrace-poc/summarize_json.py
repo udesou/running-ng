@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Print a hotspots-style summary from a run's memtrace JSON sidecars.
-
-Reads every memtrace_*.json(.gz) in the given run directory (produced by
-runbms.py's write_memtrace_json_sidecar — a folded-stack summary of each
-invocation's raw .trace, generated via the runtime's own
-memtrace_flamegraph tool) and prints the top allocation sites by sample
-count, aggregated by leaf frame across all invocations found.
+"""Top allocation sites (by leaf frame) across a run's memtrace_*.json(.gz) sidecars.
 
 Usage: summarize_json.py <run_dir>
 """

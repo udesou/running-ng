@@ -1,86 +1,12 @@
-# =============================================================================
-# PR #14571 (Faster minor GC) — (s, M) sweep x glibc-allocator on/off,
-# over owl_gc_default only
-# =============================================================================
-# Replaces the earlier 7x5x5 (M, o, s) grid. Two changes, both driven by
-# measurements rather than guesses:
-#
-#   * o is dropped (owl's major heap is ~320k live words, so percent_free has
-#     almost nothing to pace) and M keeps 5 of its 7 values.
-#   * the glibc allocator is a first-class axis, because it — not the GC — is
-#     where this regression lives.
-#
-# Why (s, M) and not (s, m): m (custom_minor_ratio) provably does nothing here.
-# Each dim=500 temporary is a ~2MB payload, far above custom_minor_max_size
-# (`n`, default 8192 bytes), so caml_alloc_custom_mem routes these blocks
-# straight to the MAJOR heap and the minor-side accounting m governs is never
-# consulted. Measured on the PR binary, dim=500, /usr/bin/time -v:
-#
-#   OCAMLRUNPARAM        wall     sys     minor faults
-#   <default>            13.21s   45.0s    9.59M
-#   m=25                 13.26s   42.3s    9.62M      <- no effect
-#   m=400                13.82s   61.2s    9.82M      <- no effect
-#   n=4194304            13.20s   57.9s   11.14M      <- routing does change
-#   M=11                 12.20s   33.4s    5.32M      <- M is the real knob
-#   M=176                12.51s   31.3s    6.70M
-#
-# M is also NON-MONOTONIC (M=11 and M=176 both beat the default M=44), which is
-# the signature of the glibc trim cliff, not of GC pacing. owl's ~28k "minor
-# collections" are forced slices: each 2MB block calls caml_adjust_gc_speed, and
-# once the accumulated dependent memory crosses the custom_major_ratio
-# threshold a major slice is requested, which empties the minor heap. So M gates
-# the collection frequency and s sets the minor heap those slices drain.
-#
-# To sweep m meaningfully you must first raise n above the payload size (see the
-# commented `n`/`m` block below) — that is a different experiment: it moves the
-# payloads onto the minor accounting path instead of measuring the current one.
-#
-# -----------------------------------------------------------------------------
-# The allocator axis
-# -----------------------------------------------------------------------------
-# Established 2026-08-19 (see pr14571_faster_minor_gc.yml's sibling notes and
-# ~/.claude memory): owl_gc_default's +31% on this PR is glibc mmap/trim churn
-# provoked by a changed free() order, not GC work. With both MALLOC_*_THRESHOLD_
-# pinned, trunk and PR are indistinguishable (10.3s, 0.06M faults each); at
-# default malloc they are 10.2s/0.20M vs 13.4s/9.7M. Running the grid both ways
-# separates the two questions:
-#
-#   malloc pinned  -> does the PR cost real GC time anywhere in (s, M)?
-#   default malloc -> how wide is the cliff in (s, M) space, i.e. how likely is
-#                     a real user to land on it?
-#
-# Cells: 2 runtimes x 2 allocator settings x 5 s x 5 M = 100, x 5 invocations
-# = 500 invocations of a ~10-14s benchmark => budget ~2h.
-#
-# Both malloc modifiers are needed together: setting either alone freezes
-# glibc's dynamic adjustment of the other and makes BOTH runtimes much worse
-# (21.9s / 45.8M faults with trim alone).
-#
-# Defaults on this trunk (runtime/caml/config.h):
-#   s = 262144  (Minor_heap_def)         — swept
-#   M = 44      (Custom_major_ratio_def) — swept
-#   o = 120     (Percent_free_def)       — left at default
-#   m = 100     (Custom_minor_ratio_def) — left at default (inert here, see above)
-#   n = 8192    (Custom_minor_max_bsz)   — left at default
-#
-# Usage (no RUNNING_TAG — the benchmarks block is already scoped to the one
-# program and the default `default_run` fallback intersects to exactly it):
-#
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-#   RUNNING_REUSE_SWITCHES=1 \
-#   CONFIG_FILE=src/running/config/experiments/pr14571_owl_s_M_malloc_sweep.yml \
-#   LOG_DIR=~/running-ng/gc-sweep-logs-pr14571-owl-s-M-malloc \
-#     bash run_ocaml_bench_gc_sweep.sh
-#
-# NOTE: owl runs OpenBLAS multithreaded (~31 CPUs), so its perf counters are only
-# trustworthy with the armed-perf handshake added to benchmark.py on 2026-08-19;
-# before that, perf racily counted the main thread alone (10.5s task-clock and
-# 90k faults instead of ~335s and ~198k). With the fix perf agrees with the
-# kernel's own accounting, and each invocation's `rusage` block is the
-# independent cross-check behind the `perf_incomplete` flag — if any cell in
-# this sweep carries that flag, discard its perf counters (wall time and olly
-# are unaffected either way).
-# =============================================================================
+# ocaml/ocaml#14571 (faster minor GC) vs trunk merge-base: (s, M) sweep x glibc
+# allocator default/pinned, owl_gc_default only. owl's +31% on the PR is glibc
+# mmap/trim churn from a changed free() order, not GC work; pinning both
+# MALLOC_*_THRESHOLD_ removes it (either alone makes both runtimes much worse).
+# o is inert (tiny live major heap) and m never applies: dim=500 payloads (~2MB) exceed
+# custom_minor_max_size n, so they go straight to the major heap. Includes macro_base.yml.
+# Run: RUNNING_MACRO_BENCH_DIR=~/macro-benches RUNNING_REUSE_SWITCHES=1 \
+#      CONFIG_FILE=<this file> LOG_DIR=... bash run_ocaml_bench_gc_sweep.sh
+# owl is OpenBLAS-multithreaded: discard perf counters of any cell flagged perf_incomplete.
 
 includes:
   - "../base/ocaml/macro_base.yml"
@@ -117,10 +43,7 @@ overrides:
   benchmarks.macro-merlin:              []
   benchmarks.macro-lavyek-monorepo:     []
 
-# =============================================================================
-# Runtimes — PR head vs its trunk merge-base (same switches as the other
-# pr14571 configs, so RUNNING_REUSE_SWITCHES=1 avoids rebuilding them)
-# =============================================================================
+# Same switches as the other pr14571 configs (RUNNING_REUSE_SWITCHES=1 avoids rebuilding).
 runtimes:
   ocaml-trunk-3b14dfbc:
     type: OCaml
@@ -131,9 +54,6 @@ runtimes:
     repo: "https://github.com/NickBarnes/ocaml.git"
     commit: "16cc07f26ded44a3c2f85ba3c0c9a032e242912f"
 
-# =============================================================================
-# Modifiers
-# =============================================================================
 modifiers:
   s:
     type: OCamlRunParam
@@ -141,7 +61,7 @@ modifiers:
   M:
     type: OCamlRunParam
     val: "M={0}"
-  # The allocator axis: applied in the second pair of config strings below.
+  # Allocator axis, applied in the second pair of config strings.
   malloc_mmap32m:
     type: EnvVar
     var: "MALLOC_MMAP_THRESHOLD_"
@@ -150,29 +70,16 @@ modifiers:
     type: EnvVar
     var: "MALLOC_TRIM_THRESHOLD_"
     val: "67108864"
-  # To make m meaningful, raise n above the 2MB payload size and sweep m in
-  # place of M — a different experiment (payloads move onto the minor
-  # accounting path), so it is defined but not enabled:
-  #   n:
-  #     type: OCamlRunParam
-  #     val: "n={0}"
-  #   m:
-  #     type: OCamlRunParam
-  #     val: "m={0}"
+  # Sweeping m needs n raised above the 2MB payload first (a different experiment):
+  #   n: {type: OCamlRunParam, val: "n={0}"}
+  #   m: {type: OCamlRunParam, val: "m={0}"}
 
-# =============================================================================
-# Configs — 4 base strings (2 runtimes x allocator default/pinned);
-# config_sweep cross-products (s, M) onto each => 100 cells
-# =============================================================================
 configs:
   - "ocaml-trunk-3b14dfbc|perf_grp1"
   - "ocaml-pr14571|perf_grp1"
   - "ocaml-trunk-3b14dfbc|perf_grp1|malloc_mmap32m|malloc_trim64m"
   - "ocaml-pr14571|perf_grp1|malloc_mmap32m|malloc_trim64m"
 
-# =============================================================================
-# Comparisons
-# =============================================================================
 comparisons:
   - label: "faster minor GC PR vs trunk merge-base (owl_gc_default)"
     a: ocaml-trunk-3b14dfbc

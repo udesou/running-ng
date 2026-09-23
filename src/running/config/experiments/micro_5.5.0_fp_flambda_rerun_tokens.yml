@@ -1,8 +1,5 @@
-# =============================================================================
-# tokens only — its ~15ms workload was masked by the domain_create crash in
-# the 2026-08-28 run; rerun of the 2026-08-29 rerun with -repeat 3000 (~5.8s).
-# Same runtimes/configs as micro_5.5.0_fp_flambda.yml for contract merging.
-# =============================================================================
+# Rerun of mpl/tokens only, with -repeat 3000 (earlier runs were ~15ms). Same
+# runtimes/configs as micro_5.5.0_fp_flambda.yml for contract merging. Includes micro_base.yml.
 includes:
   - "../base/ocaml/micro_base.yml"
 
@@ -26,9 +23,6 @@ overrides:
     mpl:
       - tokens
 
-# =============================================================================
-# Runtimes — identical to micro_5.5.0_fp_flambda.yml
-# =============================================================================
 runtimes:
   ocaml-5.5.0:
     type: OCaml
@@ -49,19 +43,13 @@ runtimes:
     version: "5.5.0"
     configure_args: ["--enable-frame-pointers", "--enable-flambda"]
 
-# =============================================================================
-# Configs — MUST stay identical to micro_5.5.0_fp_flambda.yml so config_ids
-# match for the merge (per-benchmark ocamlrunparam overrides md-2 where needed)
-# =============================================================================
+# Must stay identical to micro_5.5.0_fp_flambda.yml so config_ids match for the merge.
 configs:
   - "ocaml-5.5.0|perf_grp1|re-25|md-2"
   - "ocaml-5.5.0-fp|perf_grp1|re-25|md-2"
   - "ocaml-5.5.0-flambda|perf_grp1|re-25|md-2"
   - "ocaml-5.5.0-fp-flambda|perf_grp1|re-25|md-2"
 
-# =============================================================================
-# Comparisons
-# =============================================================================
 comparisons:
   - label: "5.5.0 micro: fp+flambda vs stock"
     a: ocaml-5.5.0

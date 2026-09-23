@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-"""Stand-in for pmcstat(8) that reproduces its counting-mode output format.
-
-Mirrors usr.sbin/pmcstat/pmcstat.c: field widths from lines 1160-1181, printing
-from pmcstat_print_headers/print_counters (270-330). Rows every -w seconds while
-the target lives, plus a final row when it exits (the SIGIO path at line 1386).
+"""Stand-in for pmcstat(8) reproducing its counting-mode output format
+(usr.sbin/pmcstat/pmcstat.c): rows every -w seconds, a final row at target exit.
 """
 import math, os, sys, time
 
@@ -23,10 +20,8 @@ while i < len(args):
 if not events or out is None or target is None:
     sys.stderr.write("pmcstat: missing -p/-o/-t\n"); sys.exit(64)
 
-# libpmc installs its portable alias table only for AMD K8, the generic class
-# and a few ARM cores, so on modern x86 anything but a raw event name from
-# `pmc list` fails to allocate. Model that: known aliases, or a raw name in the
-# uppercase dotted style the Intel/AMD tables use.
+# On modern x86 libpmc allocates only known aliases or raw uppercase dotted
+# event names; model that.
 KNOWN_ALIASES = {"instructions", "cycles", "unhalted-cycles", "branches",
                  "branch-mispredicts", "dc-misses", "ic-misses", "interrupts"}
 for e in events:

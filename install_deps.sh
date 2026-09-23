@@ -1,13 +1,5 @@
 #!/usr/bin/env bash
-# install_deps.sh — Auto-detect OS and run the appropriate install script.
-#
-# Usage:
-#   bash ~/running-ng/install_deps.sh
-#
-# Delegates to:
-#   - install_deps_linux.sh    (Ubuntu/Debian)
-#   - install_deps_macos.sh    (macOS)
-#   - install_deps_freebsd.sh  (FreeBSD; assumes no root, see its header)
+# Detect the OS and exec the matching install_deps_<os>.sh. Usage: bash install_deps.sh
 
 set -euo pipefail
 
@@ -21,8 +13,7 @@ case "$(uname -s)" in
         exec bash "$ROOT_DIR/install_deps_macos.sh" "$@"
         ;;
     FreeBSD)
-        # sh, not bash: FreeBSD has no bash in the base system, and this
-        # script must run before anything has been installed.
+        # sh, not bash: FreeBSD base has no bash and nothing is installed yet.
         exec sh "$ROOT_DIR/install_deps_freebsd.sh" "$@"
         ;;
     *)

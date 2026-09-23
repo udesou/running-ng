@@ -26,10 +26,7 @@ def test_ocaml_built_binary_uses_existing_binary_without_runtime_resolution(tmp_
         def get_executable(self) -> Path:
             raise AssertionError("Runtime executable must not be resolved")
 
-    # Passing `executable` puts OCaml.__init__ in legacy mode, so it does not
-    # provision an opam switch. It does that eagerly for a version-pinned
-    # runtime, which is the intended contract but not what these tests are
-    # about. `version` is still recorded, and is what get_cache_key reads.
+    # `executable` keeps OCaml.__init__ from provisioning a switch; `version` is still recorded.
     placeholder = tmp_path / "unused-ocaml"
     placeholder.write_text("#!/usr/bin/env bash\nexit 0\n")
     placeholder.chmod(0o755)
@@ -121,10 +118,7 @@ def test_ocaml_built_binary_can_skip_runtime_executable_resolution(tmp_path):
         def get_executable(self) -> Path:
             raise AssertionError("Runtime executable must not be resolved")
 
-    # Passing `executable` puts OCaml.__init__ in legacy mode, so it does not
-    # provision an opam switch. It does that eagerly for a version-pinned
-    # runtime, which is the intended contract but not what these tests are
-    # about. `version` is still recorded, and is what get_cache_key reads.
+    # `executable` keeps OCaml.__init__ from provisioning a switch; `version` is still recorded.
     placeholder = tmp_path / "unused-ocaml"
     placeholder.write_text("#!/usr/bin/env bash\nexit 0\n")
     placeholder.chmod(0o755)

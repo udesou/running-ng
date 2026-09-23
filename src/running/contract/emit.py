@@ -1,13 +1,5 @@
-"""Emit data-contract artifacts from running-ng, in pure Python.
-
-Uses the generated vocab (contract.vocab) as the single source of the canonical
-names, mappings, and config_id algorithm, so running-ng's native output is
-verifiably conformant and its config_ids join with anything the OCaml side
-produces. running-ng stays Python; OCaml only *verifies* the result.
-
-Normalization here mirrors the OCaml adapter (metric maps, dimension map,
-config_id); the difference is that identity comes from running-ng's in-memory
-knowledge instead of being parsed from filenames.
+"""Emit data-contract artifacts natively, using the generated contract.vocab
+so config_ids and metric names match the OCaml adapter's.
 """
 import json
 import logging
@@ -15,8 +7,6 @@ import os
 
 from running.contract import vocab
 
-
-# --- metric normalization (raw olly/perf -> canonical metrics) -----------------
 
 def _dotted(obj, path):
     cur = obj
@@ -43,14 +33,9 @@ _warned_olly_versions = set()
 
 
 def _check_olly_output_version(olly):
-    """Warn once per unsupported olly gc-stats output version.
+    """Warn once per olly output version not in OLLY_OUTPUT_VERSION_SUPPORTED.
 
-    Mirrors the adapter's `olly_version_ok`: OLLY_FIELD_MAP is written against
-    the versions in OLLY_OUTPUT_VERSION_SUPPORTED, so an unlisted one may be
-    read wrong. Native emission had no such check, which meant the two producers
-    disagreed about what they accept — the one thing the contract exists to stop.
-    Warn rather than raise: a version we don't recognise usually still carries
-    the fields we read, and losing a whole sweep to it would be worse.
+    Warn rather than raise: an unknown version usually still carries the fields we read.
     """
     v = olly.get("version")
     if v is None or v in vocab.OLLY_OUTPUT_VERSION_SUPPORTED:
@@ -91,13 +76,9 @@ def perf_metrics(perf):
 
 
 def crashed(olly_metrics_list):
-    """True if an invocation's olly metrics show the process aborted rather than
-    completing. olly derives wall_time/cpu_time from the first/last runtime-events
-    timestamps, so a process that dies before emitting proper events yields a
-    non-positive (in practice hugely negative) wall_time. Its perf counters are
-    then a partial-run count too, so the WHOLE invocation must be dropped — not
-    just the olly side — or the dashboard shows crash-time garbage (e.g. an LXR
-    bench "finishing" in a fraction of stock's instructions)."""
+    """True if olly's wall_time/cpu_time are non-positive, which happens when the
+    process died before emitting runtime events. The perf counters of such an
+    invocation are partial too, so callers drop the whole invocation."""
     for m in olly_metrics_list or []:
         if m["name"] in ("wall_time", "cpu_time") and m["value"] <= 0:
             return True
@@ -105,21 +86,15 @@ def crashed(olly_metrics_list):
 
 
 def dimensions_from_modifiers(modifiers):
-    """modifiers: {name: value} that running-ng actually applied (honoring excludes).
-
-    Maps to canonical dimensions via the registry. Skips the lavyek-scoped _par
-    duplicates (same axis as re/md) — running-ng, unlike the adapter, knows which
-    actually applied, so it should simply not pass the excluded ones."""
+    """Map applied modifiers ({name: value}, excludes already honoured) to canonical dimensions."""
     dims = {}
     for name, value in modifiers.items():
         d = vocab.DIMENSION_OF_MODIFIER.get(name)
         if d:
-            # flag modifiers (mmtk_bactrian, …) carry a fixed value in the table
+            # flag modifiers carry a fixed value in the table
             dims.setdefault(d["dimension"], d.get("value", value))
     return dims
 
-
-# --- record builders (contract shapes) -----------------------------------------
 
 def config_descriptor(kind, version, commit=None, options=None, dimensions=None,
                       runtime_name=None, modifiers=None, tools=None):
@@ -180,8 +155,6 @@ def manifest(run_id, created_at, machine, configs, tool_versions=None,
         m["_produced_by"] = produced_by
     return m
 
-
-# --- writers -------------------------------------------------------------------
 
 def append_ndjson(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)

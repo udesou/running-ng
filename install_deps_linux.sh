@@ -1,53 +1,24 @@
 #!/usr/bin/env bash
-# install_deps.sh — Install all dependencies needed to run
-# ~/running-ng/run_ocaml_bench_gc_sweep.sh on a clean Ubuntu/Debian machine.
-#
-# Usage:
-#   bash ~/running-ng/install_deps.sh
-#
-# After this completes successfully, run the benchmark sweep with:
-#   ~/running-ng/run_ocaml_bench_gc_sweep.sh
-#
-# Prerequisites:
-#   - Ubuntu/Debian-based system (uses apt)
-#   - sudo access (for system packages and perf)
-#   - Internet access (for git clones and opam packages)
-#
-# What this script does:
-#   1. Installs system packages (build tools, perf, python3, libgmp, etc.)
-#   2. Installs opam (OCaml package manager) >= 2.2 if not present
-#   3. Creates an opam switch with OCaml 5.4.0
-#   4. Installs OCaml tools and libraries needed by various benchmark suites:
-#      - dune, ocamlfind (build tools used by most benchmarks)
-#      - domainslib (multicore benchmarks)
-#      - zarith, lwt, decompress, yojson, etc. (with_packages benchmarks)
-#      (olly's own dependencies go in a separate switch; see below)
-#   5. Builds runtime_events_tools (olly) from source
-#   6. Installs Python dependencies (pyyaml)
-#   7. Clones the benches repo if not present
-#
-# The OCaml/OxCaml runtimes used for actual benchmarking are built
-# automatically by running-ng on first run — this script only prepares
-# the host environment and tools.
+# Prepare a clean Ubuntu/Debian host to run run_ocaml_bench_gc_sweep.sh: apt packages
+# (build tools, perf, python3, libgmp), opam >= 2.2, the running-ng tools and olly
+# switches, olly built from source, pyyaml, and a ~/benches clone. Needs sudo.
+# Benchmark runtimes are not built here; running-ng provisions them per config.
+# Usage: bash install_deps_linux.sh   (or bash install_deps.sh, which dispatches)
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCHES_DIR="${BENCHES_DIR:-$(cd "$ROOT_DIR/.." && pwd)/benches}"
 OLLY_DIR="${OLLY_DIR:-$HOME/runtime_events_tools}"
-# Named, not "5.4.0": a switch named after a compiler version is
-# indistinguishable from a plain `opam switch create 5.4.0`, and this
-# name is the one running.switches and the FreeBSD installer declare.
+# Not "5.4.0": this is the name running.switches and the FreeBSD installer declare.
 OPAM_SWITCH="${OPAM_SWITCH:-running-ng-tools}"
 OCAML_VERSION="${OCAML_VERSION:-5.4.0}"
-# olly needs cmdliner >= 2.0.0; opam-compiler in the switch above
-# pins it < 2.0.0, so olly gets a switch of its own.
+# olly needs cmdliner >= 2.0; opam-compiler (tools switch) pins it < 2.0.
 OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
 
-# Minimum opam version required (the ~/.opam directory format requires >= 2.2).
+# The ~/.opam directory format requires >= 2.2.
 OPAM_MIN_VERSION="2.2.0"
 
-# --- Colors for output -------------------------------------------------------
 red()   { printf '\033[1;31m%s\033[0m\n' "$*"; }
 green() { printf '\033[1;32m%s\033[0m\n' "$*"; }
 blue()  { printf '\033[1;34m%s\033[0m\n' "$*"; }
@@ -56,44 +27,35 @@ warn()  { printf '\033[1;33mWARNING: %s\033[0m\n' "$*"; }
 step() { blue "==> $*"; }
 ok()   { green "    OK: $*"; }
 
-# --- Helper: version comparison -----------------------------------------------
-# Returns 0 (true) if $1 >= $2.
 version_ge() {
     printf '%s\n%s\n' "$2" "$1" | sort -V | head -1 | grep -qx "$2"
 }
 
-# =============================================================================
 # 1. System packages
-# =============================================================================
 step "Installing system packages"
 
 REQUIRED_PKGS=(
-    # Build essentials (gcc, g++, make, libc headers, etc.)
     build-essential
     # OxCaml's configure.ac requires autoconf to generate ./configure
     autoconf
     git
     curl
-    # Python (interpreter + pip for pyyaml)
     python3
     python3-pip
     python3-venv
-    # perf — needed by PerfAndOllyAttach modifiers (perf_grp1/2/3)
+    # perf
     linux-tools-common
     linux-tools-generic
-    # C libraries needed by OCaml opam packages
     libgmp-dev              # zarith, pidigits5
-    pkg-config              # used by dune to find C libraries
-    # opam sandbox / misc
+    pkg-config
     bubblewrap
     unzip
     rsync
 )
 
-# Also try the kernel-specific perf package (may not exist for all kernels).
+# May not exist for this kernel.
 LINUX_TOOLS_PKG="linux-tools-$(uname -r)"
 
-# Filter out packages that are already installed.
 TO_INSTALL=()
 for pkg in "${REQUIRED_PKGS[@]}"; do
     if ! dpkg -s "$pkg" &>/dev/null; then
@@ -116,18 +78,14 @@ else
     ok "All system packages already installed"
 fi
 
-# Non-fatal perf check.
 if ! command -v perf &>/dev/null; then
     warn "perf not found. PerfAndOllyAttach modifiers (perf_grp1/2/3) will fail."
     warn "Try: sudo apt install linux-tools-\$(uname -r) linux-tools-generic"
 fi
 
-# =============================================================================
 # 2. opam (>= 2.2)
-# =============================================================================
 step "Checking opam"
 
-# Find the best (newest) opam binary on the system.
 find_best_opam() {
     local best="" best_ver="0.0.0"
     for candidate in $(which -a opam 2>/dev/null) /usr/local/bin/opam /usr/bin/opam; do
@@ -148,7 +106,6 @@ if [[ -n "$OPAM_BIN" ]]; then
     OPAM_VER=$("$OPAM_BIN" --version)
 fi
 
-# Install or upgrade opam if needed.
 if [[ -z "$OPAM_BIN" ]] || ! version_ge "$OPAM_VER" "$OPAM_MIN_VERSION"; then
     if [[ -z "$OPAM_BIN" ]]; then
         echo "  opam not found — installing via official script"
@@ -170,7 +127,6 @@ fi
 
 echo "  Using opam: $OPAM_BIN (version $OPAM_VER)"
 
-# Initialise opam if needed.
 if [[ ! -d "$HOME/.opam" ]]; then
     echo "  Initialising opam (this may take a minute)..."
     "$OPAM_BIN" init --yes --disable-sandboxing --bare
@@ -178,60 +134,30 @@ fi
 
 ok "opam ready"
 
-# =============================================================================
-# 3. opam switch with OCaml 5.4.0
-# =============================================================================
-# This switch is used to:
-#   - Build olly (runtime_events_tools)
-#   - Provide dune, ocamlfind, and opam packages needed by benchmark build
-#     scripts (with_packages, with_deps, multicore suites)
-#
-# Note: The actual benchmark *runtimes* (OCaml/OxCaml compilers used to run
-# benchmarks) are built separately by running-ng from source.  This switch
-# provides the *build tools* and libraries the benchmark build scripts need.
+# 3. Switches
 
 step "Provisioning running-ng's opam switches"
-# Delegated to running.switches, the single declaration of what running-ng
-# needs: a tools switch (dune, ocamlfind, opam-compiler, plus the plugin link)
-# and a SEPARATE olly switch, because olly needs cmdliner >= 2.0 while every
-# published opam-compiler pins < 2.0. Duplicating that declaration here is how
-# this script and the sweep wrapper drifted apart.
+# running.switches is the single declaration of the tools switch and the separate
+# olly switch (cmdliner >= 2.0 vs opam-compiler's < 2.0 pin).
 OPAM_BIN="$OPAM_BIN" OLLY_DIR="$OLLY_DIR" \
     PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches ensure \
         --compiler "$OCAML_VERSION"
 
 step "Pre-installing benchmark packages in $OPAM_SWITCH"
 
-# Essential build tools (many benchmark build scripts expect these on PATH).
 BUILD_TOOLS=(
-    dune                    # build system used by most benchmarks
-    ocamlfind               # multicore benchmarks use ocamlfind -package
-    opam-compiler           # `opam compiler create` provisions every runtime
-                            # switch (runtime.py); without it a run dies with
-                            # `unknown command 'compiler'`
-    processor               # ocaml-processor-dump: P-core/E-core and socket
-                            # topology, used to narrow the CPU set that CpuPin
-                            # pins to, and recorded in the run manifest.
-                            # Optional: without it running-ng falls back to the
-                            # kernel's own topology view.
+    dune
+    ocamlfind
+    opam-compiler   # provisions runtime switches via `opam compiler create`
+    processor   # ocaml-processor-dump topology for CpuPin and the manifest; optional
 )
 
-# olly's dependencies are deliberately NOT installed here. olly and
-# opam-compiler cannot share a switch: every published opam-compiler pins
-# cmdliner < 2.0.0 while olly needs >= 2.0.0, and opam's only way to satisfy
-# both is to remove opam-compiler. running-ng needs it for `opam compiler
-# create`, so a run would then die on `unknown command 'compiler'`.
-# olly gets its own switch below, with its dependencies resolved from its own
-# opam file rather than from a list here that goes stale whenever olly changes.
+# olly's deps are not installed here: they would evict opam-compiler (cmdliner
+# conflict). olly's own switch resolves them from its opam file.
 
-# Benchmark-specific opam packages.
-# The build scripts in ~/benches auto-install their own opam deps at build time
-# (they create per-compiler opam switches if needed), but pre-installing them
-# here into the 5.4.0 switch avoids redundant work and speeds up first runs.
+# Pre-warm only: the ~/benches build scripts install their own deps; this speeds up first runs.
 BENCH_PKGS=(
-    # multicore/ benchmarks (domainslib)
     domainslib
-    # with_packages/ benchmarks
     zarith num              # zarith, benchmarksgame (pidigits5, binarytrees5)
     lwt                     # chameneos, thread-lwt
     decompress              # test_decompress
@@ -240,9 +166,7 @@ BENCH_PKGS=(
     str                     # benchmarksgame (fasta, spectralnorm)
 )
 
-# BUILD_TOOLS are provisioned above by running.switches; only the
-# benchmark pre-warm is left here, which is an optimisation rather
-# than a requirement (build scripts install their own deps).
+# BUILD_TOOLS are provisioned by running.switches; only the pre-warm is left.
 ALL_PKGS=("${BENCH_PKGS[@]}")
 
 echo "  Installing: ${ALL_PKGS[*]}"
@@ -250,19 +174,11 @@ echo "  Installing: ${ALL_PKGS[*]}"
 
 ok "OCaml packages installed"
 
-# =============================================================================
 # opam compiler plugin
-# =============================================================================
 step "Verifying the opam compiler plugin"
-# running.switches registers the link when it provisions the tools switch;
-# this only checks that it resolves, which is a different job and the one that
-# catches a half-provisioned opam root. Without a working plugin,
-# `opam compiler create` (runtime.py) prompts to install it and, with no tty,
-# dies with "unknown command 'compiler'", blocking every sweep.
-#
-# No --switch: the invalid source is rejected during opam-compiler's own
-# argument parsing, so nothing can be created even in principle, while a
-# missing plugin still produces opam's "unknown command".
+# running.switches registers the link; this checks it resolves. Without it `opam compiler
+# create` dies with "unknown command 'compiler'" (no tty to prompt). No --switch: the
+# invalid source is rejected in argument parsing, so nothing can be created.
 if "$OPAM_BIN" compiler create "invalid/source#nope" </dev/null 2>&1 \
         | grep -q "unknown command"; then
     red "ERROR: the opam 'compiler' plugin does not resolve, so runtime"
@@ -272,9 +188,7 @@ if "$OPAM_BIN" compiler create "invalid/source#nope" </dev/null 2>&1 \
 fi
 ok "opam compiler plugin resolves"
 
-# =============================================================================
-# 5. Build runtime_events_tools (olly)
-# =============================================================================
+# 4. olly
 step "Building runtime_events_tools (olly)"
 
 if [[ ! -d "$OLLY_DIR" ]]; then
@@ -284,12 +198,8 @@ fi
 
 pushd "$OLLY_DIR" >/dev/null
 
-# The switch and olly's dependencies were provisioned above by
-# running.switches, which resolves them --deps-only from olly's own opam file.
-# Only the build itself is left here.
 
-# No --set-switch: this only needs to affect the build below, not
-# change the user's global switch, which an early exit would leave set.
+# No --set-switch: an early exit would leave the user's global switch changed.
 eval "$("$OPAM_BIN" env --switch="$OLLY_SWITCH")"
 # Not piped to `tail`, which would report tail's exit status rather than dune's.
 BUILD_LOG="${TMPDIR:-/tmp}/running-ng-olly-build.log"
@@ -313,17 +223,13 @@ fi
 
 popd >/dev/null
 
-# =============================================================================
-# 6. Python dependencies
-# =============================================================================
+# 5. Python dependencies
 step "Installing Python dependencies"
 
 pip3 install --user --quiet pyyaml 2>/dev/null || pip3 install --quiet pyyaml
 ok "pyyaml installed"
 
-# =============================================================================
-# 7. Benchmarks repo
-# =============================================================================
+# 6. Benchmarks
 step "Checking benchmarks directory"
 
 if [[ -d "$BENCHES_DIR" ]]; then
@@ -334,9 +240,7 @@ else
     ok "Benchmarks cloned to $BENCHES_DIR"
 fi
 
-# =============================================================================
-# 8. Verify installation
-# =============================================================================
+# 7. Verify
 step "Verifying installation"
 
 ERRORS=0
@@ -359,7 +263,6 @@ check_file() {
     fi
 }
 
-# Activate the switch for verification.
 eval "$("$OPAM_BIN" env --switch="$OPAM_SWITCH" --set-switch)"
 
 echo "  System commands:"

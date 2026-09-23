@@ -1,42 +1,10 @@
-# =============================================================================
-# PR #14571 (Faster minor GC, NickBarnes) vs PR merge-base trunk — macrobenchmarks
-# =============================================================================
-# Nick Barnes' `faster-oldify-upstream` branch rewrites the minor-collection
-# oldify path (`runtime/minor_gc.c`, `runtime/shared_heap.c`,
-# `runtime/caml/shared_heap.h`) — a pure runtime change, no runtime_events
-# enum churn, so the stock olly (`main`) decodes both sides and no `olly_ref`
-# override is needed.
-#
-# Runtimes:
-#   - ocaml-trunk-3b14dfbc: ocaml/ocaml @ 3b14dfbcca7c6c24803fc9bbbc5d4a8cc2e7f75b
-#                           (= merge-base of the PR head with trunk, 2026-05-26)
-#   - ocaml-pr14571:        NickBarnes/ocaml @ 16cc07f26ded44a3c2f85ba3c0c9a032e242912f
-#                           (= PR head as of 2026-08-18, 2 commits ahead of the
-#                           merge-base, 264 behind trunk)
-#
-# The baseline is the merge-base, not current trunk, so the delta isolates the
-# PR's effect from ~3 months of unrelated trunk drift (same convention as the
-# retired pr14796 configs). If the PR gets rebased, re-resolve both SHAs with
+# ocaml/ocaml#14571 (faster minor GC, NickBarnes/faster-oldify-upstream) vs its trunk
+# merge-base, default GC params, full macro suite. Pure runtime change, so stock olly
+# decodes both sides (no olly_ref). If the PR is rebased, re-resolve both SHAs with
 #   gh api repos/ocaml/ocaml/compare/trunk...NickBarnes:ocaml:faster-oldify-upstream
-# and bump the runtime names to match.
-#
-# Default GC parameters throughout: no `modifiers:`, no `config_sweep:`, so
-# each runtime runs once per benchmark at the compiler's own defaults. Ring
-# sizing is per-suite/per-benchmark in macro_base (the retired global
-# `re-25|md-2` pair), so the config strings carry only `perf_grp1`.
-# Benchmarks, suites and modifiers are inherited from macro_base.yml; lavyek
-# and merlin stay disabled there, so the parallel modifier triple is not needed.
-#
-# Usage — default + large rungs of the input-size ladder (20 + 20 programs;
-# `RUNNING_TAG` is a *runtime* filter, not a config field, so it must be set
-# on the command line — a bare run would only do `default_run`):
-#
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-#   RUNNING_TAG=default_run,large_run \
-#   CONFIG_FILE=src/running/config/experiments/pr14571_faster_minor_gc.yml \
-#   LOG_DIR=~/running-ng/gc-sweep-logs-pr14571 \
-#     bash run_ocaml_bench_gc_sweep.sh
-# =============================================================================
+# Includes macro_base.yml. RUNNING_TAG is a runtime filter, not a config field:
+# Run: RUNNING_MACRO_BENCH_DIR=~/macro-benches RUNNING_TAG=default_run,large_run \
+#      CONFIG_FILE=<this file> LOG_DIR=... bash run_ocaml_bench_gc_sweep.sh
 
 plugins:
   zulip:
@@ -48,14 +16,10 @@ plugins:
 includes:
   - "../base/ocaml/macro_base.yml"
 
-# 5 invocations per cell. Base scalars must be changed through `overrides:` —
-# redeclaring one at top level is a combine() TypeError.
+# Base scalars change through overrides:; a top-level redeclaration is a combine() TypeError.
 overrides:
   invocations: 5
 
-# =============================================================================
-# Runtimes
-# =============================================================================
 runtimes:
   ocaml-trunk-3b14dfbc:
     type: OCaml
@@ -66,16 +30,10 @@ runtimes:
     repo: "https://github.com/NickBarnes/ocaml.git"
     commit: "16cc07f26ded44a3c2f85ba3c0c9a032e242912f"
 
-# =============================================================================
-# Configs — default GC settings, no sweep
-# =============================================================================
 configs:
   - "ocaml-trunk-3b14dfbc|perf_grp1"
   - "ocaml-pr14571|perf_grp1"
 
-# =============================================================================
-# Comparisons
-# =============================================================================
 comparisons:
   - label: "faster minor GC PR vs trunk merge-base"
     a: ocaml-trunk-3b14dfbc

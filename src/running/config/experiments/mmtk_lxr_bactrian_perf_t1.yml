@@ -1,9 +1,7 @@
-# Rerun: MMTK_THREADS=1 + perf/olly attach (perf_grp1) for dashboard-feedable
-# stats. LXR + Bactrian vs stock 5.5.0-rc1, cbc66e3, dynamic heap, 5 iters.
-# Native contract emission (contract/measurements/{olly,perf}.ndjson) comes from
-# macro_base's schema_version — redeclaring it here is a combine() TypeError.
-# Under MMTk: olly gives wall/cpu/max_rss (GC counters empty); perf gives
-# instructions/cycles/task_clock. Same 27-bench set as mmtk_lxr_bactrian_5iter.
+# MMTk LXR and Bactrian (MMTK_THREADS=1) vs stock 5.5.0-rc1 under perf_grp1, 27
+# benchmarks, 5 invocations. Includes macro_base.yml (schema_version is inherited;
+# redeclaring it is a combine() TypeError). Under MMTk olly gives wall/cpu/max_rss only.
+# Run with run_ocaml_bench_gc_sweep.sh (RUNNING_MACRO_BENCH_DIR set).
 includes:
   - "../base/ocaml/macro_base.yml"
 
@@ -38,9 +36,6 @@ overrides:
 maxheap: 8192
 attempts: 2
 
-# plan-<Plan> / threads-<N> modifiers come from macro_base — they record
-# gc_plan / gc_threads dimensions so each plan gets a distinct config_id
-# (Bactrian vs LXR plot as separate series in the dashboard).
 
 runtimes:
   ocaml-mmtk-cbc66e3:

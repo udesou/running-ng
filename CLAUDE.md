@@ -47,8 +47,18 @@ hard-won gotchas, and the current list of known-broken files.
   (`base/ocaml/{micro_base,macro_base}.yml`) and declares only `runtimes`,
   `configs`, `modifiers`, `config_sweep`, `comparisons`, and `overrides`. See
   "Config merge" below — getting it wrong is the #1 config bug.
-- Keep docs consistent with every commit: `README.md`, this file, and the
-  header comment of any config you touch.
+- Keep this file and the header comment of any config you touch consistent
+  with every commit. For `README.md` and `docs/`, follow the docs rule below.
+- **Human-facing docs are written by a human.** `README.md` and every other
+  `.md` file except this one are maintained by hand. When a change calls for a
+  docs update, do not edit the prose. Put an invisible HTML comment next to the
+  passage that needs to change, saying what changed and what the text should
+  now say: `<!-- TODO(docs): ... -->` (it does not render). When a PR is being
+  prepared, list every such comment so they can be resolved by hand before
+  merge: `grep -rn 'TODO(docs)' --include='*.md' .`
+- **Comments only where the code is not self-explanatory.** Never add a comment
+  that restates the code. Where one is needed, keep it short and explain the
+  intent or the non-obvious constraint at a high level, for a human reader.
 
 ## Branch state (read before editing docs)
 

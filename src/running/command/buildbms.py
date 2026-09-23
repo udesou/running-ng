@@ -22,8 +22,7 @@ def setup_parser(subparsers):
 
 
 def run(args) -> bool:
-    # Guard on the subcommand: every command carries a CONFIG, so without this
-    # buildbms (listed before minheap in MODULES) would intercept them.
+    # Every command carries CONFIG; without this guard buildbms would intercept minheap.
     if args.get("which") != "buildbms":
         return False
     if "CONFIG" not in args or args["CONFIG"] is None:
@@ -42,12 +41,10 @@ def run(args) -> bool:
         configuration.get("config_sweep"),
     )
 
-    # Resolve unique runtimes from configs.
     runtime_by_config: Dict[str, Runtime] = {}
     for c in configs:
         runtime_by_config[c], _ = parse_config_str(configuration, c)
 
-    # Deduplicate runtimes for reporting.
     unique_runtimes = {rt.name: rt for rt in runtime_by_config.values()}
     total_benchmarks = sum(len(bms) for bms in benchmarks.values())
     print(f"Building {total_benchmarks} benchmarks across "

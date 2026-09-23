@@ -1,38 +1,8 @@
-# =============================================================================
-# Rerun of the 35 micro benchmarks broken in monolith-2026-08-28-Fri-025606
-# =============================================================================
-# Companion to micro_5.5.0_fp_flambda.yml (same runtimes, configs, invocations,
-# comparisons) narrowed to the benchmarks whose data from that run is missing
-# or invalid, after the fixes in micro_base.yml:
-#
-#   - 29 parallel benchmarks crashed every invocation with
-#     Failure("failed to allocate domain: domain_create"): the config-string
-#     `md-2` (OCAMLRUNPARAM d=2) capped max_domains below what they spawn
-#     (3-5). Each now carries a per-benchmark `ocamlrunparam: "d=N"` in
-#     micro_base.yml, which overrides the config-string value key-by-key —
-#     so the config strings here stay IDENTICAL to the completed run and the
-#     contract config_ids line up for merging.
-#   - 6 benchmarks ran sub-second (weak_htbl: ~6ms) — olly could never attach
-#     and the numbers were meaningless. Their args are scaled to seconds in
-#     micro_base.yml; minilight_multicore additionally never rendered at all
-#     (missing num_domains argv → help path, 1ms exit).
-#
-# Merge with the completed run afterwards: the 29 have no contract rows to
-# collide with; the 6 must have their old rows dropped (they measured the
-# wrong workload). See merge_micro_runs.py next to the run dirs.
-#
-# Usage:
-#   cd ~/running-ng
-#   RUNNING_BENCH_DIR=~/benches \
-#   RUNNING_REUSE_SWITCHES=1 \
-#   CONFIG_FILE=src/running/config/experiments/micro_5.5.0_fp_flambda_rerun.yml \
-#   LOG_DIR=~/running-ng/gc-sweep-logs-micro-5.5.0-fp-flambda-rerun-$(hostname -s)-$(date +%Y-%m-%d) \
-#     bash run_ocaml_bench_gc_sweep.sh
-#
-# (running-ng-ocaml-5.5.0-fp was removed after an interrupted provisioning on
-# 2026-08-28 and is rebuilt by this run, ~2 min. All binaries already exist,
-# so the build phase is skip-checks only.)
-# =============================================================================
+# Rerun of the 35 micro benchmarks whose data from the 2026-08-28 run was missing
+# (29 crashed with "failed to allocate domain", 6 ran sub-second); the fixes are
+# per-benchmark ocamlrunparam/args in micro_base.yml. Same runtimes and configs as
+# micro_5.5.0_fp_flambda.yml so contract config_ids merge. Includes micro_base.yml.
+# Run: RUNNING_BENCH_DIR=~/benches RUNNING_REUSE_SWITCHES=1 CONFIG_FILE=<this file> bash run_ocaml_bench_gc_sweep.sh
 
 includes:
   - "../base/ocaml/micro_base.yml"
@@ -101,9 +71,6 @@ overrides:
       - globroots_mp
       - globroots_sp
 
-# =============================================================================
-# Runtimes — identical to micro_5.5.0_fp_flambda.yml
-# =============================================================================
 runtimes:
   ocaml-5.5.0:
     type: OCaml
@@ -124,19 +91,13 @@ runtimes:
     version: "5.5.0"
     configure_args: ["--enable-frame-pointers", "--enable-flambda"]
 
-# =============================================================================
-# Configs — MUST stay identical to micro_5.5.0_fp_flambda.yml so config_ids
-# match for the merge (per-benchmark ocamlrunparam overrides md-2 where needed)
-# =============================================================================
+# Must stay identical to micro_5.5.0_fp_flambda.yml so config_ids match for the merge.
 configs:
   - "ocaml-5.5.0|perf_grp1|re-25|md-2"
   - "ocaml-5.5.0-fp|perf_grp1|re-25|md-2"
   - "ocaml-5.5.0-flambda|perf_grp1|re-25|md-2"
   - "ocaml-5.5.0-fp-flambda|perf_grp1|re-25|md-2"
 
-# =============================================================================
-# Comparisons
-# =============================================================================
 comparisons:
   - label: "5.5.0 micro: fp+flambda vs stock"
     a: ocaml-5.5.0

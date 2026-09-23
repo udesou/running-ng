@@ -6,7 +6,8 @@ heap_range: 6
 spread_factor: 1
 
 
-# Suites, modifiers, and benchmarks come from base/ocaml/micro_base.yml.
+# Example (s, o) GC sweep, stock OCaml vs OxCaml, on the micro suite; includes micro_base.yml.
+# Run: RUNNING_BENCH_DIR=~/benches CONFIG_FILE=<this file> bash run_ocaml_bench_gc_sweep.sh
 includes:
   - "../base/ocaml/micro_base.yml"
 
@@ -17,24 +18,12 @@ plugins:
       type: private
       to: [361443]
 
-# =============================================================================
-# Runtimes
-# =============================================================================
-# Each runtime resolves an OCaml compiler by version tag, commit hash, or
-# pre-built executable path.  Stock OCaml and MMTk runtimes are built into an
-# opam switch named `running-ng-<runtime-name>`, which is the cache — delete the
-# switch to force a rebuild.  (Only OxCaml also keeps a source checkout under
-# /tmp/running-ng-ocaml-toolchains/.)
-#
-# Use `repo` to point to a fork (e.g. OxCaml).  Default repo is
-# https://github.com/ocaml/ocaml.git.
+# Runtimes resolve by version tag, commit, or executable path and build into an opam
+# switch running-ng-<runtime-name> (delete it to force a rebuild). `repo` points at a fork.
 
 runtimes:
-  # NOTE: every runtime declared here must be referenced by a `configs:` entry
-  # below — `Configuration.validate()` rejects dead declarations, so a runtime
-  # you are not currently running has to stay commented out rather than merely
-  # unused.  (That check is why this file previously failed to load at all.)
-  #
+  # Every declared runtime must be referenced by a configs: entry
+  # (Configuration.validate() rejects dead declarations), so unused ones stay commented out.
   # --- stock OCaml ---
   # ocaml-v5.4:
   #   type: OCaml
@@ -45,10 +34,8 @@ runtimes:
   ocaml-release:
     type: OCaml
     commit: "02ee646ee1f40eb19f4942f50a4a607b52b3ab39"
-  # --- OxCaml (Jane Street fork with Domain.Safe, prefetch intrinsics, etc.) ---
-  # type: OxCaml handles the different build system automatically (autoconf,
-  # --enable-runtime5, Dune-based make install) and builds a stock OCaml 5.4.0
-  # bootstrap compiler if needed.  Default repo is oxcaml/oxcaml.
+  # type: OxCaml handles its own build system (autoconf, --enable-runtime5, dune
+  # install) and bootstraps a stock 5.4.0 if needed. Default repo oxcaml/oxcaml.
   oxcaml-release:
     type: OxCaml
     commit: "068b25529286862035eaf827230f7ffa86659c49"
@@ -59,12 +46,7 @@ runtimes:
   #   type: OCaml
   #   executable: "/path/to/ocaml/bin/ocaml"
 
-# =============================================================================
-# Configs & Sweep
-# =============================================================================
-# Config strings: "runtime|modifier1|modifier2|..."
-# config_sweep generates the cross-product of sweep values for any modifier
-# NOT already present in the base config.
+# config_sweep cross-products the sweep values for any modifier not already in the config string.
 
 configs:
   - "oxcaml-release|perf_grp1|re-25|md-9"

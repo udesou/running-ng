@@ -1,27 +1,10 @@
-# =============================================================================
-# FP × Flambda sweep on macrobenchmarks — OCaml 5.4.1, 3 invocations
-# =============================================================================
-# Runtimes (2×2 = 4 variants of OCaml 5.4.1):
-#   - ocaml-5.4.1             baseline
-#   - ocaml-5.4.1-fp          frame pointers enabled
-#   - ocaml-5.4.1-flambda     flambda optimizer
-#   - ocaml-5.4.1-fp-flambda  frame pointers + flambda
-#
-# Suites, benchmarks, modifiers, plugins, and run settings come from
-# macrobenchmarks_base.yml.  Only runtimes and configs live here.
-#
-# Usage:
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-#   CONFIG_FILE=src/running/config/fp_flambda_macrobenchmarks.yml \
-#     bash run_ocaml_bench_gc_sweep.sh
-# =============================================================================
+# FP x Flambda sweep on macrobenchmarks: four builds of OCaml 5.4.1 (stock, -fp,
+# -flambda, -fp-flambda) at default GC params. Includes macro_base.yml.
+# Run: RUNNING_MACRO_BENCH_DIR=~/macro-benches CONFIG_FILE=<this file> bash run_ocaml_bench_gc_sweep.sh
 
 includes:
   - "../base/ocaml/macro_base.yml"
 
-# =============================================================================
-# Runtimes
-# =============================================================================
 runtimes:
   ocaml-5.4.1:
     type: OCaml
@@ -39,9 +22,6 @@ runtimes:
     version: "5.4.1"
     configure_args: ["--enable-frame-pointers", "--enable-flambda"]
 
-# =============================================================================
-# Configs — 4 runtimes × default GC params (no sweep)
-# =============================================================================
 configs:
   - "ocaml-5.4.1|perf_grp1|re_par-22|md_par-8|pin_lavyek"
   - "ocaml-5.4.1-fp|perf_grp1|re_par-22|md_par-8|pin_lavyek"

@@ -1,51 +1,15 @@
-# =============================================================================
-# MMTk macro-benches — ocaml-mmtk vs the stock OCaml it forks from
-# =============================================================================
-# Canonical MMTk config.  Both runtimes pinned by commit:
-#   - ocaml-mmtk-cbc66e3 : fplaunchpad/ocaml-mmtk @ 5.5+mmtk tip (the canonical
-#     upstream repo, set via `repo:`), built by running-ng (type: OCamlMMTk ->
-#     opam compiler create; the MMTk build quirks — cargo network + `setarch -R`
-#     for ASLR — are handled automatically).
-#   - ocaml-5.5.0-rc1    : the stock commit the fork is based on (4090d6db).
-#
-# MMTk specifics, all carried by the OCamlMMTk runtime (no launch wrapper):
-#   - Default plan is now **GenImmix** (generational, stock-faithful). Native
-#     plans: GenImmix / Immix / StickyImmix / ConcurrentImmix / Bactrian (RQ7:
-#     generational + concurrent) / LXR (reference counting). Selected via the
-#     MMTK_PLAN EnvVar modifiers below.
-#   - Heap is **dynamic by default** (MemBalancer grows with the live set, ~memory
-#     parity with vanilla). The run configs below leave MMTK_HEAP_SIZE_MB UNSET, so
-#     they use the dynamic heap — matching the upstream "performance quick panel".
-#     Setting MMTK_HEAP_SIZE_MB (the `mmtk_heap` modifier) pins a FIXED heap, used
-#     only for the `minheap` search / fixed-heap repro.
-#   - Every MMTk process runs ASLR-disabled: running-ng prefixes each build/run
-#     command with `setarch -R` (Runtime.get_command_prefix).
-#   - No olly/perf: MMTk doesn't emit the stock runtime_events GC counters.
-#     Use MMTK_VERBOSE=1 to see plan/heap/GC activity instead.
-#
-# Build all:
-#   cd ~/running-ng
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-#   CONFIG_FILE=src/running/config/experiments/mmtk_macro.yml \
-#     bash build_ocaml_binaries_gc_sweep.sh
-#
-# Build + run (timing; dynamic heap, best-of-N via invocations):
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches \
-#   CONFIG_FILE=src/running/config/experiments/mmtk_macro.yml \
-#   LOG_DIR=/tmp/mmtk_macro \
-#     bash run_ocaml_bench_gc_sweep.sh
-#
-# Fixed-heap minheap search (uses mmtk_heap; base runtime auto-skipped):
-#   RUNNING_MACRO_BENCH_DIR=~/macro-benches PYTHONPATH=src \
-#     python3 -m running minheap \
-#       src/running/config/experiments/mmtk_macro.yml /tmp/mmtk_minheap.yml -a 2
-# =============================================================================
+# MMTk macro-benches: fplaunchpad/ocaml-mmtk (plans GenImmix/Immix/Bactrian/LXR via
+# the plan-<Plan> modifier) vs the stock 5.5.0-rc1 commit it forks from. Includes
+# macro_base.yml. Dynamic heap unless MMTK_HEAP_SIZE_MB (mmtk_heap) is set; every
+# MMTk process runs under `setarch -R`; no olly GC counters (use MMTK_VERBOSE=1).
+# With RUNNING_MACRO_BENCH_DIR=~/macro-benches CONFIG_FILE=<this file>:
+#   build:   bash build_ocaml_binaries_gc_sweep.sh
+#   run:     LOG_DIR=... bash run_ocaml_bench_gc_sweep.sh
+#   minheap: PYTHONPATH=src python3 -m running minheap <this file> /tmp/mmtk_minheap.yml -a 2
 
 includes:
   - "../base/ocaml/macro_base.yml"
 
-# Inherits the full `benchmarks:` set from macro_base.
-# best-of-N: take the min wall time across invocations (panel style).
 overrides:
   invocations: 3
 
@@ -54,8 +18,7 @@ maxheap: 8192
 attempts: 2
 
 modifiers:
-  # Fixed-heap pin (dynamic heap is the default when this is omitted). Used by
-  # `minheap` / fixed-heap repro only — NOT in the dynamic-heap run configs below.
+  # Fixed heap for minheap / repro only; the run configs below use the dynamic heap.
   mmtk_heap:
     type: EnvVar
     var: "MMTK_HEAP_SIZE_MB"
@@ -70,8 +33,6 @@ runtimes:
     type: OCaml
     commit: "4090d6db952ecae1cd0c3493c16d89cacc2bf8c6"
 
-# Dynamic heap (no mmtk_heap). Plans: GenImmix (default), Immix, Bactrian
-# (generational + concurrent, RQ7), LXR (reference counting), vs stock.
 configs:
   - "ocaml-mmtk-cbc66e3|time_stats|plan-GenImmix"
   - "ocaml-mmtk-cbc66e3|time_stats|plan-Immix"

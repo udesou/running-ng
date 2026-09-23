@@ -1,14 +1,7 @@
-"""Constraints on the FreeBSD PMC event groups.
-
-pmcstat allocates all-or-nothing: one unresolvable event name makes it exit 71
-and write nothing, so the whole group yields no counters. That failure is loud
-but total, and it cannot be caught on Linux. These tests pin the group
-definitions against what was actually verified on the hardware, so a plausible
-but unverified event name fails here rather than silently costing a sweep its
-counters.
-
-Verified on rosemary: FreeBSD 15.1, Xeon E5-2640 v4 (Broadwell-EP), against a
-real GC-heavy OCaml workload, as complete groups rather than event by event.
+"""Constraints on the FreeBSD PMC event groups. pmcstat allocates
+all-or-nothing (one unresolvable name: exit 71, no counters), and that cannot
+be caught on Linux, so the groups are pinned to names verified on hardware
+(FreeBSD 15.1, Xeon E5-2640 v4).
 """
 import re
 from pathlib import Path
@@ -19,10 +12,8 @@ import yaml
 CONFIG_DIR = Path(__file__).parent.parent / "src" / "running" / "config" / "base" / "ocaml"
 BASE_CONFIGS = ["micro_base.yml", "macro_base.yml"]
 
-#: Every event name confirmed on the hardware to resolve AND return a non-zero
-#: count. A FreeBSD group may use nothing else. Extend only with names checked
-#: on a real FreeBSD host, never from a datasheet: an unresolvable name costs
-#: the entire group, not just itself.
+#: Event names confirmed on hardware to resolve and count non-zero. Extend only
+#: from a real FreeBSD host, never from a datasheet.
 VERIFIED_EVENTS = {
     # instructions, on a fixed-function counter
     "instructions", "inst_retired.any", "inst_retired.any_p",
@@ -42,27 +33,19 @@ VERIFIED_EVENTS = {
     # stalls and uops
     "resource_stalls.any", "uops_retired.retire_slots",
     "idq_uops_not_delivered.core",
-    # soft PMCs (pmc.soft(3)); see SOFT_EVENTS for why they cost no
-    # programmable counter. Measured on rosemary: PAGE_FAULT.ALL read 60,636
-    # against rusage's 62,357, within 2.8%, and READ + WRITE summed exactly to
-    # ALL (20 + 60,616). On GC workloads write faults are ~99.97% of the
-    # total, the first-touch signature of a growing major heap.
+    # soft PMCs (pmc.soft(3)); PAGE_FAULT.ALL agreed with rusage within 3%
     "PAGE_FAULT.ALL", "PAGE_FAULT.READ", "PAGE_FAULT.WRITE",
 }
 
-#: Events added on source evidence but NOT yet run on FreeBSD hardware, each
-#: with the evidence and the consequence if it is wrong. This is a deliberate
-#: and temporary state: pmcstat allocates all-or-nothing, so an event that
-#: does not resolve costs its whole group every counter. Move an entry into
-#: VERIFIED_EVENTS once measured, or take it out of the group.
+#: Events added on source evidence, not yet run on FreeBSD hardware, each with
+#: its evidence. Move into VERIFIED_EVENTS once measured.
 PENDING_HARDWARE_VERIFICATION: dict = {}
 
-#: Events that cost no programmable counter. Fixed-function hardware ones, and
-#: soft PMCs, which are a separate class with their own 16 rows entirely.
+#: Soft PMCs: a separate class with its own rows, so no programmable counter.
 SOFT_EVENTS = {"PAGE_FAULT.ALL", "PAGE_FAULT.READ", "PAGE_FAULT.WRITE",
                "CLOCK.HARD", "CLOCK.STAT", "CLOCK.PROF"}
 
-#: Events that land on fixed-function counters, so cost no programmable slot.
+#: Fixed-function counters, so no programmable slot.
 FIXED_FUNCTION = {
     "instructions", "inst_retired.any", "inst_retired.any_p",
     "inst_retired.prec_dist",
@@ -70,14 +53,11 @@ FIXED_FUNCTION = {
     "cpu_clk_unhalted.thread_p", "cpu_clk_unhalted.ref_tsc",
 }
 
-#: 3 fixed-function + 4 programmable. Four, not eight, because SMT is on. An
-#: 8th event fails with Invalid argument.
+#: 3 fixed-function + 4 programmable (SMT halves the programmable ones).
 MAX_EVENTS = 7
 MAX_PROGRAMMABLE = 4
 
-#: Pairs that are the same underlying counter. Including both would spend a
-#: programmable slot on a duplicate. Measured identical modulo the sampling
-#: instant: 77,610,381 against 77,610,362 in one run.
+#: Pairs that are the same underlying counter (measured identical).
 SAME_COUNTER = [("llc-misses", "longest_lat_cache.miss")]
 
 
@@ -135,8 +115,7 @@ def test_no_group_repeats_an_event(config):
 
 @pytest.mark.parametrize("config", BASE_CONFIGS)
 def test_no_group_carries_an_event_that_does_not_resolve(config):
-    # The exact names the Linux groups use, which do NOT resolve on FreeBSD.
-    # This is the mistake the whole exercise exists to prevent.
+    # the Linux spellings, which do not resolve on FreeBSD
     linux_only = {"task-clock", "page-faults", "cycles", "branch-misses",
                   "cache-misses", "LLC-load-misses", "dTLB-load-misses",
                   "iTLB-load-misses", "stalled-cycles-frontend",
@@ -149,9 +128,7 @@ def test_no_group_carries_an_event_that_does_not_resolve(config):
 
 @pytest.mark.parametrize("config", BASE_CONFIGS)
 def test_every_group_carries_instructions_and_cycles(config):
-    # Two reasons. They are the only events that reach the contract
-    # vocabulary, and the all-zero guard in PmcStatBackend.collect assumes
-    # every group contains something that cannot legitimately read zero.
+    # the all-zero guard in PmcStatBackend.collect assumes every group has one
     for name, events in _freebsd_groups(config).items():
         assert "instructions" in events, name
         assert "unhalted-cycles" in events, name
@@ -159,9 +136,7 @@ def test_every_group_carries_instructions_and_cycles(config):
 
 @pytest.mark.parametrize("config", BASE_CONFIGS)
 def test_alias_spellings_are_used_so_names_match_linux(config):
-    # EVENT_ALIASES maps unhalted-cycles -> cycles, so recorded event names
-    # come out identical to Linux perf's. The dotted spellings resolve too but
-    # would break that.
+    # the dotted spellings resolve too, but would not alias onto perf's names
     from running import counters
     assert counters.PmcStatBackend.EVENT_ALIASES["unhalted-cycles"] == "cycles"
     for name, events in _freebsd_groups(config).items():
@@ -176,8 +151,6 @@ def test_both_base_configs_define_identical_groups():
 
 
 def test_linux_groups_are_untouched():
-    # The Linux groups must keep working exactly as before; the FreeBSD ones
-    # are additive.
     for config in BASE_CONFIGS:
         mods = yaml.safe_load((CONFIG_DIR / config).read_text())["modifiers"]
         assert mods["perf_grp1"]["val"] == \
@@ -195,44 +168,32 @@ EXAMPLES = (Path(__file__).parent.parent / "src" / "running" / "config"
             / "examples")
 SMOKE = EXAMPLES / "smoke_micro.yml"
 
-#: The configs that must work on FreeBSD as well as Linux. There are no
-#: separate _freebsd copies any more: a group carries both vocabularies and
-#: PerfAndOllyAttach picks by host, so any group these name must define
-#: `val_freebsd`. Naming one that does not would fall back to the Linux events,
-#: of which only `instructions` resolves under hwpmc, and pmcstat allocates
-#: all-or-nothing, so the run would produce NO counters rather than a partial
-#: set. That is the failure this guards.
+#: Configs that must work on FreeBSD as well as Linux: every group they name
+#: must define `val_freebsd`, or the run produces no counters at all.
 PORTABLE_CONFIGS = ["smoke_micro.yml", "all_micro.yml",
                     "smoke_macro.yml", "all_macro.yml"]
 
 
 def test_group_names_are_legal_modifier_names():
-    # Modifier rejects "-" in a name, reserving it for value options, so a
-    # group named perf-grp1-freebsd would be accepted by YAML and then blow up
-    # at config-resolution time.
+    # Modifier rejects "-" in a name (reserved for value options)
     from running.modifier import PerfAndOllyAttach
     for name, events in _freebsd_groups("micro_base.yml").items():
         m = PerfAndOllyAttach(name=name, type="PerfAndOllyAttach",
                               val=",".join(events))
         assert m.name == name
-        # split_quoted splits on whitespace, so the whole comma-separated list
-        # arrives as one element; split_event_list is what fans it out per -p.
         from running import counters
         assert counters.split_event_list(m.perf_events) == events
 
 
 def test_pending_events_carry_their_evidence():
-    # An entry here bypasses the hardware-verified allowlist, so it must say
-    # what the evidence is and what breaks if it is wrong. Otherwise the
-    # allowlist quietly becomes a rubber stamp.
+    # an entry bypasses the allowlist, so it must carry its evidence
     for event, reason in PENDING_HARDWARE_VERIFICATION.items():
         assert len(reason) > 80, "{} needs a real justification".format(event)
 
 
 @pytest.mark.parametrize("config", BASE_CONFIGS)
 def test_pending_events_are_confined_to_group_1(config):
-    # Deliberate blast-radius limit: an unresolvable name takes its whole
-    # group down, so nothing unverified goes near grp2 or grp3.
+    # nothing unverified goes near grp2 or grp3
     for name, events in _freebsd_groups(config).items():
         pending = set(events) & set(PENDING_HARDWARE_VERIFICATION)
         if pending:
@@ -242,18 +203,14 @@ def test_pending_events_are_confined_to_group_1(config):
 
 @pytest.mark.parametrize("config", BASE_CONFIGS)
 def test_soft_pmcs_do_not_consume_programmable_counters(config):
-    # Soft PMCs are a separate hwpmc class with their own 16 rows, so grp1 can
-    # carry PAGE_FAULT.ALL without touching the 4 programmable counters SMT
-    # leaves. If this stopped holding, grp3 would be the one to break first.
+    # soft PMCs do not use the 4 programmable counters
     for name, events in _freebsd_groups(config).items():
         hardware = [e for e in events if e not in SOFT_EVENTS]
         assert len(hardware) <= MAX_EVENTS
 
 
 def test_page_fault_alias_reaches_the_contract_metric():
-    # The whole reason for the alias: PAGE_FAULT.ALL -> page-faults ->
-    # page_faults, so FreeBSD regains that contract metric with no vocabulary
-    # change.
+    # PAGE_FAULT.ALL -> page-faults -> page_faults
     from running import counters
     from running.contract import vocab
     canonical = counters.PmcStatBackend.EVENT_ALIASES["PAGE_FAULT.ALL"]
@@ -264,9 +221,7 @@ def test_page_fault_alias_reaches_the_contract_metric():
 
 
 def test_coverage_config_runs_every_micro_benchmark_once():
-    # Its purpose is to find what fails to build or run, so one invocation
-    # answers the question and it must not narrow the set beyond the single
-    # suite that needs a different runtime type (asserted separately below).
+    # one invocation is enough to find what fails to build or run
     d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
     assert d["invocations"] == 1
     assert "benchmarks" not in d.get("overrides", {}), \
@@ -276,13 +231,7 @@ def test_coverage_config_runs_every_micro_benchmark_once():
 # --- coverage config: ring size and the OxCaml suite ---------------------------
 
 def test_coverage_config_carries_a_larger_runtime_events_ring():
-    """Without it, four GC-dense benchmarks silently produce bad GC numbers.
-
-    The globroots trio force majors explicitly and pidigits5 does ~13.7k major
-    collections; the default runtime_events ring overflows and olly marks its
-    own output stats_reliable: false, while the invocation still passes. Every
-    established micro config carries re-25|md-2, and this one omitted it.
-    """
+    """The default ring overflows on GC-dense benchmarks and olly's stats become unreliable."""
     d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
     entry = d["configs"][0]
     assert "re-25" in entry, entry
@@ -290,9 +239,7 @@ def test_coverage_config_carries_a_larger_runtime_events_ring():
 
 
 def test_coverage_config_disables_the_oxcaml_suite_without_listing_the_rest():
-    # A top-level `benchmarks:` updates the base's dict key by key, so naming
-    # one suite empty disables just that one. Using `overrides:` instead would
-    # replace the whole block, and go stale whenever micro_base changes.
+    # top-level `benchmarks:` merges key by key; `overrides:` would replace the whole block
     d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
     assert d["benchmarks"] == {"oxcaml-prefetch": []}
     assert "benchmarks" not in d.get("overrides", {})
@@ -335,14 +282,7 @@ def test_portable_configs_name_groups_that_carry_freebsd_events(config):
 
 @pytest.mark.parametrize("config", PORTABLE_CONFIGS)
 def test_every_named_suite_exists_in_the_base(config):
-    """A misspelled suite key is silently ADDED, not rejected.
-
-    Both `benchmarks:` (which updates the base key by key) and `overrides.
-    benchmarks:` take arbitrary keys, so `macro-infer` instead of
-    `macro-infer-monorepo` creates a new empty suite and disables nothing,
-    while looking entirely correct. That happened while writing the tier-1
-    config and only showed up in a benchmark count.
-    """
+    """A misspelled suite key is silently added as an empty suite, not rejected."""
     d = yaml.safe_load((EXAMPLES / config).read_text())
     base_name = d["includes"][0].split("/")[-1]
     base = yaml.safe_load((BASE_DIR / base_name).read_text())["benchmarks"]
@@ -355,18 +295,7 @@ def test_every_named_suite_exists_in_the_base(config):
 
 
 def test_all_macro_enables_every_suite_the_base_defines():
-    """No suite is disabled any more, and the count is pinned.
-
-    This config used to be all_macro_freebsd_tier1.yml, where "tier 1" meant
-    the suites needing no system library, because the validation host had none
-    installed and nobody could pkg install. All of them are installed now and
-    every suite was verified building and running on FreeBSD 15.1 (95/95), so
-    the distinction describes nothing and the disable block is gone.
-
-    Pinning the number matters: dropping a suite from the base, or quietly
-    reintroducing a `benchmarks:` block here, would both show up as a count
-    change rather than as a silently smaller run.
-    """
+    """No suite is disabled, and the count is pinned so a silently smaller run shows up."""
     d = yaml.safe_load((EXAMPLES / "all_macro.yml").read_text())
     assert "benchmarks" not in d, (
         "all_macro.yml disables suites again; if that is deliberate, say which "
@@ -377,22 +306,15 @@ def test_all_macro_enables_every_suite_the_base_defines():
     base = yaml.safe_load((BASE_DIR / "macro_base.yml").read_text())["benchmarks"]
     live = {s_: v for s_, v in base.items() if v}
     assert sum(len(v) for v in live.values()) == 95
-    # lavyek is in a private repo and merlin is empty upstream; both are empty
-    # in the base already, so 21 suites carry the 95.
+    # lavyek and merlin are empty in the base, so 21 suites carry the 95
     assert len(live) == 21
     assert {s_ for s_, v in base.items() if not v} == {
         "macro-merlin", "macro-lavyek-monorepo"}
 
-# --- the configs must actually LOAD -----------------------------------------
-# Everything above reads the YAML with yaml.safe_load, which never touches the
-# `includes:` merge. all_macro.yml (then all_macro_freebsd_tier1.yml) redefined
-# macro_base.yml already sets at top level, which combine() rejects outright;
-# it therefore could not load on ANY platform while passing every test here.
-# Parse the file the way running-ng parses it, so that cannot recur.
-#
-# from_file + validate only. NOT resolve_class(): constructing a `type: OCaml`
-# runtime provisions its opam switch, so calling it from a test would wipe and
-# rebuild a compiler.
+# --- the configs must actually load -------------------------------------------
+# yaml.safe_load never exercises the `includes:` merge, so parse the file the
+# way running-ng does. from_file + validate only: resolve_class() would
+# provision opam switches.
 @pytest.mark.parametrize("config", [
     "all_micro.yml",
     "all_macro.yml",
@@ -407,9 +329,7 @@ def test_freebsd_example_configs_load_through_the_real_merge(config):
 
 
 def test_tier1_overrides_reach_the_merged_config():
-    # The six scalars belong under `overrides:`; if they drift back to top
-    # level the merge raises, and if they are dropped the run silently takes
-    # macro_base's invocations: 3 instead of the coverage run's 1.
+    # the scalars belong under `overrides:`; dropped, the run silently takes macro_base's
     from running.config import Configuration
 
     c = Configuration.from_file(EXAMPLES, "all_macro.yml")
@@ -421,17 +341,9 @@ def test_tier1_overrides_reach_the_merged_config():
 
 
 # --- the documented command must actually select something -------------------
-# smoke_macro.yml shipped a usage block whose command could not run:
-# with RUNNING_TAG unset, runbms falls back to `default_run` (runbms.py), whose
-# exercised_by names the _default rungs, while the config restricts benchmarks:
-# to the legacy anchors. Empty intersection, ValueError, no run. Nothing caught
-# it because no test ever applied the tag a config tells you to use.
-#
-# So: take the RUNNING_TAG out of each config's own usage block, apply exactly
-# what runbms would apply, and require that benchmarks remain.
-# Only the COMMAND counts, so the line must end in a backslash continuation.
-# A bare `^#\s*RUNNING_TAG=` also matches prose explaining the variable, which
-# makes the test pass on precisely the config it is meant to fail on.
+# Apply the RUNNING_TAG from each config's usage block (or runbms's default_run
+# fallback) and require that benchmarks remain. Only a command line (ending in
+# a backslash continuation) counts; prose mentioning RUNNING_TAG= does not.
 _TAG_IN_USAGE = re.compile(r"^#\s+RUNNING_TAG=([A-Za-z0-9_,]+)\s*\\\s*$", re.M)
 
 

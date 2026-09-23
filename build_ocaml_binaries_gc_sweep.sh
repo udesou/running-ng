@@ -1,25 +1,12 @@
 #!/usr/bin/env bash
-# build_ocaml_binaries_gc_sweep.sh — Build all benchmark binaries without running them.
-#
-# This script mirrors run_ocaml_bench_gc_sweep.sh but only compiles the
-# benchmark binaries.  Useful for verifying that all benchmarks build
-# successfully with the configured runtimes before committing to a full sweep.
+# Build all benchmark binaries without running them (the build half of
+# run_ocaml_bench_gc_sweep.sh). Usage: CONFIG_FILE=<config> bash build_ocaml_binaries_gc_sweep.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# --- User-configurable paths ------------------------------------------------
-# RUNNING_BENCH_DIR / RUNNING_MACRO_BENCH_DIR: root of the OCaml benchmark tree.
-# The two names are synonyms — micro configs expand ${RUNNING_BENCH_DIR}, macro
-# configs ${RUNNING_MACRO_BENCH_DIR} — and both must be exported so a config of
-# either kind resolves its paths.
-#
-# This block used to read RUNNING_BENCH_DIR only, and resolve the ../benches
-# fallback *eagerly* under `set -e`: a macro-only build that set just
-# RUNNING_MACRO_BENCH_DIR aborted here if ~/benches did not exist, and if it did,
-# the macro config's ${RUNNING_MACRO_BENCH_DIR} reached the YAML unset and
-# expanded to a literal. run_ocaml_bench_gc_sweep.sh already did it this way;
-# the two entry points now agree.
+# RUNNING_BENCH_DIR (micro configs) and RUNNING_MACRO_BENCH_DIR (macro configs) are
+# synonyms; both must be exported so a config of either kind resolves its paths.
 export RUNNING_BENCH_DIR="${RUNNING_BENCH_DIR:-${RUNNING_MACRO_BENCH_DIR:-$(cd "$ROOT_DIR/../benches" 2>/dev/null && pwd || echo "$ROOT_DIR/../benches")}}"
 export RUNNING_MACRO_BENCH_DIR="${RUNNING_MACRO_BENCH_DIR:-$RUNNING_BENCH_DIR}"
 CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/src/running/config/examples/ocaml_gc_sweep_example.yml}"
@@ -27,7 +14,6 @@ PYTHONPATH="$ROOT_DIR/src"
 OLLY_DIR="${OLLY_DIR:-$(cd "$ROOT_DIR/../runtime_events_tools" 2>/dev/null && pwd || echo "$HOME/runtime_events_tools")}"
 OLLY_BIN="${OLLY_BIN:-$OLLY_DIR/_build/install/default/bin}"
 
-# --- Ensure a tools switch with dune/ocamlfind exists ----------------------
 _OPAM=$(command -v opam 2>/dev/null || ([[ -x /usr/local/bin/opam ]] && echo /usr/local/bin/opam))
 
 TOOLS_SWITCH="${TOOLS_SWITCH:-}"
@@ -61,17 +47,14 @@ TOOLS_BIN="$("$_OPAM" var prefix --switch="$TOOLS_SWITCH" 2>/dev/null)/bin"
 echo "Tools switch: $TOOLS_SWITCH ($TOOLS_BIN)"
 export PATH="$TOOLS_BIN:$PATH"
 
-# --- Ensure the opam-compiler plugin is available --------------------------
-# See the same block in run_ocaml_bench_gc_sweep.sh: `opam compiler create`
-# provisions every non-`executable:` runtime, nothing installed the plugin, and
-# a rebuilt tools switch leaves the plugin symlink dangling.
+# `opam compiler create` provisions every non-`executable:` runtime; a rebuilt tools
+# switch leaves the plugin symlink dangling.
 _OPAM_PLUGIN_BIN="$("$_OPAM" var root 2>/dev/null)/plugins/bin/opam-compiler"
 if [[ ! -x "$_OPAM_PLUGIN_BIN" && ! -x "$TOOLS_BIN/opam-compiler" ]]; then
   echo "opam-compiler plugin not found — installing into '$TOOLS_SWITCH'..."
   "$_OPAM" install --switch "$TOOLS_SWITCH" --yes opam-compiler
 fi
 
-# --- Build olly if it hasn't been built yet --------------------------------
 if [[ ! -x "$OLLY_BIN/olly" ]]; then
   echo "olly not found at $OLLY_BIN/olly — building from $OLLY_DIR ..."
   if [[ ! -d "$OLLY_DIR" ]]; then

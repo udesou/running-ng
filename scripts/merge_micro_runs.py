@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
 """Merge a partial rerun into a completed run's artifacts.
 
-Written for merging the 2026-08-28 micro fp/flambda rerun (35 fixed
-benchmarks) into the main run, but generic over any pair of run dirs that
-share config strings (and therefore contract config_ids).
-
     python3 scripts/merge_micro_runs.py MAIN_RUN_DIR RERUN_DIR MERGED_DIR
 
-- MERGED_DIR is created as a full copy of MAIN_RUN_DIR, then every benchmark
-  present in RERUN_DIR has its artifacts REPLACED by the rerun's: legacy
-  .log / olly_* / perf_* files, and its rows in contract/measurements/*.ndjson.
-  Replacement (not append) is deliberate: a benchmark was rerun because its
-  data in the main run was crashed, mismeasured, or absent.
-- contract/manifest.json: config_ids must match between the two runs (that is
-  what makes the merge sound); benchmarks are unioned; a _merged_from note
-  records provenance. Measurement rows keep their own run_id, so a reader can
-  still tell which run produced which row.
+MERGED_DIR is a copy of MAIN_RUN_DIR in which every benchmark present in
+RERUN_DIR has its artifacts (logs, olly_*/perf_* files, measurement rows)
+replaced, not appended. The two runs must have identical config_ids;
+the manifest records provenance in _merged_from.
 """
 import json
 import shutil
@@ -60,9 +51,6 @@ def main():
 
     shutil.copytree(main_dir, merged_dir)
 
-    # Legacy artifacts: drop the main run's files for replaced benchmarks,
-    # copy the rerun's in. Filenames encode benchmark+config, so a rerun file
-    # would otherwise silently shadow nothing / coexist ambiguously.
     dropped = 0
     for f in list(merged_dir.iterdir()):
         stem = f.name.split(".")[0]
@@ -81,7 +69,6 @@ def main():
         copied += 1
     print(f"legacy artifacts: dropped {dropped} stale files, copied {copied}")
 
-    # Contract measurements: drop replaced benchmarks' rows, append rerun rows.
     for tool in ("olly", "perf"):
         out = []
         kept = dropped_rows = added = 0
@@ -102,7 +89,6 @@ def main():
         pa.write_text("\n".join(out) + "\n")
         print(f"{tool}.ndjson: kept {kept}, dropped {dropped_rows}, added {added}")
 
-    # Manifest: union benchmarks, record provenance.
     seen = {(b["name"], b.get("suite")) for b in man_a["benchmarks"]}
     merged_benchmarks = list(man_a["benchmarks"])
     for b in man_b["benchmarks"]:
@@ -116,7 +102,6 @@ def main():
     print(f"manifest: {len(merged_benchmarks)} benchmarks, "
           f"merged from {man_a['_merged_from']}")
 
-    # Sanity: every benchmark should now have rows for every config in perf.
     import collections
     cnt = collections.Counter()
     p = merged_dir / "contract" / "measurements" / "perf.ndjson"

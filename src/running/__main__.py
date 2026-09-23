@@ -33,7 +33,6 @@ def main():
     parsers = setup_parser()
     args = vars(parsers.parse_args())
 
-    # Config root logger
     if args.get("verbose") == True:
         log_level = logging.DEBUG
     else:
@@ -54,14 +53,11 @@ def main():
             else:
                 parsers.print_help()
     except OpamRootBusyError as e:
-        # Expected, actionable condition — report it plainly rather than as a
-        # traceback, and exit non-zero so scripts and CI notice.
+        # Actionable condition: report plainly, no traceback.
         logger.error("%s", e)
         sys.exit(1)
     finally:
-        # Provisioning a switch selects it, and removing a stale one deselects
-        # whatever was active; put the user's original switch back either way,
-        # including when the run failed or was interrupted.
+        # Provisioning/removing switches changes the active one; always restore the user's.
         OCaml.restore_active_switch()
         OCaml.release_opam_lock()
 

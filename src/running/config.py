@@ -74,20 +74,9 @@ class Configuration(object):
         return self.__items.get(name)
 
     def validate_tags(self) -> None:
-        """Cross-check the ``tags:`` block — every ``(suite, program)`` listed
-        under any tag's ``exercised_by:`` or ``cold:`` must exist in
-        ``suites:``.  Each tag entry must either name at least one
-        ``exercised_by:`` program *or* carry a ``gap:`` note (so an empty
-        tag is intentional, not a typo).
-
-        Errors here mean the tags block has fallen out of sync with the
-        suite definitions — typo, program rename, or new gap that wasn't
-        annotated.  This method is a no-op when no ``tags:`` block is
-        present.
-
-        Must be called before :meth:`resolve_class` for the same reason
-        :meth:`validate` is — the suite definitions are still raw dicts
-        at that point.
+        """Check the ``tags:`` block: every ``exercised_by:``/``cold:`` program
+        must exist in ``suites:``, and a tag with no ``exercised_by:`` must carry
+        a ``gap:`` note. Call before :meth:`resolve_class`, while suites are raw dicts.
         """
         tags = self.__items.get("tags") or {}
         if not tags:
@@ -146,32 +135,10 @@ class Configuration(object):
             )
 
     def apply_tag_filter(self, tag_names: list) -> None:
-        """Restrict ``benchmarks:`` to the union of programs listed under
-        the named tag(s) in the ``tags:`` block.  Intended to be driven
-        by the ``RUNNING_TAG`` environment variable; comma-separated
-        names are union'd.
-
-        Semantics:
-
-        * **Union across tags.**  A program is kept if it appears under
-          ``exercised_by:`` of *any* named tag.
-        * **Intersection with existing ``benchmarks:``.**  The filter
-          never re-enables a program that is already excluded — if
-          ``benchmarks.<suite>`` is ``[]`` (e.g. ``macro-merlin`` is
-          disabled), no tag will revive it.  This matters for benches
-          we keep tag-listed but disable for reasons unrelated to the
-          runtime feature they exercise (upstream race, parked, etc.).
-        * **``cold:`` is ignored** for filtering — it's documentation
-          only, used by :meth:`validate_tags` to track presence-but-
-          cold uses.
-
-        Raises ``ValueError`` if:
-
-        * the configuration has no ``tags:`` block;
-        * any of ``tag_names`` is not defined under ``tags:``;
-        * the filter result is empty across every suite (catches typos
-          in tag names, all-gap tag sets, and cases where every tagged
-          benchmark happens to be disabled in ``benchmarks:``).
+        """Restrict ``benchmarks:`` to programs under ``exercised_by:`` of any
+        named tag (RUNNING_TAG). Never re-enables a program already excluded
+        from ``benchmarks:``; ``cold:`` is ignored. Raises ``ValueError`` on an
+        unknown tag or an empty result.
         """
         tags = self.__items.get("tags")
         if not tags:
@@ -200,14 +167,7 @@ class Configuration(object):
         filtered: dict = {}
         for suite, programs in existing.items():
             wanted = selected.get(suite, set())
-            # An entry is either a bare program name or the dict form
-            # ``{name:, bm_name:, timeout:}`` that
-            # ``BenchmarkSuite.get_benchmark`` accepts to override a
-            # benchmark's timeout.  Compare on the program name in both
-            # cases: ``p in wanted`` on the dict form raises
-            # ``TypeError: unhashable type: 'dict'``, so before this any
-            # per-benchmark timeout override was unusable together with
-            # RUNNING_TAG.
+            # Entries may be the dict form ``{name:, bm_name:, timeout:}``; compare on the name.
             filtered[suite] = [
                 p for p in programs
                 if (p if isinstance(p, str) else p.get("name")) in wanted
@@ -240,31 +200,10 @@ class Configuration(object):
         )
 
     def validate(self) -> None:
-        """Cross-check ``runtimes:`` / ``configs:`` / ``comparisons:`` consistency.
-
-        Raises ``ValueError`` if any of the following conditions hold:
-
-        Structural problems in ``comparisons:``:
-          * Block missing ``a`` or ``b`` keys.
-          * Unknown ``mode`` (must be ``pairwise`` or ``cartesian``).
-          * Pairwise length mismatch where neither side is a scalar.
-          * Non-string entries in ``a`` / ``b`` lists.
-
-        Cross-block consistency:
-          * Runtime referenced by ``configs:`` but not declared in ``runtimes:``.
-          * Runtime referenced by ``comparisons:`` but not declared in ``runtimes:``.
-          * Runtime declared in ``runtimes:`` but not referenced by any
-            ``configs:`` entry (dead declaration).
-          * (When ``comparisons:`` is present) Runtime referenced by a
-            comparison but not in any ``configs:`` entry — would produce
-            no data.
-          * (When ``comparisons:`` is present) Runtime in ``configs:`` not
-            referenced by any comparison block — data would be collected
-            but never rendered.
-
-        Must be called *before* :meth:`resolve_class`, which filters
-        ``runtimes`` to only those referenced by ``configs`` — calling
-        after would mask the "declared but unused" check.
+        """Cross-check ``runtimes:`` / ``configs:`` / ``comparisons:``: well-formed
+        comparison blocks, and every runtime declared, used by a config, and (when
+        comparisons exist) compared. Call before :meth:`resolve_class`, which
+        drops unreferenced runtimes and would mask the dead-declaration check.
         """
         runtimes = self.__items.get("runtimes") or {}
         configs = self.__items.get("configs") or []
@@ -387,19 +326,8 @@ class Configuration(object):
         """
         new_values = copy.deepcopy(self.__items)
         for k, v in other.__items.items():
-            # A key written with nothing under it parses as None, not as an
-            # empty container: deleting the entries below `benchmarks:` and
-            # leaving the key behind is the obvious way to enable everything
-            # the base defines, and it used to die in the merge below with a
-            # bare "TypeError: 'NoneType' object is not iterable" naming
-            # neither the file nor the key.
-            #
-            # Treat it as no override at all, which is what an explicit `{}`
-            # already does here (`.update({})` is a no-op) and what omitting
-            # the key does. Warn rather than stay silent: an emptied key is
-            # usually an edit that lost its content, and this config family
-            # already has a trap in the same area, where a suite name absent
-            # from the base is added as an empty suite instead of rejected.
+            # A key with nothing under it parses as None; treat it like an
+            # explicit `{}` (no override), but warn: it is usually a lost edit.
             if v is None and k in new_values:
                 logging.warning(
                     "Key `%s` is present but empty; ignoring it and keeping "

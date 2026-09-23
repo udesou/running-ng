@@ -1,59 +1,14 @@
-# =============================================================================
-# All micro benchmarks, once each — coverage run
-# =============================================================================
-# Purpose is COVERAGE, not measurement: build and run every micro benchmark
-# once, to find which ones fail to build or run. One invocation each, so the
-# numbers are not worth comparing; do not read them as results.
-#
-# 195 benchmarks across 13 suites, so this is long. Expect build failures
-# rather than run failures, and expect them to cluster by suite. Verified
-# 195/195 on FreeBSD 15.1.
-#
-# Runs on Linux and FreeBSD from this one file. `perf_grp1` carries both event
-# vocabularies (`val` and `val_freebsd`) and PerfAndOllyAttach picks by host.
-# That matters here: of perf_grp1's Linux events only `instructions` resolves
-# under hwpmc, and pmcstat allocates all-or-nothing, so the wrong list yields
-# no counters at all rather than a partial set. A config that wants to pin one
-# platform's events deliberately can still name perf_grp1_freebsd.
-#
-# `re-25|md-2` matches what every established micro config uses
-# (config/experiments/micro_5.5.0*.yml). Without it four GC-event-dense
-# benchmarks overflow the default runtime_events ring and olly marks its own
-# output `stats_reliable: false`: the globroots trio, which force majors
-# explicitly, and pidigits5 at ~13.7k major collections. `md-2` is safe across
-# the multicore suites because those benchmarks declare their own `d=` and a
-# per-benchmark ocamlrunparam wins over the modifier.
-#
-# No CpuPin. Pinning is verified separately and confining a coverage run to
-# one NUMA node would only make it slower; add `|pin_bench` to the config
-# string if you want it exercised here too.
-#
-# oxcaml-prefetch is excluded: it needs a `type: OxCaml` runtime and would
-# otherwise fail its build check on every run as pure noise. Exercising OxCaml
-# provisioning on FreeBSD is worthwhile but deserves its own config, not a
-# side effect of a coverage run.
-#
-# Usage. `bash`, not `sh`: the wrapper is #!/usr/bin/env bash. PYTHON matters
-# because running-ng is usually in a virtualenv.
-#
-#   cd ~/running-ng
-#   PYTHON=/path/to/venv/bin/python \
-#   RUNNING_BENCH_DIR=~/benches \
-#   CONFIG_FILE=src/running/config/examples/all_micro.yml \
-#   LOG_DIR=/tmp/all_micro \
-#   RUNNING_REUSE_SWITCHES=1 \
-#     bash run_ocaml_bench_gc_sweep.sh
-#
-# RUNNING_REUSE_SWITCHES=1 is worth setting here: without it, constructing the
-# runtime WIPES and rebuilds running-ng-ocaml-5.4.1, costing a ~7 minute
-# compile before any benchmark runs.
-# =============================================================================
+# Coverage run of every micro benchmark (195 programs, 13 suites), 1 invocation each;
+# not a measurement. Includes micro_base.yml. Works on Linux and FreeBSD (perf_grp1
+# carries both event vocabularies). re-25|md-2 matches the established micro configs;
+# without it globroots_* and pidigits5 overflow the ring (olly stats_reliable: false).
+# md-2 is safe: multicore benchmarks declare their own d= in micro_base.
+# Run: PYTHON=<venv python> RUNNING_BENCH_DIR=~/benches CONFIG_FILE=<this file> \
+#      LOG_DIR=/tmp/all_micro RUNNING_REUSE_SWITCHES=1 bash run_ocaml_bench_gc_sweep.sh
 
 includes:
   - "../base/ocaml/micro_base.yml"
 
-# Coverage, not measurement: one invocation is enough to answer "does it build
-# and run at all", which is the whole question here.
 invocations: 1
 remote_host: null
 compress_logs: false
@@ -61,15 +16,9 @@ minheap_multiplier: 1.0
 heap_range: 6
 spread_factor: 1
 
-# A top-level `benchmarks:` dict UPDATES the base's, key by key, so naming one
-# suite with an empty list disables just that suite and leaves every other one
-# tracking micro_base. (`overrides:` would replace the whole block, which would
-# mean listing all 195 remaining entries and going stale the moment micro_base
-# gains a benchmark.)
+# A top-level `benchmarks:` dict updates the base key by key, so this disables one suite only.
 benchmarks:
-  # Needs a `type: OxCaml` runtime, so under an OCaml runtime it fails its
-  # build check every run. The harness rejects it correctly and carries on,
-  # but for a coverage config that is pure noise.
+  # Needs a `type: OxCaml` runtime; under OCaml it fails its build check every run.
   oxcaml-prefetch: []
 
 runtimes:

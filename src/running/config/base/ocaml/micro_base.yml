@@ -1,33 +1,15 @@
-# =============================================================================
-# Micro / multicore benchmark BASE — shared suites, modifiers, benchmarks
-# =============================================================================
-# Included by:
-#   - examples/ocaml_gc_sweep_example.yml
-#   - experiments/gc_sweep_all_versions.yml
-#
-# Defines every (benchmark, build script) pair under ~/benches/ that the
-# running-ng OCaml pipeline can drive, plus the standard modifier set
-# (perf groups, time_stats, olly_gc, OCAMLRUNPARAM templates). This file
-# does NOT define runtimes, configs, config_sweep, or invocations — those
-# belong in the including config (the experiment).
-#
-# Paths use ${RUNNING_BENCH_DIR} which is supplied by the launch script.
-# =============================================================================
+# Micro/multicore benchmark base: sandmark-derived suites under ${RUNNING_BENCH_DIR}
+# (~/benches), the standard modifiers (perf groups, olly, OCAMLRUNPARAM templates) and
+# the enabled-benchmark list. Experiments include it with
+#   includes: ["../base/ocaml/micro_base.yml"]
+# and define runtimes, configs, config_sweep and invocations themselves.
+# Run: running-env/bin/python -m running runbms LOG_DIR <experiment>.yml
 
-# =============================================================================
-# Suites
-# =============================================================================
-# Each suite defines the available programs (path, args, timeout).  The
-# `benchmarks` section below selects which programs are actually run.
-#
-# Suite types:
-#   OCamlBenchmarkSuite          — sequential benchmarks (any OCaml version)
-#   OCamlMulticoreBenchmarkSuite — enforces OCaml >= 5 at build time
+# Suites. OCamlMulticoreBenchmarkSuite enforces OCaml >= 5 at build time;
+# OCamlBenchmarkSuite builds on any version.
 
 suites:
-  # ---------------------------------------------------------------------------
-  # simple/ — stdlib-only sequential benchmarks
-  # ---------------------------------------------------------------------------
+  # simple/ (stdlib-only sequential)
   sandmark-sequential:
     type: OCamlBenchmarkSuite
     timeout: 120
@@ -38,11 +20,7 @@ suites:
       bdd:
         path: "${RUNNING_BENCH_DIR}/simple/bdd"
         args: ""
-      # `binarytrees` used to be declared here pointing at simple/binarytrees,
-      # a directory that does not exist in ~/benches. Nothing selected it in
-      # this file, so it was invisible until a config's `overrides:` picked it
-      # up (smoke_micro_550.yml did, and failed). The real one is
-      # `binarytrees5` in the sandmark-with-packages suite below.
+      # No `binarytrees` here: simple/binarytrees does not exist; use binarytrees5 (sandmark-with-packages).
       hamming:
         path: "${RUNNING_BENCH_DIR}/simple/hamming"
         args: "500000"
@@ -93,7 +71,7 @@ suites:
       sequence_cps:
         path: "${RUNNING_BENCH_DIR}/simple/sequence"
         args: "10000"
-      # --- simple/stdlib ---
+      # simple/stdlib
       array_bench_fold:
         path: "${RUNNING_BENCH_DIR}/simple/stdlib"
         build_script: "array_bench.build.sh"
@@ -370,7 +348,7 @@ suites:
         path: "${RUNNING_BENCH_DIR}/simple/stdlib"
         build_script: "big_array_bench.build.sh"
         args: "big_array_int32_rev 1024 50000"
-      # --- simple/simple-tests ---
+      # simple/simple-tests
       alloc:
         path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
         args: "200_000"
@@ -466,9 +444,9 @@ suites:
         args: "75 10000000"
       weak_htbl:
         path: "${RUNNING_BENCH_DIR}/simple/simple-tests"
-        # 1000 finished in ~6ms, too short for olly to attach; ~6.4s at 20M.
+        # 1000 finishes in ~6ms, too short for olly to attach.
         args: "20000000"
-      # --- simple/capi (OCaml→C FFI call overhead) ---
+      # simple/capi (OCaml->C FFI call overhead)
       capi_no_args_alloc:
         path: "${RUNNING_BENCH_DIR}/simple/capi"
         build_script: "capi.build.sh"
@@ -494,9 +472,7 @@ suites:
         build_script: "capi.build.sh"
         args: "test_many_args_noalloc 10000000"
 
-  # ---------------------------------------------------------------------------
-  # with_deps/ — benchmarks needing dune multi-library builds or generated data
-  # ---------------------------------------------------------------------------
+  # with_deps/ (dune multi-library builds or generated data)
   sandmark-with-deps:
     type: OCamlBenchmarkSuite
     timeout: 300
@@ -504,8 +480,7 @@ suites:
       graph500seq:
         path: "${RUNNING_BENCH_DIR}/with_deps/graph500seq"
         args: "${RUNNING_BENCH_DIR}/with_deps/graph500seq/edges.data"
-      # --- benchmarksgame (fasta-generated input data; no external packages) ---
-      # build.deps.sh generates input25000000.txt and input5000000.txt via fasta3 on first build.
+      # build.deps.sh generates input25000000.txt / input5000000.txt via fasta3 on first build.
       knucleotide:
         path: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame"
         args: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame/input25000000.txt"
@@ -519,10 +494,7 @@ suites:
         path: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame"
         args: "${RUNNING_BENCH_DIR}/with_deps/benchmarksgame/input5000000.txt"
 
-  # ---------------------------------------------------------------------------
-  # with_packages/ — benchmarks needing external opam packages
-  # Packages are auto-installed by each build script (no manual setup needed).
-  # ---------------------------------------------------------------------------
+  # with_packages/ (external opam packages, auto-installed by each build script)
   sandmark-with-packages:
     type: OCamlBenchmarkSuite
     timeout: 120
@@ -540,8 +512,7 @@ suites:
       mandelbrot6:
         path: "${RUNNING_BENCH_DIR}/with_packages/benchmarksgame"
         args: "16000"
-      # Was `nbody`, which collided with multicore-numerical's own `nbody`
-      # (a different program). Build script is still nbody.build.sh.
+      # Named to avoid colliding with multicore-numerical's nbody, a different program.
       nbody_benchmarksgame:
         path: "${RUNNING_BENCH_DIR}/with_packages/benchmarksgame"
         build_script: nbody.build.sh
@@ -572,37 +543,26 @@ suites:
       thread_ring_lwt_stream:
         path: "${RUNNING_BENCH_DIR}/with_packages/thread-lwt"
         args: "20000"
-      # NOTE: test_decompress, ydump, owl_gc and zarith_pi used to live here.
-      # They now live in ~/macro-benches (see macro_base.yml) as vendored,
-      # input-size-laddered benchmarks; the copies here `opam install`ed
-      # whatever the solver picked per switch, which is exactly the
-      # non-hermeticity macro-benches exists to avoid.
-      # Three args: num_domains tasks_to_spawn list_length. The old "2 1000"
-      # was missing the third and crashed on Sys.argv.(3) every run.
+      # args = num_domains tasks_to_spawn list_length (all three required).
       test_sched:
         path: "${RUNNING_BENCH_DIR}/with_packages/test_sched"
         args: "2 1000000 1000"
-        ocamlrunparam: "d=3"  # 2 domains + main
-      # contrast — disabled 2026-08-10: camlimages 5.0.5 does not build on
-      # OCaml >= 5.4 (`ld: final link failed: bad value`), so every sweep spent
-      # a build slot to report a failure. Source is still in ~/benches.
-      #   path: "${RUNNING_BENCH_DIR}/with_packages/sauvola"
-      #   args: "${RUNNING_BENCH_DIR}/with_packages/sauvola/example2_small.ppm /tmp/sauvola_out"
-      # OxCaml-incompatible (lwt.unix locality error)
+        ocamlrunparam: "d=3"
+      # contrast disabled: camlimages 5.0.5 does not build on OCaml >= 5.4 ("ld: final
+      # link failed: bad value"). Source is still in ~/benches/with_packages/sauvola.
+      # test_lwt is OxCaml-incompatible (lwt.unix locality error).
       test_lwt:
         path: "${RUNNING_BENCH_DIR}/with_packages/valet"
         args: "100"
 
-  # ---------------------------------------------------------------------------
-  # multicore/ — OCaml 5+ benchmarks (effects, domains, domainslib)
-  # ---------------------------------------------------------------------------
+  # multicore/ (OCaml 5+: effects, domains, domainslib). ocamlrunparam d = spawned domains + main.
   multicore-effects:
     type: OCamlMulticoreBenchmarkSuite
     timeout: 120
     programs:
       algorithmic_differentiation:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        args: "300000"  # 100 iters ran ~3ms; ~4.5s at 300k
+        args: "300000"
       rec_eff_fib:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
         args: ""
@@ -623,7 +583,7 @@ suites:
         args: ""
       effect_throughput_val:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        args: "1_000_000_000"  # 1M ops ran ~10ms; ~8.3s at 1G
+        args: "1_000_000_000"
       effect_throughput_perform:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
         args: "1_000_000"
@@ -633,14 +593,13 @@ suites:
       eratosthenes:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
         args: "1000"
-      # Explicit size: the built-in default (2 x 500M) blows the 120s timeout.
-      # Kept identical to rec_seq_evenodd so the pair stays comparable.
+      # The built-in default (2 x 500M) exceeds the 120s timeout.
       rec_eff_evenodd:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
         args: "2 5000000"
       rec_seq_evenodd:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
-        args: "20 500000000"  # 2x5M ran ~4ms; ~3.5s at 20x500M
+        args: "20 500000000"
       rec_eff_motzkin:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-effects"
         args: ""
@@ -664,87 +623,87 @@ suites:
       test_queue_parallel:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
         args: "1000000"
-        ocamlrunparam: "d=3"  # 2 domains + main
+        ocamlrunparam: "d=3"
       test_stack_sequential:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
         args: "1000000"
       test_stack_parallel:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
         args: "1000000"
-        ocamlrunparam: "d=3"  # 2 domains + main
+        ocamlrunparam: "d=3"
       test_spsc_queue_sequential:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
         args: "100000"
       test_spsc_queue_parallel:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
         args: "1000000"
-        ocamlrunparam: "d=3"  # 2 domains + main
+        ocamlrunparam: "d=3"
       test_spsc_queue_pingpong_parallel:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-structures"
         args: "4 100000"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
 
   multicore-numerical:
     type: OCamlMulticoreBenchmarkSuite
     timeout: 180
     programs:
-      # multicore variants (first arg is always num_domains)
+      # multicore variants (first arg is num_domains)
       mandelbrot6_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 200"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       nbody_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 500 1024"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       floyd_warshall_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 512"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       game_of_life_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 10 1024"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       binarytrees5_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 21"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       spectralnorm2_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 2000"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       fannkuchredux_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 11"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       quicksort_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 2000000"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       mergesort_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 1000000"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       matrix_multiplication_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 512"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       matrix_multiplication_tiling_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 512"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       LU_decomposition_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 1200"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       nqueens_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 13"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       evolutionary_algorithm_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
         args: "4 1000 1000"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       # sequential baselines
       nbody:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-numerical"
@@ -784,7 +743,7 @@ suites:
       grammatrix_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix"
         args: "4 16 ${RUNNING_BENCH_DIR}/multicore/multicore-grammatrix/data/tox21_nrar_ligands_std_rand_01.csv"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
 
   multicore-minilight:
     type: OCamlMulticoreBenchmarkSuite
@@ -792,10 +751,9 @@ suites:
     programs:
       minilight_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-minilight"
-        # argv is `num_domains scene`; the scene alone hits the argv<=2 help
-        # path and exits in 1ms without rendering (~8s with 4 domains).
+        # argv is `num_domains scene`; the scene alone hits the help path and exits without rendering.
         args: "4 ${RUNNING_BENCH_DIR}/multicore/multicore-minilight/roomfront.ml.txt"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
 
   graph500par:
     type: OCamlMulticoreBenchmarkSuite
@@ -804,7 +762,7 @@ suites:
       kernel1_run_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/graph500par"
         args: "-ndomains 4 ${RUNNING_BENCH_DIR}/multicore/graph500par/edges.data"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
 
   mpl:
     type: OCamlMulticoreBenchmarkSuite
@@ -813,31 +771,25 @@ suites:
       primes:
         path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
         args: "-N 100000000 -procs 4"
-        ocamlrunparam: "d=5"  # -procs 4 + main
+        ocamlrunparam: "d=5"
       msort_ints:
         path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
         args: "-N 10000000 -procs 4"
-        ocamlrunparam: "d=5"  # -procs 4 + main
+        ocamlrunparam: "d=5"
       msort_strings:
         path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
         args: "-f ${RUNNING_BENCH_DIR}/with_deps/mpl/inputs/words64.txt -procs 4"
-        ocamlrunparam: "d=5"  # -procs 4 + main
+        ocamlrunparam: "d=5"
       tokens:
         path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
-        # one tokenize of the 600KB input is ~2ms; -repeat 3000 makes it ~5.8s
+        # -repeat lifts a ~2ms tokenize to a measurable run.
         args: "-f ${RUNNING_BENCH_DIR}/with_deps/mpl/inputs/words.txt --no-output -procs 4 -repeat 3000"
-        ocamlrunparam: "d=5"  # -procs 4 + main
+        ocamlrunparam: "d=5"
       raytracer:
         path: "${RUNNING_BENCH_DIR}/with_deps/mpl"
         args: "-n 2000 -procs 4"
-        ocamlrunparam: "d=5"  # -procs 4 + main
+        ocamlrunparam: "d=5"
 
-  # ---------------------------------------------------------------------------
-  # OxCaml-only benchmarks (require a `type: OxCaml` runtime)
-  # These benchmarks use OxCaml-specific APIs (Domain.Safe, prefetch
-  # intrinsics, etc.).  The framework will refuse to build them if the
-  # runtime is not `type: OxCaml` (see runtimes section above).
-  # ---------------------------------------------------------------------------
   multicore-simple-tests:
     type: OCamlMulticoreBenchmarkSuite
     timeout: 120
@@ -845,11 +797,11 @@ suites:
       alloc_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/alloc_multicore"
         args: "2 200_000"
-        ocamlrunparam: "d=3"  # 2 domains + main
+        ocamlrunparam: "d=3"
       pingpong_multicore:
         path: "${RUNNING_BENCH_DIR}/multicore/pingpong_multicore"
         args: "3 1 1000000"
-        ocamlrunparam: "d=4"  # 3 domains + main
+        ocamlrunparam: "d=4"
 
   multicore-gcroots:
     type: OCamlMulticoreBenchmarkSuite
@@ -861,11 +813,11 @@ suites:
       globroots_mp:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-gcroots"
         args: "4 10000"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
       globroots_sp:
         path: "${RUNNING_BENCH_DIR}/multicore/multicore-gcroots"
         args: "4 10000"
-        ocamlrunparam: "d=5"  # 4 domains + main
+        ocamlrunparam: "d=5"
 
   oxcaml-prefetch:
     type: OCamlOxcamlBenchmarkSuite
@@ -875,14 +827,9 @@ suites:
         path: "${RUNNING_BENCH_DIR}/multicore/oxcaml-prefetch"
         args: ""
 
-# =============================================================================
-# Modifiers
-# =============================================================================
-# Modifiers tweak how benchmarks are executed.  They are referenced by name
-# in the pipe-separated config strings (e.g. "ocaml-release|time_stats|s-32768").
+# Modifiers, referenced by name in pipe-separated config strings (e.g. "ocaml-release|time_stats|s-32768").
 
 modifiers:
-  # --- wrappers (prepend commands to the benchmark invocation) ---
   time_stats:
     type: Wrapper
     val: "/usr/bin/time -f \"%Uuser %Ssystem %eelapsed %PCPU (%Xavgtext+%Davgdata %Mmaxresident)k\""
@@ -890,166 +837,46 @@ modifiers:
     type: Wrapper
     val: "olly gc-stats"
 
-  # --- perf + olly attach (PerfAndOllyAttach) ---
-  # Uses SIGSTOP/SIGCONT to freeze the child so both perf stat and olly
-  # gc-stats can attach before any code runs.  Requires `perf` and `olly`
-  # on PATH.
-  #
-  # Run one group at a time to avoid PMU multiplexing.  Each group fits
-  # within ~4 programmable + 3 fixed hardware counters.
-  #
-  # Group 1: baseline IPC (fixed counters + software events)
+  # Freezes the child (SIGSTOP/SIGCONT) so perf stat and olly attach before any code
+  # runs; needs perf and olly on PATH. Run one group at a time to avoid PMU multiplexing.
   perf_grp1:
     type: PerfAndOllyAttach
     val: "task-clock,page-faults,cycles,instructions"
-    # hwpmc vocabulary; used instead of `val` on FreeBSD. See the
-    # PerfAndOllyAttach docstring for why both live here rather than
-    # in a parallel _freebsd config file.
+    # hwpmc event names, used instead of val on FreeBSD.
     val_freebsd: "instructions,unhalted-cycles,PAGE_FAULT.ALL"
-  # Group 2: pipeline stalls
   perf_grp2:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,stalled-cycles-frontend,stalled-cycles-backend"
-    # hwpmc vocabulary; used instead of `val` on FreeBSD. See the
-    # PerfAndOllyAttach docstring for why both live here rather than
-    # in a parallel _freebsd config file.
     val_freebsd: "instructions,unhalted-cycles,idq_uops_not_delivered.core,resource_stalls.any"
-  # Group 3: cache / TLB hierarchy
   perf_grp3:
     type: PerfAndOllyAttach
     val: "task-clock,cycles,cache-misses,LLC-load-misses,dTLB-load-misses,iTLB-load-misses"
-    # hwpmc vocabulary; used instead of `val` on FreeBSD. See the
-    # PerfAndOllyAttach docstring for why both live here rather than
-    # in a parallel _freebsd config file.
     val_freebsd: "instructions,unhalted-cycles,longest_lat_cache.miss,mem_load_uops_retired.l3_miss,dtlb_load_misses.walk_completed,itlb_misses.walk_completed"
 
-  # --- FreeBSD event groups (hwpmc via pmcstat) ---
-  #
-  # The groups above cannot allocate on FreeBSD: of their event names only
-  # `instructions` resolves as a PMC. `task-clock`, `page-faults`, `cycles`,
-  # `branch-misses` and `cache-misses` do not. And pmcstat is all-or-nothing:
-  # one unresolvable name makes it exit 71 and write nothing, so the whole
-  # group yields no counters rather than a partial set. Hence separate groups
-  # rather than per-OS substitution inside the modifier: the config string is
-  # the provenance for a set of numbers, so it should say which events ran.
-  #
-  # Verified as complete groups (not merely event by event) on a Xeon E5-2640
-  # v4 (Broadwell-EP) under FreeBSD 15.1, against a real GC-heavy OCaml
-  # workload: 2/2, 4/4 and 6/6 counters non-zero respectively.
-  #
-  # Hard ceiling: 7 events, being 3 fixed-function plus 4 programmable. Four,
-  # not eight, because SMT is enabled. An 8th event fails `Invalid argument`.
-  # `instructions` and `unhalted-cycles` land on fixed-function counters, so
-  # grp3's four dotted events fill every programmable slot: it is AT the
-  # ceiling. The only event addable to grp3 is the remaining fixed-function
-  # counter, `cpu_clk_unhalted.ref_tsc`; anything else needs a grp4.
-  #
-  # Unlike perf, hwpmc never multiplexes. Over-subscribe and it hard-fails
-  # instead of time-slicing and scaling, so a FreeBSD count is always an
-  # unscaled true count. Both platforms' groups fit within the programmable
-  # counters SMT leaves, so neither is scaling today, but a future addition
-  # will be refused here where Linux would quietly start estimating.
-  #
-  # These are counting PMCs, not sampling ones: `pmcstat -p` allocates a
-  # process-mode counting PMC, and the harness passes none of the sampling
-  # flags (-P/-S/-n/-D/-g). `-C` makes the running total cumulative and `-w`
-  # only sets how often it is printed, so the final row is the exact total
-  # rather than an extrapolation. (This is also why `inst_retired.prec_dist`
-  # is not used even though it resolves: its purpose is PEBS sampling.)
-  #
-  # `page-faults` IS available, as the soft PMC PAGE_FAULT.ALL (see grp1).
-  # `task-clock` is not, and is dropped rather than substituted: CLOCK.STAT is
-  # the nearest soft event but counts stat-clock ticks at ~127 Hz, so it would
-  # be a coarse estimate wearing the name of a Linux exact one, and olly's
-  # `cpu_time` already covers what task-clock was wanted for. So a FreeBSD run
-  # is missing the `task_clock` contract metric and nothing else. The
-  # per-invocation record still carries user_time, system_time, minor_faults,
-  # major_faults and context-switch counts from getrusage, but rusage is not a
-  # contract source, so those do not appear as contract metrics.
-  #
-  # Alias spellings are deliberate: `instructions` and `unhalted-cycles`
-  # rather than `inst_retired.any` / `cpu_clk_unhalted.thread`, though all
-  # four resolve. PmcStatBackend.EVENT_ALIASES canonicalises
-  # `unhalted-cycles` to `cycles`, so the recorded names come out as
-  # `instructions` / `cycles`, identical to Linux perf's, keeping the two
-  # platforms in one result schema. Only these two reach the contract
-  # vocabulary on either platform; every dotted event below is archival in
-  # the raw sidecar, exactly as Linux's stalled-cycles-* and *-misses are.
-  #
-  # Group 1: baseline IPC plus page faults. Direct equivalent of perf_grp1
-  # apart from task-clock.
-  #
-  # PAGE_FAULT.ALL is a SOFT PMC (pmc.soft(3)), not a hardware one. hwpmc
-  # defines page_fault all/read/write in sys/amd64/amd64/trap.c and fires them
-  # from the page-fault handler; hwpmc_soft.c increments a readable counter
-  # whenever the allocated PMC is not in sampling mode, which is our case.
-  # Soft PMCs live in their own class with their own 16 rows, so this costs NO
-  # programmable hardware counter. It is aliased onto perf's `page-faults`, so
-  # it reaches the `page_faults` contract metric with no vocabulary change.
-  #
-  # PAGE_FAULT.READ and PAGE_FAULT.WRITE also exist and have no Linux
-  # equivalent. Worth a look for GC work, since write faults are where
-  # copy-on-write and first-touch of freshly-mapped major-heap pages show up.
-  #
-  # Verified on a Xeon E5-2640 v4 under FreeBSD 15.1: allocates alongside
-  # hardware PMCs in one group, and read 60,636 against rusage's 62,357,
-  # within 2.8%. READ and WRITE sum exactly to ALL (20 + 60,616), and on GC
-  # workloads write faults are ~99.97% of the total, which is the first-touch
-  # signature of a growing major heap.
+  # FreeBSD groups: pmcstat is all-or-nothing (one unresolvable name exits 71 with no
+  # output) and only `instructions` of the Linux names resolves, so separate groups
+  # keep the config string honest about what ran. Ceiling is 7 events (3 fixed + 4
+  # programmable with SMT on) and hwpmc never multiplexes, it fails instead.
+  # task-clock has no exact equivalent and is dropped (olly cpu_time covers it);
+  # page-faults maps to the soft PMC PAGE_FAULT.ALL, which costs no hardware counter.
+  # PmcStatBackend.EVENT_ALIASES canonicalises `unhalted-cycles` to `cycles`.
   perf_grp1_freebsd:
     type: PerfAndOllyAttach
     val: "instructions,unhalted-cycles,PAGE_FAULT.ALL"
-  # Group 2: pipeline stalls. APPROXIMATIONS, not equivalents: perf's
-  # stalled-cycles-frontend/backend are derived events with specific umasks,
-  # so these numbers are NOT comparable with Linux's. Directionally useful
-  # within FreeBSD.
+  # Approximations of perf's stalled-cycles-*; not comparable with Linux numbers.
   perf_grp2_freebsd:
     type: PerfAndOllyAttach
     val: "instructions,unhalted-cycles,idq_uops_not_delivered.core,resource_stalls.any"
-  # Group 3: cache and TLB hierarchy.
-  #
-  #   cache-misses     -> longest_lat_cache.miss
-  #       Linux's cache-misses is PERF_COUNT_HW_CACHE_MISSES, all-request LLC
-  #       misses (loads, stores and prefetches), which is exactly this event.
-  #   LLC-load-misses  -> mem_load_uops_retired.l3_miss
-  #       Closest available, but it counts RETIRED LOAD UOPS where Linux
-  #       counts requests, so speculative loads that never retire and
-  #       prefetches are excluded. NOT numerically comparable with a Linux
-  #       figure. The measured split corroborates the shape: 12.27M load
-  #       misses within 77.61M total LLC misses on an allocation-heavy run.
-  #   dTLB/iTLB-load-misses -> *.walk_completed
-  #       Completed page walks, the conventional perf mapping. Alternatives if
-  #       a different flavour is ever wanted: *.miss_causes_a_walk (walks
-  #       started), *.walk_duration, *.stlb_hit, page_walker_loads.itlb_l*.
-  #
-  # DO NOT add `llc-misses`: it is the SAME counter as longest_lat_cache.miss
-  # (measured 77,610,381 against 77,610,362 in one run, and 48,445,804
-  # against 48,445,767 in another). Adding both would burn one of only four
-  # programmable slots on a duplicate.
-  #
-  # `instructions` here is a deliberate addition that Linux's grp3 lacks. It
-  # costs no programmable slot, being fixed-function, and makes
-  # per-instruction normalisation possible.
+  # mem_load_uops_retired.l3_miss counts retired load uops, not requests: not comparable
+  # with Linux LLC-load-misses. Do not add llc-misses: same counter as
+  # longest_lat_cache.miss and it would burn one of four programmable slots (group is at the ceiling).
   perf_grp3_freebsd:
     type: PerfAndOllyAttach
     val: "instructions,unhalted-cycles,longest_lat_cache.miss,mem_load_uops_retired.l3_miss,dtlb_load_misses.walk_completed,itlb_misses.walk_completed"
 
-  # --- GC run parameters (set via OCAMLRUNPARAM) ---
-  #
-  # gc_verbose: Print GC statistics at program exit.
-  #
-  # IMPORTANT: OxCaml reshuffled the GC verbosity flags relative to stock OCaml.
-  # The CAML_GC_MSG_STATS bit that prints minor/major collection counts, heap
-  # size, etc. at exit is:
-  #   - Stock OCaml (4.x / 5.x):  v=0x400   (bit 10)
-  #   - OxCaml:                    v=0x1000  (bit 12)
-  #
-  # OxCaml added new categories (DOMAIN=0x40, STW=0x80, MINOR_HEAP=0x100,
-  # MAJOR_HEAP=0x200, STACKS=0x800) which pushed STATS from 0x400 to 0x1000.
-  # Using the wrong value silently prints nothing (stock) or address-space
-  # reservation messages (OxCaml) instead of GC stats.
-  #
-  # Pick the modifier matching your runtime:
+  # gc_verbose prints GC stats at exit. OxCaml moved the STATS bit: stock OCaml v=0x400,
+  # OxCaml v=0x1000; the wrong one silently prints nothing (stock) or address-space
+  # messages (OxCaml). Pick the modifier matching the runtime.
   gc_verbose:
     type: OCamlRunParam
     val: "v=0x400"
@@ -1065,29 +892,18 @@ modifiers:
   a:
     type: OCamlRunParam
     val: "a={0}"
-  # Runtime events ring buffer size (log2 words per domain).
-  # Default is 16 (64K words).  Increase to reduce "Lost N events" from olly
-  # when running GC-heavy multicore benchmarks.
-  # NOTE: total events file size = max_domains * 2^e * 8 bytes.
-  # With default max_domains=128, e=21 gives a 2GB file which will fail
-  # ftruncate.  Pair with max_domains (d=) to keep it reasonable.
+  # runtime_events ring, log2 words per domain (default 16). Events file = max_domains
+  # * 2^e * 8 bytes: e=21 at the default d=128 is 2GB and fails ftruncate, so pair with md.
   re:
     type: OCamlRunParam
     val: "e={0}"
-  # Max domains (OCAMLRUNPARAM d=).  Default is 128, but setting it to
-  # the actual number of domains used (main + spawned) reduces the runtime
-  # events file size proportionally.
+  # Max domains; set to main + spawned to shrink the events file.
   md:
     type: OCamlRunParam
     val: "d={0}"
 
-# =============================================================================
-# Benchmarks — which programs to actually run
-# =============================================================================
-# Active benchmarks: compatible with both oxcaml-release and ocaml-release.
-# Some benchmarks are commented out due to OxCaml locality type errors in
-# upstream packages (lwt, yojson) or benchmark source (mandelbrot6_multicore);
-# these build fine with stock OCaml — see BENCHMARK_INCOMPATIBILITIES.md.
+# Benchmarks: the programs actually run. Commented-out entries fail to build on OxCaml
+# (locality errors) but build with stock OCaml.
 
 benchmarks:
   sandmark-sequential:
@@ -1220,7 +1036,6 @@ benchmarks:
     - revcomp2
     - regexredux2
 
-  # Packages are auto-installed by each build script
   sandmark-with-packages:
     - binarytrees5
     - fasta3
@@ -1234,11 +1049,9 @@ benchmarks:
     - zarith_tak
     - test_sched
     - test_lwt
-    # --- OxCaml-incompatible (build OK with stock OCaml) ---
-    # chameneos_redux_lwt     — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
-    # thread_ring_lwt_mvar    — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
-    # thread_ring_lwt_stream  — lwt_unix: OxCaml locality error (bytes @ local in Unix.recv)
-    # ydump                   — yojson: OxCaml locality type error (write_intlit Buffer.t @ local)
+    # OxCaml-incompatible (build OK with stock OCaml):
+    # chameneos_redux_lwt, thread_ring_lwt_mvar, thread_ring_lwt_stream: lwt_unix locality error (bytes @ local in Unix.recv)
+    # ydump: yojson locality error (write_intlit Buffer.t @ local)
 
   multicore-effects:
     - algorithmic_differentiation
@@ -1269,8 +1082,7 @@ benchmarks:
     - test_spsc_queue_pingpong_parallel
 
   multicore-numerical:
-    # --- OxCaml-incompatible (builds OK with stock OCaml) ---
-    # mandelbrot6_multicore  — OxCaml type error: output_bytes `bytes @ local` vs Array.iter
+    # mandelbrot6_multicore: OxCaml type error (output_bytes bytes @ local vs Array.iter); builds with stock OCaml
     - nbody_multicore
     - floyd_warshall_multicore
     - game_of_life_multicore
@@ -1320,7 +1132,7 @@ benchmarks:
     - globroots_mp
     - globroots_sp
 
-  # OxCaml-only — requires a `type: OxCaml` runtime; will error otherwise.
+  # OxCaml-only: requires a `type: OxCaml` runtime, errors otherwise.
   oxcaml-prefetch:
     - oxcaml_prefetch
 

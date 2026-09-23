@@ -1,13 +1,6 @@
 #!/bin/sh
-# Build the legacy → contract adapter.
-#
-# Requires, in the active opam switch: the shared data-contract package
-# `bench-contract` (pin it once to the contract repo) and `yaml`:
-#     opam pin add bench-contract <path-to-ocaml-bench-dashboard>
-#     opam install yaml
-#
-# Produces contract-adapter/bin/adapter, which running-ng invokes on a legacy run
-# directory to emit contract artifacts (see README.md).
+# Build contract-adapter/bin/adapter (legacy run dir -> contract artifacts). Needs
+# `bench-contract` (opam pin add bench-contract <ocaml-bench-dashboard>) and `yaml` in the active switch.
 set -e
 cd "$(dirname "$0")"
 dune build ./adapter.exe

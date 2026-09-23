@@ -1,30 +1,13 @@
-"""No test may hardcode an absolute path to a utility whose location moves.
-
-This is the third time the same bug has been written. `/bin/true` is a Linux
-spelling: FreeBSD ships it at `/usr/bin/true`, and `BinaryBenchmark` asserts
-`program.exists()`, so a hardcoded path fails the whole module there while
-staying green on Linux, which is why it keeps surviving review.
-
-The fix each time is the same, and two test modules already do it:
-
-    TRUE_BIN = shutil.which("true")
-
-Deliberately narrow. It checks only the utilities that genuinely move between
-Linux and FreeBSD, not every absolute path: several tests legitimately use
-/bin/sh, /bin/ls and /bin/sleep, which exist in the same place on both, and
-others use fake paths like "/usr/bin/ocaml" as config placeholders that are
-never executed. Flagging those would be noise, and a noisy test gets ignored.
-
-Uses ast rather than a regex so it reads real string constants and does not
-trip over a comment (such as the ones this rule prompted).
+"""No test may hardcode an absolute path to a utility that moves between
+platforms (`/bin/true` is `/usr/bin/true` on FreeBSD); use shutil.which.
+Checks string constants via ast, so comments do not trip it.
 """
 import ast
 import pathlib
 
 import pytest
 
-#: Utilities Linux and FreeBSD place in different directories. Extend this when
-#: another one bites, rather than widening the rule to every absolute path.
+#: Utilities Linux and FreeBSD place in different directories.
 MOVES_BETWEEN_PLATFORMS = {"true", "false"}
 
 TESTS_DIR = pathlib.Path(__file__).parent
