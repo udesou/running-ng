@@ -58,8 +58,7 @@
 ## [`v0.3.1` (2022-09-18)](https://github.com/anupli/running-ng/releases/tag/v0.3.1)
 ### Added
 #### Base Syntax
-<!-- TODO(docs): the shipped base configs moved to base/upstream/ on 2026-09-23; this path is now $RUNNING_NG_PACKAGE_DATA/base/upstream/... -->
-- Use the `$RUNNING_NG_PACKAGE_DATA` environment variable to refer to base configurations shipped with running-ng, such as `$RUNNING_NG_PACKAGE_DATA/base/runbms.yml`, regardless how you installed runnin-ng.
+- Use the `$RUNNING_NG_PACKAGE_DATA` environment variable to refer to base configurations shipped with running-ng, such as `$RUNNING_NG_PACKAGE_DATA/base/upstream/runbms.yml`, regardless how you installed runnin-ng.
 #### Benchmark Suites
 - `DaCapo` gains an extra key `companion` to facilitate eBPF tracing programs.
 
