@@ -1,0 +1,20 @@
+# The full macro suite on OCaml 5.5.1, 5 invocations: the reference numbers for the
+# current stable compiler. Includes macro_base.yml.
+# Run: RUNNING_MACRO_BENCH_DIR=~/macro-benches RUNNING_REUSE_SWITCHES=1 \
+#      CONFIG_FILE=<this file> RUNNING_TAG=all_benches \
+#      LOG_DIR=$PWD/gc-sweep-logs-macro-5.5.1-$(date +%F) bash run_ocaml_bench_gc_sweep.sh
+# Without RUNNING_TAG this measures the default_run rung of each tool (21 of the 95).
+
+includes:
+  - "../base/ocaml/macro_base.yml"
+
+overrides:
+  invocations: 5
+
+runtimes:
+  ocaml-5.5.1:
+    type: OCaml
+    version: "5.5.1"
+
+configs:
+  - "ocaml-5.5.1|perf_grp1"

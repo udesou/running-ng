@@ -166,12 +166,23 @@ def test_linux_groups_are_untouched():
 
 EXAMPLES = (Path(__file__).parent.parent / "src" / "running" / "config"
             / "examples")
+EXPERIMENTS = EXAMPLES.parent / "experiments"
 SMOKE = EXAMPLES / "smoke_micro.yml"
 
+
+def _config_dir(name):
+    """Configs are named uniquely across examples/ and experiments/."""
+    return EXAMPLES if (EXAMPLES / name).exists() else EXPERIMENTS
+
+
 #: Configs that must work on FreeBSD as well as Linux: every group they name
-#: must define `val_freebsd`, or the run produces no counters at all.
-PORTABLE_CONFIGS = ["smoke_micro.yml", "all_micro.yml",
-                    "smoke_macro.yml", "all_macro.yml"]
+#: must define `val_freebsd`, or the run produces no counters at all. This is
+#: what makes a separate `*_freebsd.yml` copy unnecessary.
+PORTABLE_CONFIGS = ["smoke_micro.yml", "baseline_micro.yml",
+                    "smoke_macro.yml", "baseline_macro.yml",
+                    "baseline_sweep.yml", "baseline_variants.yml",
+                    "micro_5.5.1.yml", "macro_5.5.1.yml",
+                    "macro_fp_flambda_5.5.1.yml", "macro_sweep_5.5.1.yml"]
 
 
 def test_group_names_are_legal_modifier_names():
@@ -222,7 +233,7 @@ def test_page_fault_alias_reaches_the_contract_metric():
 
 def test_coverage_config_runs_every_micro_benchmark_once():
     # one invocation is enough to find what fails to build or run
-    d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "baseline_micro.yml").read_text())
     assert d["invocations"] == 1
     assert "benchmarks" not in d.get("overrides", {}), \
         "overrides would REPLACE the base's set, defeating the coverage point"
@@ -232,7 +243,7 @@ def test_coverage_config_runs_every_micro_benchmark_once():
 
 def test_coverage_config_carries_a_larger_runtime_events_ring():
     """The default ring overflows on GC-dense benchmarks and olly's stats become unreliable."""
-    d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "baseline_micro.yml").read_text())
     entry = d["configs"][0]
     assert "re-25" in entry, entry
     assert "md-2" in entry, entry
@@ -240,7 +251,7 @@ def test_coverage_config_carries_a_larger_runtime_events_ring():
 
 def test_coverage_config_disables_the_oxcaml_suite_without_listing_the_rest():
     # top-level `benchmarks:` merges key by key; `overrides:` would replace the whole block
-    d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "baseline_micro.yml").read_text())
     assert d["benchmarks"] == {"oxcaml-prefetch": []}
     assert "benchmarks" not in d.get("overrides", {})
 
@@ -248,7 +259,7 @@ def test_coverage_config_disables_the_oxcaml_suite_without_listing_the_rest():
 def test_coverage_config_still_tracks_every_other_suite():
     base = yaml.safe_load(
         (EXAMPLES.parent / "base" / "ocaml" / "micro_base.yml").read_text())
-    d = yaml.safe_load((EXAMPLES / "all_micro.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "baseline_micro.yml").read_text())
     merged = dict(base["benchmarks"])
     merged.update(d["benchmarks"])
     disabled = [s for s, b in merged.items() if not b]
@@ -265,8 +276,8 @@ BASE_DIR = EXAMPLES.parent / "base" / "ocaml"
 
 @pytest.mark.parametrize("config", PORTABLE_CONFIGS)
 def test_portable_configs_name_groups_that_carry_freebsd_events(config):
-    d = yaml.safe_load((EXAMPLES / config).read_text())
-    base_name = "micro_base.yml" if "micro" in config else "macro_base.yml"
+    d = yaml.safe_load((_config_dir(config) / config).read_text())
+    base_name = d["includes"][0].split("/")[-1]
     base = yaml.safe_load((BASE_DIR / base_name).read_text())["modifiers"]
     for entry in d["configs"]:
         groups = [t for t in entry.split("|") if t.startswith("perf_grp")]
@@ -283,7 +294,7 @@ def test_portable_configs_name_groups_that_carry_freebsd_events(config):
 @pytest.mark.parametrize("config", PORTABLE_CONFIGS)
 def test_every_named_suite_exists_in_the_base(config):
     """A misspelled suite key is silently added as an empty suite, not rejected."""
-    d = yaml.safe_load((EXAMPLES / config).read_text())
+    d = yaml.safe_load((_config_dir(config) / config).read_text())
     base_name = d["includes"][0].split("/")[-1]
     base = yaml.safe_load((BASE_DIR / base_name).read_text())["benchmarks"]
     named = dict(d.get("benchmarks", {}))
@@ -294,11 +305,11 @@ def test_every_named_suite_exists_in_the_base(config):
         "and reports no error.".format(config, base_name, unknown))
 
 
-def test_all_macro_enables_every_suite_the_base_defines():
+def test_baseline_macro_enables_every_suite_the_base_defines():
     """No suite is disabled, and the count is pinned so a silently smaller run shows up."""
-    d = yaml.safe_load((EXAMPLES / "all_macro.yml").read_text())
+    d = yaml.safe_load((EXAMPLES / "baseline_macro.yml").read_text())
     assert "benchmarks" not in d, (
-        "all_macro.yml disables suites again; if that is deliberate, say which "
+        "baseline_macro.yml disables suites again; if that is deliberate, say which "
         "and why here")
     assert "benchmarks" not in d.get("overrides", {}), (
         "overrides.benchmarks would REPLACE the base's block, not update it")
@@ -316,8 +327,8 @@ def test_all_macro_enables_every_suite_the_base_defines():
 # way running-ng does. from_file + validate only: resolve_class() would
 # provision opam switches.
 @pytest.mark.parametrize("config", [
-    "all_micro.yml",
-    "all_macro.yml",
+    "baseline_micro.yml",
+    "baseline_macro.yml",
     "smoke_micro.yml",
     "smoke_macro.yml",
 ])
@@ -329,14 +340,13 @@ def test_freebsd_example_configs_load_through_the_real_merge(config):
 
 
 def test_tier1_overrides_reach_the_merged_config():
-    # the scalars belong under `overrides:`; dropped, the run silently takes macro_base's
+    # invocations belongs under `overrides:`; dropped, the run silently takes
+    # macro_base's 3. compress_logs is inherited, and absent it defaults to True,
+    # which would gzip every log and sidecar.
     from running.config import Configuration
 
-    c = Configuration.from_file(EXAMPLES, "all_macro.yml")
+    c = Configuration.from_file(EXAMPLES, "baseline_macro.yml")
     assert c.get("invocations") == 1
-    assert c.get("heap_range") == 6
-    assert c.get("spread_factor") == 1
-    assert c.get("minheap_multiplier") == 1.0
     assert c.get("compress_logs") is False
 
 
@@ -348,8 +358,8 @@ _TAG_IN_USAGE = re.compile(r"^#\s+RUNNING_TAG=([A-Za-z0-9_,]+)\s*\\\s*$", re.M)
 
 
 @pytest.mark.parametrize("config", [
-    "all_micro.yml",
-    "all_macro.yml",
+    "baseline_micro.yml",
+    "baseline_macro.yml",
     "smoke_micro.yml",
     "smoke_macro.yml",
 ])

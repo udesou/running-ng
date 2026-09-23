@@ -93,6 +93,7 @@ The main program will start two seconds after the companion program to make sure
 Once the main program finishes, we will wait for the companion program to finish.
 Therefore, companion programs should have appropriate timeouts or detect when main program finishes.
 Here is an example of using `companion` to launch `bpftrace` in the background to count the system calls.
+<!-- TODO(docs): the shipped base configs moved to base/upstream/ on 2026-09-23; this path is now $RUNNING_NG_PACKAGE_DATA/base/upstream/... -->
 ```yaml
 includes:
   - "$RUNNING_NG_PACKAGE_DATA/base/runbms.yml"

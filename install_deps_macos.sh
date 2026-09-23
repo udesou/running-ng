@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Prepare a clean macOS host to run run_ocaml_bench_gc_sweep.sh: Xcode CLT, Homebrew
 # packages, opam >= 2.2, the running-ng tools and olly switches, olly built from source,
-# pyyaml, and a ~/benches clone. Benchmark runtimes are not built here; running-ng
-# provisions them per config. No hardware-counter backend on macOS: PerfAndOllyAttach
+# pyyaml, and clones of the two benchmark repos and of runtime_events_tools beside this
+# one. Benchmark runtimes are not built here; running-ng provisions them per config.
+# Set BENCHES_DIR / MACRO_BENCHES_DIR / OLLY_DIR to use checkouts you already have;
+# an existing directory is never touched.
+# No hardware-counter backend on macOS: PerfAndOllyAttach
 # yields no counters ("none" backend), olly and rusage still work.
 # Usage: bash install_deps_macos.sh   (or bash install_deps.sh, which dispatches)
 
@@ -14,8 +17,21 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BENCHES_DIR="${BENCHES_DIR:-$(cd "$ROOT_DIR/.." && pwd)/benches}"
-OLLY_DIR="${OLLY_DIR:-$HOME/runtime_events_tools}"
+PARENT_DIR="$(cd "$ROOT_DIR/.." && pwd)"
+BENCHES_DIR="${BENCHES_DIR:-$PARENT_DIR/benches}"
+MACRO_BENCHES_DIR="${MACRO_BENCHES_DIR:-$PARENT_DIR/macro-benches}"
+# Same search order as the launch scripts, so they find what is cloned here:
+# a sibling checkout wins, an existing ~/runtime_events_tools is kept, and a
+# fresh clone lands beside this repo.
+if [[ -z "${OLLY_DIR:-}" ]]; then
+    if [[ -d "$PARENT_DIR/runtime_events_tools" ]]; then
+        OLLY_DIR="$PARENT_DIR/runtime_events_tools"
+    elif [[ -d "$HOME/runtime_events_tools" ]]; then
+        OLLY_DIR="$HOME/runtime_events_tools"
+    else
+        OLLY_DIR="$PARENT_DIR/runtime_events_tools"
+    fi
+fi
 # Not "5.4.0": this is the name running.switches and the FreeBSD installer declare.
 OPAM_SWITCH="${OPAM_SWITCH:-running-ng-tools}"
 OCAML_VERSION="${OCAML_VERSION:-5.4.0}"
@@ -32,6 +48,19 @@ warn()  { printf '\033[1;33mWARNING: %s\033[0m\n' "$*"; }
 
 step() { blue "==> $*"; }
 ok()   { green "    OK: $*"; }
+
+# Clone at its default branch, or leave an existing checkout alone: it may be a
+# pinned one (the bench service points OLLY_DIR and the bench dirs at its own).
+clone_if_missing() {
+    local url="$1" dir="$2"
+    if [[ -d "$dir" ]]; then
+        ok "$(basename "$dir") found at $dir"
+    else
+        echo "  Cloning $url into $dir ..."
+        git clone --quiet "$url" "$dir"
+        ok "$(basename "$dir") cloned to $dir"
+    fi
+}
 
 # GNU sort -V (gsort from coreutils) when available.
 _sort_V() {
@@ -228,10 +257,7 @@ ok "opam compiler plugin resolves"
 # 6. olly
 step "Building runtime_events_tools (olly)"
 
-if [[ ! -d "$OLLY_DIR" ]]; then
-    echo "  Cloning runtime_events_tools..."
-    git clone https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
-fi
+clone_if_missing https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
 
 pushd "$OLLY_DIR" >/dev/null
 
@@ -269,15 +295,10 @@ pip3 install --user --quiet pyyaml 2>/dev/null \
 ok "pyyaml installed"
 
 # 8. Benchmarks
-step "Checking benchmarks directory"
+step "Checking benchmark repositories"
 
-if [[ -d "$BENCHES_DIR" ]]; then
-    ok "Benchmarks found at $BENCHES_DIR"
-else
-    echo "  Cloning benches repo to $BENCHES_DIR..."
-    git clone https://github.com/udesou/benches.git "$BENCHES_DIR"
-    ok "Benchmarks cloned to $BENCHES_DIR"
-fi
+clone_if_missing https://github.com/ocaml-bench/benches.git "$BENCHES_DIR"
+clone_if_missing https://github.com/ocaml-bench/macro-benches.git "$MACRO_BENCHES_DIR"
 
 # 9. Verify
 step "Verifying installation"
@@ -321,7 +342,8 @@ check_cmd ocamlopt
 echo "  Files:"
 check_file "$OLLY_EXE"
 check_file "$BENCHES_DIR"
-check_file "$ROOT_DIR/src/running/config/ocaml_gc_sweep_example.yml"
+check_file "$MACRO_BENCHES_DIR"
+check_file "$ROOT_DIR/src/running/config/examples/baseline_micro.yml"
 
 echo "  Python modules:"
 python3 -c "import yaml" 2>/dev/null && ok "pyyaml" || {
@@ -344,7 +366,10 @@ if [[ $ERRORS -eq 0 ]]; then
     green "All dependencies installed successfully!"
     echo ""
     echo "To run the benchmark sweep:"
-    echo "  ~/running-ng/run_ocaml_bench_gc_sweep.sh"
+    echo "  $ROOT_DIR/run_ocaml_bench_gc_sweep.sh"
+    echo ""
+    echo "Before the first macro run, vendor macro-benches' dependencies (slow, once):"
+    echo "  make -C $MACRO_BENCHES_DIR setup"
     echo ""
     echo "Notes:"
     echo "  - perf is not available on macOS. Make sure your config uses"
@@ -352,7 +377,7 @@ if [[ $ERRORS -eq 0 ]]; then
     echo "  - The first run will take longer as it builds OCaml/OxCaml runtimes."
     echo "    Subsequent runs reuse cached toolchains in /tmp/running-ng-ocaml-toolchains/."
     echo "  - Edit the config file to enable/disable benchmark suites:"
-    echo "    $ROOT_DIR/src/running/config/ocaml_gc_sweep_example.yml"
+    echo "    $ROOT_DIR/src/running/config/examples/baseline_micro.yml"
     echo "  - The opam switch '$OPAM_SWITCH' should be active when running benchmarks"
     echo "    that need dune/ocamlfind (with_packages, with_deps, multicore suites)."
     echo "    Run: eval \$($OPAM_BIN env --switch=$OPAM_SWITCH --set-switch)"

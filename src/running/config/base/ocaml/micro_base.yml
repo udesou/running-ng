@@ -8,6 +8,13 @@
 # Suites. OCamlMulticoreBenchmarkSuite enforces OCaml >= 5 at build time;
 # OCamlBenchmarkSuite builds on any version.
 
+# Inherited by every including config; a top-level redeclaration in an experiment is
+# a combine() TypeError, use overrides:.
+# schema_version emits contract/{manifest.json,measurements/} inline during runbms.
+# compress_logs must stay false: absent it defaults to true and gzips every sidecar.
+schema_version: "1.0"
+compress_logs: false
+
 suites:
   # simple/ (stdlib-only sequential)
   sandmark-sequential:

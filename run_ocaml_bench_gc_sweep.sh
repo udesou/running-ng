@@ -10,7 +10,7 @@ export RUNNING_BENCH_DIR="${RUNNING_BENCH_DIR:-${RUNNING_MACRO_BENCH_DIR:-$(cd "
 export RUNNING_MACRO_BENCH_DIR="${RUNNING_MACRO_BENCH_DIR:-$RUNNING_BENCH_DIR}"
 
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/gc-sweep-logs}"
-CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/src/running/config/examples/ocaml_gc_sweep_example.yml}"
+CONFIG_FILE="${CONFIG_FILE:-$ROOT_DIR/src/running/config/examples/baseline_micro.yml}"
 PYTHONPATH="$ROOT_DIR/src"
 # Not auto-detected (.venv, $VIRTUAL_ENV): an explicit variable plus the error below is less surprising.
 PYTHON="${PYTHON:-python3}"

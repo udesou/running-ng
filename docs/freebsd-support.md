@@ -40,7 +40,7 @@ installed there; on a host without it, that is where failures would appear.
 `oxcaml_prefetch` needs a `type: OxCaml` runtime, so under an OCaml runtime the
 harness rejects it at build time with a precise reason and carries on. That is
 correct behaviour, not a portability gap, and the suite is disabled in
-`all_micro.yml` so it does not recur as noise. OxCaml on FreeBSD is
+`baseline_micro.yml` so it does not recur as noise. OxCaml on FreeBSD is
 untested and out of scope.
 
 ## Discrepancies from Linux
@@ -135,7 +135,7 @@ published. perf has no equivalent hazard.
 - **Macro benchmarks: 95 of 95 run.** `~/macro-benches`'s vendoring scripts
   were GNU-only (20 `sed -i`, six of them GNU-only sed constructs, five
   `md5sum`, one `nproc`) and are now portable via `scripts/lib-portable.sh`
-  there. Use `smoke_macro.yml` and `all_macro.yml`; there are no FreeBSD-only
+  there. Use `smoke_macro.yml` and `baseline_macro.yml`; there are no FreeBSD-only
   copies any more, because the counter group carries both event vocabularies.
   Every suite needs its system libraries installed (macro-benches' README has
   the `pkg install` line), plus five source patches `make setup` applies for

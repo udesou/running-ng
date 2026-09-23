@@ -8,6 +8,7 @@ Please follow the [installation guide](./install.md) to install `running-ng`.
 You will need Python 3.6+.
 
 Then, create a file `two_builds.yml` with the following content.
+<!-- TODO(docs): the shipped base configs moved to base/upstream/ on 2026-09-23; this path is now $RUNNING_NG_PACKAGE_DATA/base/upstream/... -->
 ```yaml
 includes:
   - "$RUNNING_NG_PACKAGE_DATA/base/runbms.yml"

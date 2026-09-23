@@ -1,8 +1,11 @@
 #!/bin/sh
 # Prepare a FreeBSD host to run running-ng, assuming NO ROOT: nothing is pkg-installed,
 # missing packages are reported for someone with privileges. Installs a user-local opam,
-# a sandbox-free opam root, the running-ng tools and olly switches, and builds olly.
+# a sandbox-free opam root, the running-ng tools and olly switches, builds olly, and
+# clones the two benchmark repos and runtime_events_tools beside this one.
 # Benchmark runtimes are not built here; running-ng provisions them per config.
+# Set BENCHES_DIR / MACRO_BENCHES_DIR / OLLY_DIR to use checkouts you already have;
+# an existing directory is never touched.
 # Usage: sh install_deps_freebsd.sh [--check]   (--check reports and changes nothing)
 # POSIX sh: FreeBSD base has no bash.
 
@@ -15,8 +18,21 @@ OPAM_SWITCH="${OPAM_SWITCH:-running-ng-tools}"
 OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
 OCAML_VERSION="${OCAML_VERSION:-5.4.0}"
 LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
-OLLY_DIR="${OLLY_DIR:-$HOME/runtime_events_tools}"
-BENCHES_DIR="${BENCHES_DIR:-$(cd "$ROOT_DIR/.." && pwd)/benches}"
+PARENT_DIR=$(cd "$ROOT_DIR/.." && pwd)
+BENCHES_DIR="${BENCHES_DIR:-$PARENT_DIR/benches}"
+MACRO_BENCHES_DIR="${MACRO_BENCHES_DIR:-$PARENT_DIR/macro-benches}"
+# Same search order as the launch scripts, so they find what is cloned here:
+# a sibling checkout wins, an existing ~/runtime_events_tools is kept, and a
+# fresh clone lands beside this repo.
+if [ -z "${OLLY_DIR:-}" ]; then
+    if [ -d "$PARENT_DIR/runtime_events_tools" ]; then
+        OLLY_DIR="$PARENT_DIR/runtime_events_tools"
+    elif [ -d "$HOME/runtime_events_tools" ]; then
+        OLLY_DIR="$HOME/runtime_events_tools"
+    else
+        OLLY_DIR="$PARENT_DIR/runtime_events_tools"
+    fi
+fi
 
 CHECK_ONLY=0
 [ "${1:-}" = "--check" ] && CHECK_ONLY=1
@@ -28,6 +44,18 @@ warn()  { printf '\033[1;33mWARNING: %s\033[0m\n' "$*"; }
 step()  { blue "==> $*"; }
 ok()    { green "    OK: $*"; }
 have()  { command -v "$1" >/dev/null 2>&1; }
+
+# Clone at its default branch, or leave an existing checkout alone: it may be a
+# pinned one (the bench service points OLLY_DIR and the bench dirs at its own).
+clone_if_missing() {
+    if [ -d "$2" ]; then
+        ok "$(basename "$2") at $2"
+    else
+        echo "  cloning $1 into $2 ..."
+        git clone --quiet "$1" "$2"
+        ok "$(basename "$2") cloned to $2"
+    fi
+}
 
 if [ "$(uname -s)" != "FreeBSD" ]; then
     red "ERROR: this script is for FreeBSD. Use install_deps.sh, which dispatches."
@@ -223,9 +251,7 @@ if [ "$NO_CMAKE" = "1" ]; then
     warn "re-run this script; the switch and packages above will be reused."
     OLLY_EXE=""
 else
-    if [ ! -d "$OLLY_DIR" ]; then
-        git clone https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
-    fi
+    clone_if_missing https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
 
     NCPU=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
     BUILD_LOG="${TMPDIR:-/tmp}/running-ng-olly-build.log"
@@ -248,13 +274,9 @@ else
 fi
 
 # 6. Benchmarks
-step "Checking the benchmarks directory"
-if [ -d "$BENCHES_DIR" ]; then
-    ok "benchmarks at $BENCHES_DIR"
-else
-    git clone https://github.com/udesou/benches.git "$BENCHES_DIR"
-    ok "benchmarks cloned to $BENCHES_DIR"
-fi
+step "Checking the benchmark repositories"
+clone_if_missing https://github.com/ocaml-bench/benches.git "$BENCHES_DIR"
+clone_if_missing https://github.com/ocaml-bench/macro-benches.git "$MACRO_BENCHES_DIR"
 
 # 7. Summary
 echo ""
@@ -264,6 +286,9 @@ echo "  eval \$($OPAM_BIN env --switch=$OPAM_SWITCH --set-switch)"
 if [ -n "$OLLY_EXE" ]; then
     echo "  export PATH=\"$OLLY_DIR/_build/install/default/bin:\$PATH\""
 fi
+echo ""
+echo "Before the first macro run, vendor macro-benches' dependencies (slow, once):"
+echo "  make -C $MACRO_BENCHES_DIR setup"
 echo ""
 echo "Then check what running-ng makes of the host:"
 echo "  sh $ROOT_DIR/scripts/portability_probe.sh"

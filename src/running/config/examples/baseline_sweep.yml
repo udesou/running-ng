@@ -1,0 +1,34 @@
+# GC parameter sweep: one compiler, a 3x3 (s, o) grid, on a few allocation-heavy
+# micro benchmarks. 9 cells per program per invocation, so widen the grid only
+# after `-d` shows an expansion you can afford.
+# Run: RUNNING_BENCH_DIR=~/benches CONFIG_FILE=<this file> \
+#      LOG_DIR=/tmp/baseline_sweep bash run_ocaml_bench_gc_sweep.sh
+
+includes:
+  - "../base/ocaml/micro_base.yml"
+
+invocations: 3
+
+# Under overrides: this REPLACES the base's benchmark set instead of extending it,
+# which is how a sweep is kept to a few programs.
+overrides:
+  benchmarks:
+    sandmark-sequential:
+      - bdd
+      - kb
+      - lexifi-g2pp
+      - minilight
+
+runtimes:
+  ocaml-5.5.1:
+    type: OCaml
+    version: "5.5.1"
+
+configs:
+  - "ocaml-5.5.1|perf_grp1|re-25|md-2"
+
+# s and o come from micro_base; each value not already in the config string above is
+# cross-producted into it. Defaults are s=262144 and o=120.
+config_sweep:
+  s: [131072, 262144, 524288]
+  o: [80, 120, 200]

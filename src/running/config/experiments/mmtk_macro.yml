@@ -1,41 +1,51 @@
-# MMTk macro-benches: fplaunchpad/ocaml-mmtk (plans GenImmix/Immix/Bactrian/LXR via
-# the plan-<Plan> modifier) vs the stock 5.5.0-rc1 commit it forks from. Includes
-# macro_base.yml. Dynamic heap unless MMTK_HEAP_SIZE_MB (mmtk_heap) is set; every
-# MMTk process runs under `setarch -R`; no olly GC counters (use MMTK_VERBOSE=1).
-# With RUNNING_MACRO_BENCH_DIR=~/macro-benches CONFIG_FILE=<this file>:
-#   build:   bash build_ocaml_binaries_gc_sweep.sh
-#   run:     LOG_DIR=... bash run_ocaml_bench_gc_sweep.sh
-#   minheap: PYTHONPATH=src python3 -m running minheap <this file> /tmp/mmtk_minheap.yml -a 2
-
+# MMTk LXR and Bactrian (MMTK_THREADS=1) vs stock 5.5.0-rc1 under perf_grp1, 27
+# benchmarks, 5 invocations. Includes macro_base.yml (schema_version is inherited;
+# redeclaring it is a combine() TypeError). Under MMTk olly gives wall/cpu/max_rss only.
+# Run with run_ocaml_bench_gc_sweep.sh (RUNNING_MACRO_BENCH_DIR set).
 includes:
   - "../base/ocaml/macro_base.yml"
 
-overrides:
-  invocations: 3
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: private
+      to: [361443]
 
-# Bounds for `minheap` (ignored by runbms/buildbms).
+overrides:
+  invocations: 5
+  benchmarks:
+    macro-menhir-monorepo: [menhir_ocamly, menhir_sql_parser, menhir_sysver]
+    macro-cpdf-monorepo: [cpdf_merge, cpdf_blacktext, cpdf_scale, cpdf_squeeze]
+    macro-alt-ergo-monorepo: [alt_ergo_fill, alt_ergo_yyll, alt_ergo_unsat_smt2]
+    macro-frama-c-monorepo: [frama_c_eva_t, frama_c_eva_sqlite]
+    macro-coq-monorepo: [coqc_corelib_stress]
+    macro-devkit: [devkit_stre, devkit_network, devkit_gzip]
+    macro-irmin: [irmin_mem_rw]
+    macro-ocamlformat: [ocamlformat_rocq]
+    macro-decompress: [test_decompress]
+    macro-eio: [eio_fiber_stream]
+    macro-yojson: [ydump_repeat]
+    macro-zarith: [zarith_pi]
+    macro-owl: [owl_gc]
+    macro-ocamlc-self-compile: [ocamlc_self_compile]
+    macro-liquidsoap-lang: [liq_parse_typecheck]
+    macro-jsoo: [jsoo]
+    macro-pplacer: [pplacer_testsuite]
+
 maxheap: 8192
 attempts: 2
 
-modifiers:
-  # Fixed heap for minheap / repro only; the run configs below use the dynamic heap.
-  mmtk_heap:
-    type: EnvVar
-    var: "MMTK_HEAP_SIZE_MB"
-    val: "16384"
 
 runtimes:
   ocaml-mmtk-cbc66e3:
     type: OCamlMMTk
-    repo: "https://github.com/fplaunchpad/ocaml-mmtk.git"
     commit: "cbc66e3efd8f9200f3e84f791a6b6dfc36efce8c"
   ocaml-5.5.0-rc1:
     type: OCaml
     commit: "4090d6db952ecae1cd0c3493c16d89cacc2bf8c6"
 
 configs:
-  - "ocaml-mmtk-cbc66e3|time_stats|plan-GenImmix"
-  - "ocaml-mmtk-cbc66e3|time_stats|plan-Immix"
-  - "ocaml-mmtk-cbc66e3|time_stats|plan-Bactrian"
-  - "ocaml-mmtk-cbc66e3|time_stats|plan-LXR"
-  - "ocaml-5.5.0-rc1|time_stats"
+  - "ocaml-mmtk-cbc66e3|perf_grp1|plan-LXR|threads-1"
+  - "ocaml-mmtk-cbc66e3|perf_grp1|plan-Bactrian|threads-1"
+  - "ocaml-5.5.0-rc1|perf_grp1"

@@ -135,23 +135,51 @@ tag filter is *intersection-only* (can't re-enable a program absent from
   - `analysis/json_sidecars.py` — sidecar discovery/parsing (new per-tool form
     plus the old combined form).
 - `src/running/config/` — `base/ocaml/{micro_base,macro_base}.yml`,
-  `examples/` (smoke tests), `experiments/` (one file per lab run, plus a few
-  `*.md` findings write-ups).
+  `examples/` (`baseline_{micro,macro,variants,sweep}.yml`, the copy-me
+  templates `docs/ocaml/adding-an-experiment.md` walks through, plus the
+  smoke tests), `experiments/` (one file per lab run, plus a few
+  `*.md` findings write-ups). `experiments/` was cut to six on 2026-09-23
+  (`{micro,macro,macro_fp_flambda,macro_sweep}_5.5.1.yml`, `mmtk_macro.yml`,
+  `memtrace.yml`); the 5.4.1/5.5.0-era investigations are in git history, not
+  the tree. **Everything from the JVM/DaCapo lineage lives
+  under `upstream/`** (`base/upstream/*.yml`, `examples/upstream/*.yml`),
+  segregated on 2026-09-23 so it is not mistaken for something this fork runs.
+  Put nothing OCaml there and change nothing in it that upstream might also
+  change. The fork's own early OCaml scaffolding that had been mixed into that
+  lineage (`base/ocaml.yml`, and the `ocaml.yml` line it added to `jvms.yml`,
+  plus `examples/ocaml_example.yml`) was deleted the same day: superseded by
+  `base/ocaml/` and `examples/`, and `jvms.yml` is byte-identical to upstream
+  again.
 - `contract-adapter/` — OCaml legacy→contract adapter + `gen_contract_py.py`
   (regenerates `src/running/contract/vocab.py` from the contract).
 - `experiments/memtrace-poc/` — a standalone `Makefile` + `summarize_json.py`
   for poking at memtrace output; separate from the shipped
-  `config/experiments/memtrace_poc.yml`.
+  `config/experiments/memtrace.yml`.
 - `run_ocaml_bench_gc_sweep.sh`, `build_ocaml_binaries_gc_sweep.sh`,
   `install_deps{,_linux,_macos,_freebsd}.sh`, `scripts/plot_gc_sweep.py`,
   `scripts/portability_probe.sh`, `notebooks/`.
+  The three `install_deps_<os>.sh` clone `benches`, `macro-benches` and
+  `runtime_events_tools` **beside this repo** if they are absent, and skip any
+  directory that already exists; `BENCHES_DIR` / `MACRO_BENCHES_DIR` /
+  `OLLY_DIR` redirect them. `OLLY_DIR`'s default follows the launch scripts'
+  search order (sibling, then `~/runtime_events_tools`), so all four agree on
+  one checkout. They deliberately do **not** run macro-benches' `make setup`
+  (slow, and it fails for reasons unrelated to this repo). The bench service is
+  unaffected either way: its agent passes explicit `RUNNING_*_BENCH_DIR` and
+  `OLLY_DIR` pointing at its own pinned checkouts under `$BENCH_AGENT_STATE`.
+- `README.md` — deliberately short: what this is, quick start, and links out.
+  Reference material lives in `docs/ocaml/` (`running.md` covers the scripts,
+  subcommands, env vars and output layout; then `configs.md`, `runtimes.md`,
+  `modifiers.md`, `tags.md`, `adding-a-benchmark.md`,
+  `adding-an-experiment.md`). Put new OCaml-facing prose there, not in the
+  README.
 - `docs/` — upstream's mdBook (`docs/src/`, JVM-oriented) plus this fork's
   methodology notes (`benchmark-calibration-triage.md`,
   `benchmark-noise-and-comparison-plan.md`, `benchmark-coverage-gaps-plan.md`).
 
 ## Build / run
 
-- Env vars: see the README table. `RUNNING_BENCH_DIR` and
+- Env vars: see the table in `docs/ocaml/running.md`. `RUNNING_BENCH_DIR` and
   `RUNNING_MACRO_BENCH_DIR` are **synonyms**, and **both** launch scripts now
   export both, with a lazy `../benches` fallback that does not require the
   directory to exist. Until 2026-08-10 only `run_ocaml_bench_gc_sweep.sh` did
@@ -369,11 +397,28 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
 ## Gotchas (hard-won — don't rediscover)
 
 - **Config merge.** Including a base then redefining one of its **top-level
-  scalars** (`invocations`, `schema_version`, `compress_logs`, `remote_host`,
-  `minheap_multiplier`, `heap_range`, `spread_factor`) at top level →
+  scalars** (`invocations`, `schema_version`, `compress_logs`) at top level →
   `combine()` `TypeError`. Change them through `overrides:`. A top-level
   `benchmarks:` dict *merges/extends* the base's set rather than replacing it,
   so narrowing the suite must also go through `overrides:`.
+- **No config needs a `_freebsd` variant.** `PerfAndOllyAttach.__init__` swaps
+  in the modifier's `val_freebsd` when `osinfo.IS_FREEBSD`, and `perf_grp1`'s
+  `val_freebsd` is byte-identical to `perf_grp1_freebsd`'s `val`, so one config
+  runs on both hosts; `CpuPin` derives its CPU list from the machine too. The
+  explicit `perf_grp{1,2,3}_freebsd` modifiers exist to *force* the hwpmc
+  vocabulary on a Linux host (`RUNNING_NG_COUNTER_BACKEND=freebsd-pmc`), which
+  `IS_FREEBSD` does not detect. `PORTABLE_CONFIGS` in
+  `tests/test_freebsd_event_groups.py` is what keeps this true: it fails if a
+  listed config names a group with no `val_freebsd`.
+- **`remote_host`, `minheap_multiplier`, `heap_range` and `spread_factor` do
+  nothing for OCaml** and were dropped from the OCaml bases and configs on
+  2026-09-23. The last three feed the JVM heap-factor sweep, reached only when
+  `runbms` is given an `N` argument, and `OCaml*BenchmarkSuite.get_minheap()`
+  returns 0 with a warning anyway; `remote_host: null` is just the default. Do
+  not copy them back in from `base/upstream/runbms.yml`, where they are
+  load-bearing.
+  **`compress_logs: false` is not in that set:** absent, it defaults to `True`
+  and every log and sidecar is gzipped.
 - **`validate()` is strict about runtimes.** Declared-but-unused and
   compared-but-not-run are **errors**, not warnings. Comment out spare runtime
   declarations rather than leaving them in.
@@ -503,8 +548,9 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   SIGABRT (channel finaliser during GC); both are excluded from the shipped MMTk
   configs rather than being live failures.
 - **MMTk runtime (`type: OCamlMMTk`)** is a drop-in. Default repo is
-  `udesou/ocaml-mmtk`; the shipped `mmtk_*.yml` configs override `repo:` to
-  `fplaunchpad/ocaml-mmtk`. Three mechanisms make the stock scripts work:
+  `fplaunchpad/ocaml-mmtk` (`OCamlMMTk.DEFAULT_REPO`, moved there from
+  `udesou/ocaml-mmtk` on 2026-09-23), so `mmtk_macro.yml` no longer overrides
+  `repo:`. Three mechanisms make the stock scripts work:
   1. `get_command_prefix()` prepends `setarch <arch> -R` to every build/run
      command (MMTk's fixed-address metadata mmap flakes under ASLR).
   2. `get_build_env_overrides()` sets a build-time `MMTK_HEAP_SIZE_MB` (16384,
@@ -536,15 +582,14 @@ config-layering regression.
 
 | File | Problem |
 |---|---|
-| `examples/{minheap,ocaml,runbms}_example.yml` | Upstream examples that `include:` `$RUNNING_NG_PACKAGE_DATA/...`; only loadable through `python3 -m running`, which sets that variable. Not usable as `CONFIG_FILE` from the shell scripts. `runbms_example.yml` *also* fails `validate()` (it declares four runtimes and runs a subset) — upstream predates that check. |
+| `examples/upstream/{minheap,runbms}_example.yml` | Upstream's own JVM examples, isolated under `upstream/` and **not ours to fix**. Both fail `validate()`: `base/upstream/jvms.yml` declares `temurin-8/11/17`, each example runs one runtime of its own, and dead declarations are an error in this fork, which upstream predates. `minheap_example.yml` also names `adoptopenjdk-11`, dropped upstream in 2022 (#83) and never propagated. Their `$RUNNING_NG_PACKAGE_DATA/...` includes are **not** a problem: `__main__.main()` sets that variable before any subcommand runs. It is unset only for a harness that imports `Configuration` directly, which is why a bare `Configuration.from_file` cannot load them. |
 | `src/running/command/genadvice.py` | Not in `__main__.MODULES`; unreachable. Either register it or delete it. |
-| `install_deps_linux.sh` / `install_deps_macos.sh` | Clone `github.com/udesou/benches`; the canonical remote (and what `~/benches` actually points at) is `github.com/ocaml-bench/benches`. |
 | `experiments/mmtk_minheap.yml`, `mmtk_minheap_result.yml` | Referenced by older docs, but they exist only on the unmerged `mmtk-minheap` branch. `experiments/mmtk_minheap_findings.md` (the write-up) is here. |
 
 **`validate()` is stricter than the configs it inherited.** "Runtime declared but
 not referenced by any `configs:` entry" is an *error*, which rules out the
-commented-menu style (declare several compilers, run one) that both
-`ocaml_gc_sweep_example.yml` and upstream's `runbms_example.yml` were written in.
+commented-menu style (declare several compilers, run one) that upstream's
+`runbms_example.yml` was written in.
 `resolve_class` already drops unreferenced runtimes, so nothing breaks if one is
 left declared — the check is hygiene, not correctness. If that ergonomics cost
 starts to bite, downgrading this one case to a warning (keeping
@@ -553,8 +598,9 @@ left alone here deliberately rather than folded into a docs change.
 
 ## Per-session workflow
 
-1. Read `README.md` (overview, how to add a benchmark/experiment), this file
-   (internals + gotchas), and `~/.claude` memory for current project state.
+1. Read `README.md` (overview), `docs/ocaml/` (how a config is put together,
+   how to add a benchmark/experiment), this file (internals + gotchas), and
+   `~/.claude` memory for current project state.
 2. An experiment config `includes:` a base; declare only experiment-specific
    bits, and change base scalars through `overrides:`.
 3. Validate cheaply before a long run: `-d` (dry run) expands the whole config

@@ -1,5 +1,5 @@
 # Smoke test of the macro path: cpdf_merge + sedlex_tokenize (legacy anchors, ~1.5s
-# each) under OCaml 5.4.1, 1 invocation. Includes macro_base.yml. RUNNING_TAG=legacy is
+# each) under OCaml 5.5.1, 1 invocation. Includes macro_base.yml. RUNNING_TAG=legacy is
 # required: a bare run applies default_run, whose rungs are not in this benchmarks:
 # list, and dies with "no benchmarks remain".
 # Run:
@@ -24,10 +24,10 @@ overrides:
     #   - lavyek_kv_1d
 
 runtimes:
-  ocaml-5.4.1:
+  ocaml-5.5.1:
     type: OCaml
-    version: "5.4.1"
+    version: "5.5.1"
 
 # Sequential suites set their own ring via ocamlrunparam:; the lavyek triple is inert while lavyek is disabled.
 configs:
-  - "ocaml-5.4.1|perf_grp1|re_par-22|md_par-8|pin_lavyek"
+  - "ocaml-5.5.1|perf_grp1|re_par-22|md_par-8|pin_lavyek"

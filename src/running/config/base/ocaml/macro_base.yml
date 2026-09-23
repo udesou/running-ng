@@ -16,16 +16,13 @@ default_modifiers:
   - pin_bench
   - pin_bench_mc
 
+# Inherited by every including config; a top-level redeclaration in an experiment is
+# a combine() TypeError, use overrides:.
+# schema_version emits contract/{manifest.json,measurements/} inline during runbms.
+# compress_logs must stay false: absent it defaults to true and gzips every sidecar.
 invocations: 3
-remote_host: null
-compress_logs: false
-minheap_multiplier: 1.0
-heap_range: 6
-spread_factor: 1
-
-# Emits contract/{manifest.json,measurements/} inline during runbms. Inherited; a
-# top-level redeclaration in an experiment is a combine() TypeError, use overrides:.
 schema_version: "1.0"
+compress_logs: false
 
 # No plugins here: they would force every including config to install the plugin deps.
 
@@ -1294,8 +1291,6 @@ tags:
         - pplacer_like_small
         - pplacer_like_default
         - pplacer_like_large
-
-
 
   # Coverage gaps: no benchmark exercises these on the hot path
 

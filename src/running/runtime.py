@@ -775,7 +775,7 @@ class OCaml(Runtime):
 
 @register(Runtime)
 class OCamlMMTk(OCaml):
-    """OCaml built against MMTk (udesou/ocaml-mmtk).
+    """OCaml built against MMTk (fplaunchpad/ocaml-mmtk).
 
     The heap is fixed, sized at run time by ``MMTK_HEAP_SIZE_MB`` (so minheap
     is well defined); the plan is chosen by ``MMTK_PLAN`` via an EnvVar
@@ -786,7 +786,7 @@ class OCamlMMTk(OCaml):
     or ``executable:`` (pre-built tree).
     """
 
-    DEFAULT_REPO = "https://github.com/udesou/ocaml-mmtk.git"
+    DEFAULT_REPO = "https://github.com/fplaunchpad/ocaml-mmtk.git"
 
     def __init__(self, **kwargs):
         if not kwargs.get("executable") and "repo" not in kwargs:
