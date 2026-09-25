@@ -92,6 +92,20 @@ scaled-up copy of the one below. `macro_base.yml` enables **every** program in
   (`liq_video_frames_pool` #14533, `goblint` #13733).
 - `all_benches` (95) — everything runnable at once.
 
+Alongside those six, `tags:` carries the **runtime-feature** selectors, re-derived
+2026-09-21 by reading every enabled benchmark and checking each claim against a perf
+profile and an strace of the small rungs on 5.5.0: `weak_refs`, `ephemerons`,
+`effects`, `domains`, `marshal`, `compare_hash`, `c_side_allocation`, `custom_blocks`,
+`bigarrays`, `ffi_bulk`, `off_heap_accounting`, `lwt`, plus the documented gaps
+`io_uring` and `ocaml_finalisers` (which error loudly when selected). A feature tag
+earns its place only if it names runtime code someone actually edits AND selects a set
+no other tag already gives you — that test removed `kcas`, `eio_fibers`, `atomics`,
+`mutex_condition`, `pthread_affinity`, `foreign_threads`, `subprocess_spawn`,
+`digests`, `lex_parse_engines`, `signals` and `memprof`. Every `exercised_by:` entry
+carries a `verified_at:` citation, now including the measurement behind it;
+`docs/ocaml/tags.md` is the human-facing page and the matrix lives in macro-benches'
+CLAUDE.md.
+
 **A bare run (no `RUNNING_TAG`) auto-applies `default_run`** (`runbms.py` — guarded
 on the tag existing, so micro-benches is unaffected). So the standard suite is the
 default rungs; other sizes / legacy / everything are opt-in via `RUNNING_TAG`. The
