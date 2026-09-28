@@ -220,6 +220,17 @@ tag filter is *intersection-only* (can't re-enable a program absent from
   ocaml/ocaml:<sha>`, not the `ocaml-base-compiler` opam package. That is what keeps
   a runtime immune to whatever a shadowing opam repo publishes under the same
   version number. An abbreviated SHA is refused.
+- **OxCaml** roots need the opam-compiler from ocaml-opam/opam-compiler#42
+  (OxCaml has no compiler opam file in its tree; the released plugin silently
+  builds a *stock* compiler from OxCaml's source). Until #42 is released,
+  `switches.py` pins the tools switch's opam-compiler to that PR's commit
+  (`pins:`); once released, delete the pin and `running.switches ensure`
+  rebuilds the tools switch. `OxCaml.__init__` refuses a compiler that rejects
+  mode syntax, and defaults `dune_version:` to `3.22.2+ox` (the only dune
+  builds oxcaml/opam-repository's guards admit). `GITHUB_TOKEN` avoids GitHub's
+  API rate limit while the plugin picks the recipe. That recipe comes from
+  oxcaml/opam-repository's main branch at build time and is not part of the
+  root's identity, so a recipe change alone does not give a new root.
 
 ### Opam roots (`opam_roots.py`)
 
@@ -264,9 +275,8 @@ tag filter is *intersection-only* (can't re-enable a program absent from
   the tools switch's (installed *unconstrained*) — a 5.5.0-vs-trunk run built its
   two sides with different dune versions. If a compiler needs a different dune,
   say so with `dune_version:` on that runtime. **`OxCaml` inherits this path**
-  (`OCamlMMTk` does not — it deliberately installs no dune and uses the tools
-  switch), so an OxCaml runtime that can't take the pinned dune now needs an
-  explicit `dune_version:`. Before raising the pin: build the *whole* suite on
+  with its own default, `3.22.2+ox` (`OCamlMMTk` does not; it deliberately
+  installs no dune and uses the tools switch). Before raising the pin: build the *whole* suite on
   the candidate, confirm it bootstraps on **trunk** and not just the release, and
   note that an already-populated `macro-benches/duniverse/` keeps its old
   `dune-project` until `make setup` is re-run.

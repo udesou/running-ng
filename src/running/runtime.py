@@ -649,8 +649,26 @@ class OxCaml(OCaml):
     """OxCaml (Jane Street's OCaml fork): OCaml with a different default repo."""
 
     DEFAULT_REPO = "https://github.com/oxcaml/oxcaml.git"
+    # oxcaml/opam-repository's guard packages only admit its +ox dune builds.
+    DUNE_VERSION = "3.22.2+ox"
 
     def __init__(self, **kwargs):
         if "repo" not in kwargs:
             kwargs["repo"] = OxCaml.DEFAULT_REPO
+        kwargs.setdefault("dune_version", OxCaml.DUNE_VERSION)
         super().__init__(**kwargs)
+        self._assert_is_oxcaml()
+
+    def _assert_is_oxcaml(self):
+        """Refuse a compiler that rejects mode syntax: a stock OCaml built
+        from the OxCaml repo would otherwise pass for OxCaml."""
+        ocamlopt = self.executable.parent / "ocamlopt"
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "modes.ml"
+            src.write_text("let f (x @ local) = let _ = x in ()\n")
+            r = subprocess.run([str(ocamlopt), "-c", str(src)],
+                               capture_output=True, text=True, cwd=d)
+        if r.returncode != 0:
+            raise RuntimeError(
+                "Runtime '{}' is not OxCaml: {} rejects mode syntax.\n{}".format(
+                    self.name, ocamlopt, r.stderr.strip()))

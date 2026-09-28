@@ -35,6 +35,8 @@ root. Because each run holds a shared lock on the roots it uses, concurrent runs
 
 ## OxCaml
 
+<!-- TODO(docs): this section describes an implementation that no longer exists. An OxCaml runtime gets its own opam root like any other runtime, built by `opam-compiler create oxcaml/oxcaml:<commit>` with the opam-compiler from ocaml-opam/opam-compiler#42 (pinned in the tools switch until released). The plugin borrows an `oxcaml-compiler` recipe from oxcaml/opam-repository, which already configures flambda2, runtime5, `--enable-multidomain` and `--enable-poll-insertion`. `configure_args` is rejected for OxCaml, there is no bootstrap_version, no /tmp/running-ng-ocaml-toolchains and no running-ng-oxcaml-build switch. dune defaults to 3.22.2+ox; running-ng refuses a compiler that rejects mode syntax. The example should drop configure_args. -->
+
 ```yaml
 oxcaml-trunk:
   type: OxCaml

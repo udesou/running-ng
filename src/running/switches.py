@@ -42,6 +42,11 @@ SWITCHES: Dict[str, Dict] = {
         # `flags: plugin` packages must be linked into $(opam var root)/plugins/bin
         # or `opam compiler create` cannot resolve them.
         "registers_plugin": "opam-compiler",
+        # OxCaml support (ocaml-opam/opam-compiler#42); drop once it is released.
+        "pins": {
+            "opam-compiler": "git+https://github.com/udesou/opam-compiler.git"
+                             "#9b9ca6184e8b04f539f1c6308e5dc05a5a6b39d3",
+        },
     },
     OLLY_SWITCH: {
         "purpose": "olly (runtime_events_tools), which needs cmdliner >= 2.0",
@@ -50,6 +55,7 @@ SWITCHES: Dict[str, Dict] = {
         "identity_packages": ["ocaml", "cmdliner"],
         "source": OLLY_DIR_ENV_VAR,
         "registers_plugin": None,
+        "pins": {},
     },
 }
 
@@ -141,6 +147,17 @@ def _package_versions(opam: str, switch: str, packages: List[str]) -> Dict[str, 
     return versions
 
 
+def _pins(opam: str, switch: str) -> Dict[str, str]:
+    """Pinned package name -> pin target, as `opam pin list` reports them."""
+    out = _run([opam, "pin", "list", "--switch", switch], check=False)
+    pins = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 3:
+            pins[parts[0].split(".")[0]] = parts[2]
+    return pins
+
+
 def source_dir(spec: Dict) -> Optional[str]:
     """The checkout a switch is built from, or None if it has no source.
 
@@ -180,6 +197,9 @@ def observe(opam: str, name: str) -> Optional[Dict]:
     spec = SWITCHES[name]
     identity: Dict[str, Optional[str]] = dict(
         _package_versions(opam, name, spec["identity_packages"]))
+    # A pinned package keeps its version number when the pin target moves.
+    for pkg, target in _pins(opam, name).items():
+        identity["pin:" + pkg] = target
     sha = _source_sha(spec)
     if sha is not None:
         identity["source_sha"] = sha
@@ -193,6 +213,20 @@ def missing_packages(opam: str, name: str) -> List[str]:
         return []
     installed = _package_versions(opam, name, declared)
     return [p for p in declared if not installed.get(p)]
+
+
+def pin_drift(name: str, observed: Dict) -> List[str]:
+    """Declared pins of `name` that `observed` does not have."""
+    return [pkg for pkg, target in SWITCHES[name].get("pins", {}).items()
+            if observed.get("pin:" + pkg) != target]
+
+
+def pin_commands(opam: str, name: str, pkgs: List[str],
+                 install: bool) -> List[List[str]]:
+    pins = SWITCHES[name].get("pins", {})
+    return [[opam, "pin", "add", "--switch", name, "--yes"]
+            + ([] if install else ["--no-action"]) + [pkg, pins[pkg]]
+            for pkg in pkgs]
 
 
 def plan(opam: str, name: str) -> str:
@@ -213,10 +247,16 @@ def plan(opam: str, name: str) -> str:
                   if k not in missing and (recorded or {}).get(k) != observed.get(k)]
         return "rebuild" if (recorded is not None and others) else "repair"
 
+    drift = pin_drift(name, observed)
     if recorded is None:
         # exists, not built by us, complete: adopt rather than destroy
-        return "adopt"
-    return "ok" if recorded == observed else "rebuild"
+        return "repair" if drift else "adopt"
+    # Pins are re-applied in place; anything else that moved means a rebuild.
+    moved = [k for k in set(recorded) | set(observed)
+             if not k.startswith("pin:") and recorded.get(k) != observed.get(k)]
+    if moved:
+        return "rebuild"
+    return "repair" if drift or recorded != observed else "ok"
 
 
 # --- creation ------------------------------------------------------------------
@@ -232,6 +272,7 @@ def build_commands(name: str, compiler: str = DEFAULT_COMPILER) -> List[List[str
     spec = SWITCHES[name]
     cmds = [[opam, "switch", "create", name,
              "ocaml-base-compiler.{}".format(compiler), "--yes"]]
+    cmds += pin_commands(opam, name, list(spec.get("pins", {})), install=False)
     if spec["packages"]:
         cmds.append([opam, "install", "--switch", name, "--yes"]
                     + spec["packages"])
@@ -283,17 +324,26 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
         # May downgrade packages (opam-compiler pins cmdliner < 2.0); that is
         # correct for this switch.
         missing = missing_packages(opam, name)
-        logging.warning(
-            "opam switch '%s' is missing packages it declares: %s. Installing "
-            "them; this may change the versions of packages that depend on "
-            "them.", name, ", ".join(missing))
-        cmd = [opam, "install", "--switch", name, "--yes"] + missing
+        drift = pin_drift(name, observe(opam, name) or {})
+        if missing:
+            logging.warning(
+                "opam switch '%s' is missing packages it declares: %s. Installing "
+                "them; this may change the versions of packages that depend on "
+                "them.", name, ", ".join(missing))
+        if drift:
+            logging.warning("opam switch '%s' does not pin %s as declared; "
+                            "re-pinning", name, ", ".join(drift))
+        cmds = pin_commands(opam, name, drift, install=True)
+        if missing:
+            cmds.append([opam, "install", "--switch", name, "--yes"] + missing)
         if dry_run:
-            logging.info("DRY RUN: %s", " ".join(cmd))
+            for cmd in cmds:
+                logging.info("DRY RUN: %s", " ".join(cmd))
             return "repair"
         previous = _active_switch(opam)
         try:
-            subprocess.run(cmd, check=True, env=tools_env())
+            for cmd in cmds:
+                subprocess.run(cmd, check=True, env=tools_env())
             _register_plugin(opam, name)
             _record(opam, name)
         finally:
