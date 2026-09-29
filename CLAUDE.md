@@ -436,6 +436,13 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
 - **`validate()` is strict about runtimes.** Declared-but-unused and
   compared-but-not-run are **errors**, not warnings. Comment out spare runtime
   declarations rather than leaving them in.
+- **Logs carry the environment and process snapshots, redacted.** Every `.log`
+  prologue lists the environment and the output of `w` and `top -c` (full
+  command lines). Values of variables whose names contain TOKEN, SECRET,
+  PASSWORD, CREDENTIAL, API_KEY, PRIVATE_KEY or AUTH become `<redacted>`, and
+  `runbms.redact` masks credential-like `name=value` / `--name value` pairs,
+  well-known token formats and `user:password@` URLs in all of it. Anything
+  that matches none of these is recorded verbatim, and logs get published.
 - **olly JSON sidecars are JSONL** — one line per invocation; don't infer
   invocation count from filenames.
 - **Constructing an `OCaml` runtime provisions its opam switch.** `__init__`

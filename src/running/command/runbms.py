@@ -14,6 +14,7 @@ import tempfile
 import gzip
 import shutil
 import os
+import re
 import json
 import subprocess
 from running.command.fillin import fillin
@@ -333,6 +334,41 @@ def hz_to_ghz(hzstr: str) -> str:
         return "unknown"
 
 
+# Logs are shared and published, so credentials must not reach them: values of
+# variables named like credentials, and anything in probe output (command lines
+# in `top -c` and `w`) that looks like one.
+SECRET_ENV_MARKERS = ("TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL",
+                      "API_KEY", "PRIVATE_KEY", "AUTH")
+REDACTED = "<redacted>"
+_SECRET_PATTERNS = [
+    # name=value, name: value, --name value, for credential-like names
+    (re.compile(r"(?i)((?:token|secret|passw(?:or)?d|credential|api[_-]?key|"
+                r"private[_-]?key|auth)[\w.-]*[\"']?(?:\s*[=:]\s*|\s+))"
+                r"[\"']?[^\s\"',;]+"), r"\1" + REDACTED),
+    # well-known token formats (GitHub, Anthropic/OpenAI, Slack, AWS)
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|"
+                r"sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|"
+                r"AKIA[0-9A-Z]{16})\b"), REDACTED),
+    # user:password@ in URLs
+    (re.compile(r"(://[^/\s:@]+:)[^/\s@]+@"), r"\1" + REDACTED + "@"),
+]
+
+
+def redact(text: str) -> str:
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def format_environment(env: Dict[str, str]) -> str:
+    output = ""
+    for k, v in sorted(env.items()):
+        if any(m in k.upper() for m in SECRET_ENV_MARKERS):
+            v = REDACTED
+        output += "\t{}={}\n".format(k, redact(v))
+    return output
+
+
 def get_log_prologue(runtime: Runtime, bm: Benchmark) -> str:
     output = "\n-----\n"
     output += "mkdir -p PLOTTY_WORKAROUND; timedrun; "
@@ -341,13 +377,12 @@ def get_log_prologue(runtime: Runtime, bm: Benchmark) -> str:
     output += "running-ng v{}\n".format(__VERSION__)
     # osinfo.probe never raises: a probe the host lacks must not abort the sweep.
     output += osinfo.probe("date") + "\n"
-    output += osinfo.probe("w") + "\n"
+    output += redact(osinfo.probe("w")) + "\n"
     for cmd in (osinfo.memory_snapshot_cmd(), osinfo.process_snapshot_cmd()):
         if cmd:
-            output += osinfo.probe(cmd) + "\n"
+            output += redact(osinfo.probe(cmd)) + "\n"
     output += "Environment variables: \n"
-    for k, v in sorted(os.environ.items()):
-        output += "\t{}={}\n".format(k, v)
+    output += format_environment(dict(os.environ))
     output += "OS: "
     output += osinfo.probe("uname -a")
     output += "CPU: {}\n".format(osinfo.cpu_model() or "unknown")
