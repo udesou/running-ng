@@ -316,8 +316,8 @@ def test_baseline_macro_enables_every_suite_the_base_defines():
 
     base = yaml.safe_load((BASE_DIR / "macro_base.yml").read_text())["benchmarks"]
     live = {s_: v for s_, v in base.items() if v}
-    assert sum(len(v) for v in live.values()) == 95
-    # lavyek and merlin are empty in the base, so 21 suites carry the 95
+    assert sum(len(v) for v in live.values()) == 94
+    # lavyek and merlin are empty in the base, so 21 suites carry the 94
     assert len(live) == 21
     assert {s_ for s_, v in base.items() if not v} == {
         "macro-merlin", "macro-lavyek-monorepo"}

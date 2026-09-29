@@ -429,7 +429,8 @@ suites:
         args: "180000"
 
   # Wrapper args = "$LOOP $DIM". owl_gc_* use loop=1 and scale the matrix dim; the live
-  # set is off-heap Bigarrays, so read RSS not top_heap. Wall is BLAS-thread-bound.
+  # set is off-heap Bigarrays, so read RSS not top_heap. The macro-benches wrapper keeps
+  # OpenBLAS to one thread, so pin_bench's single core is safe.
   macro-owl:
     type: OCamlBenchmarkSuite
     timeout: 900
@@ -445,19 +446,15 @@ suites:
       owl_gc_small:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
-        args: "1 300"
+        args: "1 250"
       owl_gc_default:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
-        args: "1 500"
+        args: "1 400"
       owl_gc_large:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
         build_script: "owl.build.sh"
-        args: "1 1500"
-      owl_gc_huge:
-        path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/owl"
-        build_script: "owl.build.sh"
-        args: "1 2400"
+        args: "1 800"
 
   # Runs the variant's own ocamlc on a generated ~400k-line workload. Bytecode rather
   # than ocamlopt so the workload is identical across flambda/non-flambda variants.
@@ -903,7 +900,6 @@ benchmarks:
     - owl_gc_small
     - owl_gc_default
     - {name: owl_gc_large, bm_name: owl_gc_large, timeout: 7200}
-    - owl_gc_huge
 
   macro-ocamlc-self-compile:
     - ocamlc_self_compile
@@ -1108,8 +1104,6 @@ tags:
     exercised_by:
       macro-zarith:
         - zarith_pi_huge
-      macro-owl:
-        - owl_gc_huge
 
   legacy:
     description: |
@@ -1264,7 +1258,6 @@ tags:
         - owl_gc_small
         - owl_gc_default
         - owl_gc_large
-        - owl_gc_huge
       macro-ocamlc-self-compile:
         - ocamlc_self_compile
         - ocamlc_compile_uucp
@@ -1567,7 +1560,6 @@ tags:
         - owl_gc_small
         - owl_gc_default
         - owl_gc_large
-        - owl_gc_huge
       macro-liq-video-frames:
         - liq_video_frames_pool
         - liq_video_frames_pool_small
@@ -1616,7 +1608,6 @@ tags:
         - owl_gc_small
         - owl_gc_default
         - owl_gc_large
-        - owl_gc_huge
       macro-liq-video-frames:
         - liq_video_frames_pool
         - liq_video_frames_pool_small
@@ -1658,7 +1649,6 @@ tags:
         - owl_gc_small
         - owl_gc_default
         - owl_gc_large
-        - owl_gc_huge
       macro-zarith:
         - zarith_pi
         - zarith_pi_small
@@ -1717,7 +1707,7 @@ tags:
         - liq_video_frames_pool_default
         - liq_video_frames_pool_large
     cold:
-      macro-owl: [owl_gc, owl_gc_small, owl_gc_default, owl_gc_large, owl_gc_huge]
+      macro-owl: [owl_gc, owl_gc_small, owl_gc_default, owl_gc_large]
       macro-zarith: [zarith_pi, zarith_pi_small, zarith_pi_default, zarith_pi_large, zarith_pi_huge]
       macro-decompress: [test_decompress, test_decompress_small, test_decompress_default, test_decompress_large]
                                       # custom blocks, but their `mem` is too small to swing the pacer
