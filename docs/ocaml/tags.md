@@ -35,8 +35,8 @@ The twelve runnable feature tags:
 
 Six more tags select input-size ladders rather than features: `default_run` (one
 rung per tool, 21 programs, auto-applied when `RUNNING_TAG` is unset), `small_run`
-and `large_run` (21 each), `huge_run` (2: zarith and owl), `legacy` (30) and
-`all_benches` (95).
+and `large_run` (21 each), `huge_run` (1: zarith), `legacy` (30) and
+`all_benches` (94).
 
 Tag validation (making sure tags are sound) runs on every
 `runbms`, whether or not `RUNNING_TAG` is set.

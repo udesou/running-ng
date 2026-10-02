@@ -16,7 +16,7 @@ hard-won gotchas, and the current list of known-broken files.
 - Benchmarks live in sibling repos: micro = `~/benches` (13 suites, 196 enabled
   programs of 200 declared; 195 of the 196 run on stock OCaml, `oxcaml_prefetch`
   needs an OxCaml runtime), macro = `~/macro-benches` (23 suites declared, 21 with
-  programs, 95 enabled; merlin and lavyek disabled). Both are driven through
+  programs, 94 enabled; merlin and lavyek disabled). Both are driven through
   `OCamlBenchmarkSuite`.
   Both repos also carry their own program list (`manifest.yml` /
   `benchmarks/manifest.yml`) with `args` copied verbatim from the matching base
@@ -82,15 +82,15 @@ Still unmerged:
 Each macro tool has a `{small,default,large}` (a few also `huge`) input-size
 ladder — rungs chosen so each reaches a different GC/runtime regime, not just a
 scaled-up copy of the one below. `macro_base.yml` enables **every** program in
-`benchmarks:` (all rungs + legacy = 95), and `tags:` carries the run selectors:
+`benchmarks:` (all rungs + legacy = 94), and `tags:` carries the run selectors:
 
 - `default_run` / `small_run` / `large_run` / `huge_run` — the rung of that size
-  across every tool (`default_run` = 21, one per tool; `huge_run` = 2).
+  across every tool (`default_run` = 21, one per tool; `huge_run` = 1, zarith).
 - `legacy` (30) — the pre-ladder benches kept but not run by default: original
   anchors, extra per-tool workloads (cpdf ops, alt-ergo problems, menhir
   grammars, devkit stre/network/gzip), and the frozen issue reproducers
   (`liq_video_frames_pool` #14533, `goblint` #13733).
-- `all_benches` (95) — everything runnable at once.
+- `all_benches` (94) — everything runnable at once.
 
 Alongside those six, `tags:` carries the **runtime-feature** selectors, re-derived
 2026-09-21 by reading every enabled benchmark and checking each claim against a perf
