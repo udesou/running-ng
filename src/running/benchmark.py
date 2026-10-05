@@ -24,6 +24,14 @@ import os
 from enum import Enum
 import pty
 
+_retry_failed_builds = False
+
+
+def set_retry_failed_builds(v: bool) -> None:
+    global _retry_failed_builds
+    _retry_failed_builds = v
+
+
 def _is_dry_run() -> bool:
     """Imported lazily: running.suite imports names from this module, so a
     module-level import here would make the import order matter."""
@@ -851,10 +859,14 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         out_binary = self._resolve_output_binary(runtime)
         sentinel = Path(str(out_binary) + ".build-failed")
         if sentinel.exists() and not self.always_build:
-            raise RuntimeError(
-                "Build previously failed for {} (sentinel: {}). "
-                "Delete the sentinel file to retry.".format(out_binary.name, sentinel)
-            )
+            if not _retry_failed_builds:
+                raise RuntimeError(
+                    "Build previously failed for {} (sentinel: {}). "
+                    "Delete the sentinel file, or pass --retry-failed-builds, "
+                    "to retry.".format(out_binary.name, sentinel)
+                )
+            logging.warning("Build previously failed for %s (sentinel: %s); retrying.",
+                            out_binary.name, sentinel)
         if _is_dry_run():
             self._binary_cache[runtime_key] = out_binary
             return out_binary

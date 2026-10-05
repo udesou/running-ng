@@ -74,7 +74,8 @@ def test_prebuild_reports_failures_and_builds_each_pair_once():
     configs = ["a|x", "a|y", "b|x"]
     by_config = {"a|x": a, "a|y": a, "b|x": b}
     failed = prebuild({"s": [ok, bad]}, {"s": None}, configs, by_config)
-    assert failed == {("s", "bad", "b")}
+    assert set(failed) == {("s", "bad", "b")}
+    assert failed[("s", "bad", "b")] == "boom"
     assert ok.calls == ["a", "b"]
     assert bad.calls == ["a", "b"]
 

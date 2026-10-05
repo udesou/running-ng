@@ -287,8 +287,11 @@ Post-conditions and caching:
 - A failed build touches `<output>.build-failed` and **subsequent runs refuse
   to retry** until the sentinel is deleted.
 - `runbms` builds every (benchmark, runtime) pair before the first run and
-  **exits 1 before any run** if one failed (`--skip-build-failures` runs the
-  rest instead, and still attempts the failed ones). `buildbms` exits 1 too.
+  **exits 1 before any run** if one failed, listing each with its reason.
+  `--skip-build-failures` runs the rest and never runs a failed one;
+  `--retry-failed-builds` (the bench service) rebuilds despite a sentinel,
+  with a warning. `buildbms` exits 1 too. The sentinel is per runtime config
+  name, not per compiler commit.
 - In-memory binary cache is keyed on `runtime.get_cache_key()`, which includes
   the runtime's *config name* — so `ocaml-5.4.1` and `ocaml-5.4.1-flambda`
   never share a cache entry despite the same `version:`.
