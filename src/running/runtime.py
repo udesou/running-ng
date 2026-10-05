@@ -647,6 +647,7 @@ class OCaml(Runtime):
         self.version: Optional[str] = kwargs.get("version")
         self.commit: Optional[str] = kwargs.get("commit", kwargs.get("hash"))
         self._satellite_switches: Dict[str, str] = {}  # benchmark_name -> switch_name
+        self._compiler_identity: Optional[str] = None
 
         executable = kwargs.get("executable")
         if executable:
@@ -717,6 +718,30 @@ class OCaml(Runtime):
         """Environment with the benchmark's satellite switch activated."""
         satellite = self.ensure_benchmark_switch(benchmark_name)
         return OCaml._parse_opam_env(satellite)
+
+    def get_compiler_identity(self) -> str:
+        """The compiler's git SHA, from the switch's pinned compiler package
+        (opam compiler create pins it to a commit); the executable's hash when
+        there is no switch."""
+        if self._compiler_identity is None:
+            self._compiler_identity = self._resolve_compiler_identity()
+        return self._compiler_identity
+
+    def _resolve_compiler_identity(self) -> str:
+        if self._switch_name:
+            out = subprocess.run(
+                [OCaml._find_opam(), "pin", "list", "--color=never",
+                 "--switch={}".format(self._switch_name)],
+                capture_output=True, text=True,
+            ).stdout
+            for line in out.splitlines():
+                if line.startswith(("ocaml-variants.", "oxcaml-compiler.")):
+                    m = re.search(r"\(at ([0-9a-f]{40})\)", line)
+                    if m:
+                        return m.group(1)
+            return self.commit or "version:{}".format(self.version)
+        h = hashlib.sha256(Path(self.executable).read_bytes()).hexdigest()
+        return "executable:{}".format(h[:16])
 
     def get_benchmark_switch_name(self, benchmark_name: str) -> Optional[str]:
         """Satellite switch name for a benchmark, or None if not created."""

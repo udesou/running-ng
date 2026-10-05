@@ -284,14 +284,16 @@ Post-conditions and caching:
 - The script **must** create `RUNNING_OCAML_OUTPUT`, or the build is an error.
 - An existing output binary means **skip the build** (warning:
   `already exists; skipping build`) unless `always_build: true`.
-- A failed build touches `<output>.build-failed` and **subsequent runs refuse
-  to retry** until the sentinel is deleted.
+- A failed build writes `<output>.build-failed`; **later runs with the same
+  compiler refuse to retry** until the sentinel is deleted.
 - `runbms` builds every (benchmark, runtime) pair before the first run and
   **exits 1 before any run** if one failed, listing each with its reason.
   `--skip-build-failures` runs the rest and never runs a failed one;
   `--retry-failed-builds` (the bench service) rebuilds despite a sentinel,
-  with a warning. `buildbms` exits 1 too. The sentinel is per runtime config
-  name, not per compiler commit.
+  with a warning. `buildbms` exits 1 too.
+- The sentinel holds the compiler's git SHA (`OCaml.get_compiler_identity()`,
+  from the switch's pinned compiler package). A sentinel from another compiler,
+  or an empty legacy one, is stale: the build reruns with a warning.
 - In-memory binary cache is keyed on `runtime.get_cache_key()`, which includes
   the runtime's *config name* — so `ocaml-5.4.1` and `ocaml-5.4.1-flambda`
   never share a cache entry despite the same `version:`.

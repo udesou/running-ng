@@ -186,3 +186,17 @@ def test_failed_build_sentinel_blocks_until_retry(tmp_path):
         set_retry_failed_builds(False)
     assert calls() == 2
     assert not list(bench_dir.glob("*.build-failed"))
+
+
+def test_failed_build_sentinel_from_another_compiler_is_stale(tmp_path):
+    bench_dir, runtime, bm = _flaky_bench(tmp_path)
+    with pytest.raises(Exception):
+        bm.prepare(runtime)
+    sentinel = next(bench_dir.glob("*.build-failed"))
+    assert sentinel.read_text().strip() == runtime.get_compiler_identity()
+    # A failure recorded for a different compiler does not block this one.
+    sentinel.write_text("0" * 40 + "\n")
+    (bench_dir / "ok").touch()
+    bm.prepare(runtime)
+    assert len((bench_dir / "calls").read_text().split()) == 2
+    assert not sentinel.exists()
