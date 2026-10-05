@@ -28,6 +28,8 @@ Override `minheap_multiplier` in the config file.
 
 `--skip-timeout` (preview ⚠️): skip the remaining invocations if a benchmark under a `config`  has timed out more than `SKIP_TIMEOUT` times.
 
+<!-- TODO(docs): new flag `--skip-build-failures`. By default runbms now builds every (benchmark, runtime) pair first and, if any build fails, lists the failures and exits 1 before the first run; `--skip-build-failures` keeps the old behaviour (list them and run the rest). `buildbms` also exits 1 when any build fails. Add the flag to the synopsis line above. -->
+
 `--resume` (preview ⚠️): resume a previous run under `LOG_DIR/RESUME`. If a `.log.gz` already exists for a group of invocations, they will be skipped. Remember to clean up the partial `*.log` files before resuming.
 
 `--workdir` (preview ⚠️): use the specified directory as the working directory for benchmarks.

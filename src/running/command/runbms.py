@@ -19,6 +19,7 @@ import json
 import subprocess
 from running.command.fillin import fillin
 import math
+import sys
 import yaml
 if TYPE_CHECKING:
     from running.plugin.runbms import RunbmsPlugin
@@ -111,6 +112,10 @@ def setup_parser(subparsers):
     f.add_argument("--skip-timeout", type=int)
     f.add_argument("--resume", type=str)
     f.add_argument("--workdir", type=Path)
+    f.add_argument(
+        "--skip-build-failures", action="store_true",
+        help="Run what built instead of stopping before the first run when a build fails",
+    )
 
 
 def getid() -> str:
@@ -633,6 +638,30 @@ def rsync(log_dir):
         system("rsync -ae ssh {}/ {}:{}".format(log_dir, remote_host, log_dir))
 
 
+def prebuild(benchmarks, suites, configs: List[str],
+             runtime_by_config: Dict[str, Runtime]) -> Set[Tuple[str, str, str]]:
+    """Build every (benchmark, runtime) pair once; return the ones that failed."""
+    prepared: Set[Tuple[str, str, str]] = set()
+    build_failed: Set[Tuple[str, str, str]] = set()
+    for suite_name, bms in benchmarks.items():
+        _ = suites[suite_name]
+        for bm in bms:
+            for c in configs:
+                runtime = runtime_by_config[c]
+                key = (suite_name, bm.name, runtime.name)
+                if key in prepared or key in build_failed:
+                    continue
+                try:
+                    bm.prepare(runtime)
+                except Exception as e:
+                    logging.warning("Build failed for %s/%s with runtime %s: %s",
+                                    suite_name, bm.name, runtime.name, e)
+                    build_failed.add(key)
+                    continue
+                prepared.add(key)
+    return build_failed
+
+
 def run(args):
     if args.get("which") != "runbms":
         return False
@@ -763,31 +792,16 @@ def run(args):
         runtime_by_config: Dict[str, Runtime] = {}
         for c in configs:
             runtime_by_config[c], _ = parse_config_str(configuration, c)
-        prepared: Set[Tuple[str, str, str]] = set()
-        build_failed: Set[Tuple[str, str, str]] = set()
-        for suite_name, bms in benchmarks.items():
-            _ = suites[suite_name]
-            for bm in bms:
-                for c in configs:
-                    runtime = runtime_by_config[c]
-                    key = (suite_name, bm.name, runtime.name)
-                    if key in prepared or key in build_failed:
-                        continue
-                    try:
-                        bm.prepare(runtime)
-                    except Exception as e:
-                        logging.warning(
-                            "Build failed for %s/%s with runtime %s: %s — skipping.",
-                            suite_name, bm.name, runtime.name, e,
-                        )
-                        build_failed.add(key)
-                        continue
-                    prepared.add(key)
-
+        build_failed = prebuild(benchmarks, suites, configs, runtime_by_config)
         if build_failed:
+            skip = bool(args.get("skip_build_failures"))
             print("\n--- Build failures ({}) ---".format(len(build_failed)))
             for suite_name, bm_name, rt_name in sorted(build_failed):
-                print("  SKIP {}/{} [{}]".format(suite_name, bm_name, rt_name))
+                print("  {} {}/{} [{}]".format(
+                    "SKIP" if skip else "FAILED", suite_name, bm_name, rt_name))
+            if not skip:
+                print("---\nStopping before any run (--skip-build-failures runs what built).")
+                sys.exit(1)
             print("---\nContinuing with remaining benchmarks.\n")
 
         def run_hfacs(hfacs):

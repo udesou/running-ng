@@ -286,6 +286,9 @@ Post-conditions and caching:
   `already exists; skipping build`) unless `always_build: true`.
 - A failed build touches `<output>.build-failed` and **subsequent runs refuse
   to retry** until the sentinel is deleted.
+- `runbms` builds every (benchmark, runtime) pair before the first run and
+  **exits 1 before any run** if one failed (`--skip-build-failures` runs the
+  rest instead, and still attempts the failed ones). `buildbms` exits 1 too.
 - In-memory binary cache is keyed on `runtime.get_cache_key()`, which includes
   the runtime's *config name* — so `ocaml-5.4.1` and `ocaml-5.4.1-flambda`
   never share a cache entry despite the same `version:`.
