@@ -146,3 +146,57 @@ def test_ocaml_built_binary_can_skip_runtime_executable_resolution(tmp_path):
 
     cmd = [str(part) for part in bm.get_full_args(runtime)]
     assert cmd == [str(built_binary.resolve()), "--build-fallback"]
+
+
+def _flaky_bench(tmp_path):
+    bench_dir = tmp_path / "b"
+    bench_dir.mkdir()
+    script = bench_dir / "b.build.sh"
+    script.write_text(
+        '#!/usr/bin/env bash\n'
+        'echo x >> "$RUNNING_OCAML_BENCH_DIR/calls"\n'
+        '[ -e "$RUNNING_OCAML_BENCH_DIR/ok" ] || exit 1\n'
+        'printf "#!/bin/sh\\n" > "$RUNNING_OCAML_OUTPUT"; chmod +x "$RUNNING_OCAML_OUTPUT"\n')
+    placeholder = tmp_path / "ocaml"
+    placeholder.write_text("#!/bin/sh\n")
+    placeholder.chmod(0o755)
+    runtime = OCaml(name="rt", version="5.4.1", executable=str(placeholder))
+    bm = OCamlBuiltBinaryBenchmark(
+        benchmark_name="b", benchmark_dir=bench_dir, build_script=None,
+        binary=None, program_args=[], build_args=[], build_env={},
+        always_build=False, suite_name="s", name="b")
+    return bench_dir, runtime, bm
+
+
+def test_failed_build_sentinel_blocks_until_retry(tmp_path):
+    from running.benchmark import set_retry_failed_builds
+    bench_dir, runtime, bm = _flaky_bench(tmp_path)
+    calls = lambda: len((bench_dir / "calls").read_text().split())
+    with pytest.raises(Exception):
+        bm.prepare(runtime)
+    assert calls() == 1
+    with pytest.raises(RuntimeError, match="--retry-failed-builds"):
+        bm.prepare(runtime)
+    assert calls() == 1
+    (bench_dir / "ok").touch()
+    set_retry_failed_builds(True)
+    try:
+        bm.prepare(runtime)
+    finally:
+        set_retry_failed_builds(False)
+    assert calls() == 2
+    assert not list(bench_dir.glob("*.build-failed"))
+
+
+def test_failed_build_sentinel_from_another_compiler_is_stale(tmp_path):
+    bench_dir, runtime, bm = _flaky_bench(tmp_path)
+    with pytest.raises(Exception):
+        bm.prepare(runtime)
+    sentinel = next(bench_dir.glob("*.build-failed"))
+    assert sentinel.read_text().strip() == runtime.get_compiler_identity()
+    # A failure recorded for a different compiler does not block this one.
+    sentinel.write_text("0" * 40 + "\n")
+    (bench_dir / "ok").touch()
+    bm.prepare(runtime)
+    assert len((bench_dir / "calls").read_text().split()) == 2
+    assert not sentinel.exists()

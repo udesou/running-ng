@@ -3,7 +3,7 @@ This subcommand runs benchmarks with different configs, possibly with varying he
 
 ## Usage
 ```console
-runbms [-h|--help] [-i|--invocations INVOCATIONS] [-s|--slice SLICE] [-p|--id-prefix ID_PREFIX] [-m|--minheap-multiplier MINHEAP_MULTIPLIER] [--skip-oom SKIP_OOM] [--skip-timeout SKIP_TIMEOUT] [--resume RESUME] [--workdir WORKDIR] LOG_DIR CONFIG [N] [n [n ...]]
+runbms [-h|--help] [-i|--invocations INVOCATIONS] [-s|--slice SLICE] [-p|--id-prefix ID_PREFIX] [-m|--minheap-multiplier MINHEAP_MULTIPLIER] [--skip-oom SKIP_OOM] [--skip-timeout SKIP_TIMEOUT] [--skip-build-failures] [--retry-failed-builds] [--resume RESUME] [--workdir WORKDIR] LOG_DIR CONFIG [N] [n [n ...]]
 ```
 
 `-h`: print help message.
@@ -27,6 +27,19 @@ Override `minheap_multiplier` in the config file.
 `--skip-oom` (preview ⚠️): skip the remaining invocations if a benchmark under a `config` has run out of memory more than `SKIP_OOM` times.
 
 `--skip-timeout` (preview ⚠️): skip the remaining invocations if a benchmark under a `config`  has timed out more than `SKIP_TIMEOUT` times.
+
+Before the first run, `runbms` builds every benchmark for every runtime.
+If any build fails, it lists the failures with their reasons and exits with status 1 without running anything, so a broken build shows up before a long run starts.
+`buildbms` also exits with status 1 when any build fails.
+
+`--skip-build-failures`: run the benchmarks that built instead of stopping.
+A benchmark that failed to build is not run; a warning says so.
+
+`--retry-failed-builds`: rebuild a benchmark whose previous build failed.
+A failed build leaves a `<binary>.build-failed` file recording the compiler's git commit.
+Without this flag, a later build with the same compiler fails straight away with a message naming that file; delete it to retry.
+With the flag, the build is retried with a warning.
+A file left by a different compiler never blocks a build.
 
 `--resume` (preview ⚠️): resume a previous run under `LOG_DIR/RESUME`. If a `.log.gz` already exists for a group of invocations, they will be skipped. Remember to clean up the partial `*.log` files before resuming.
 

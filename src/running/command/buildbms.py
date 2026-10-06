@@ -1,5 +1,6 @@
 """Build-only command: compiles all benchmark binaries without running them."""
 import logging
+import sys
 from typing import Dict, Set, Tuple
 from running.suite import is_dry_run
 from running.config import Configuration
@@ -93,4 +94,6 @@ def run(args) -> bool:
         for suite_name, bm_name, rt_name in sorted(prepared):
             print(f"  OK   {suite_name}/{bm_name} [{rt_name}]")
 
+    if build_failed:
+        sys.exit(1)
     return True

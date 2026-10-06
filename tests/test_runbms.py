@@ -49,3 +49,38 @@ def test_expand_configs_cartesian_respects_fixed_modifiers():
 def test_expand_configs_without_sweep():
     configs = ["ocaml-v5.4|time_stats|d-1|s-32768|o-40|i-32|a-1"]
     assert expand_configs(configs, None) == configs
+
+
+class _Runtime:
+    def __init__(self, name):
+        self.name = name
+
+
+class _Bm:
+    def __init__(self, name, fails=()):
+        self.name, self.fails, self.calls = name, set(fails), []
+
+    def prepare(self, runtime):
+        self.calls.append(runtime.name)
+        if runtime.name in self.fails:
+            raise RuntimeError("boom")
+
+
+def test_prebuild_reports_failures_and_builds_each_pair_once():
+    from running.command.runbms import prebuild
+    a, b = _Runtime("a"), _Runtime("b")
+    ok, bad = _Bm("ok"), _Bm("bad", fails={"b"})
+    # Two configs share runtime a: each (benchmark, runtime) is built once.
+    configs = ["a|x", "a|y", "b|x"]
+    by_config = {"a|x": a, "a|y": a, "b|x": b}
+    failed = prebuild({"s": [ok, bad]}, {"s": None}, configs, by_config)
+    assert set(failed) == {("s", "bad", "b")}
+    assert failed[("s", "bad", "b")] == "boom"
+    assert ok.calls == ["a", "b"]
+    assert bad.calls == ["a", "b"]
+
+
+def test_prebuild_rejects_unknown_suite():
+    from running.command.runbms import prebuild
+    with pytest.raises(KeyError):
+        prebuild({"missing": [_Bm("x")]}, {}, ["a"], {"a": _Runtime("a")})

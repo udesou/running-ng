@@ -24,6 +24,14 @@ import os
 from enum import Enum
 import pty
 
+_retry_failed_builds = False
+
+
+def set_retry_failed_builds(v: bool) -> None:
+    global _retry_failed_builds
+    _retry_failed_builds = v
+
+
 def _is_dry_run() -> bool:
     """Imported lazily: running.suite imports names from this module, so a
     module-level import here would make the import order matter."""
@@ -851,10 +859,22 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         out_binary = self._resolve_output_binary(runtime)
         sentinel = Path(str(out_binary) + ".build-failed")
         if sentinel.exists() and not self.always_build:
-            raise RuntimeError(
-                "Build previously failed for {} (sentinel: {}). "
-                "Delete the sentinel file to retry.".format(out_binary.name, sentinel)
-            )
+            # The sentinel holds the compiler identity the build failed with.
+            failed_with = sentinel.read_text().strip()
+            compiler = runtime.get_compiler_identity()
+            if failed_with != compiler:
+                logging.warning(
+                    "Build previously failed for %s with compiler %s; this is %s, rebuilding.",
+                    out_binary.name, failed_with or "unknown", compiler)
+            elif not _retry_failed_builds:
+                raise RuntimeError(
+                    "Build previously failed for {} with this compiler ({}), "
+                    "sentinel: {}. Delete the sentinel file, or pass "
+                    "--retry-failed-builds, to retry.".format(out_binary.name, compiler, sentinel)
+                )
+            else:
+                logging.warning("Build previously failed for %s (sentinel: %s); retrying.",
+                                out_binary.name, sentinel)
         if _is_dry_run():
             self._binary_cache[runtime_key] = out_binary
             return out_binary
@@ -862,7 +882,7 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
             self._run_build(runtime, out_binary)
         except Exception:
             sentinel.parent.mkdir(parents=True, exist_ok=True)
-            sentinel.touch()
+            sentinel.write_text(runtime.get_compiler_identity() + "\n")
             raise
         sentinel.unlink(missing_ok=True)
         if not out_binary.exists():

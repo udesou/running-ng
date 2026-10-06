@@ -5,6 +5,7 @@ from running.suite import BenchmarkSuite, is_dry_run
 from running.benchmark import Benchmark, SubprocessrExit
 from running.config import Configuration
 from pathlib import Path
+from running.benchmark import set_retry_failed_builds
 from running.util import parse_config_str, system, get_logged_in_users, config_index_to_chr, config_str_encode
 import socket
 from datetime import datetime
@@ -19,6 +20,7 @@ import json
 import subprocess
 from running.command.fillin import fillin
 import math
+import sys
 import yaml
 if TYPE_CHECKING:
     from running.plugin.runbms import RunbmsPlugin
@@ -31,6 +33,8 @@ skip_oom: Optional[int]
 skip_timeout: Optional[int]
 plugins: Dict[str, Any]
 resume: Optional[str]
+# (suite, benchmark, config) whose build failed, under --skip-build-failures.
+unbuilt: Set[Tuple[str, str, str]] = set()
 compress_logs: bool
 
 
@@ -111,6 +115,14 @@ def setup_parser(subparsers):
     f.add_argument("--skip-timeout", type=int)
     f.add_argument("--resume", type=str)
     f.add_argument("--workdir", type=Path)
+    f.add_argument(
+        "--skip-build-failures", action="store_true",
+        help="Run what built instead of stopping before the first run when a build fails",
+    )
+    f.add_argument(
+        "--retry-failed-builds", action="store_true",
+        help="Rebuild benchmarks whose previous build failed, instead of failing on their sentinel",
+    )
 
 
 def getid() -> str:
@@ -490,6 +502,9 @@ def run_one_benchmark(
         logging.warning("More than one user logged in: {}".format(
             " ".join(logged_in_users)))
     ever_ran = [False] * len(configs)
+    for c in configs:
+        if (bm.suite_name, bm.name, c) in unbuilt:
+            logging.warning("%s failed to build for %s; not running it.", bm.name, c)
     for i in range(0, invocations):
         for p in plugins.values():
             p.start_invocation(hfac, size, bm, i)
@@ -498,6 +513,11 @@ def run_one_benchmark(
             config_passed = False
             for p in plugins.values():
                 p.start_config(hfac, size, bm, i, c, j)
+            if (bm.suite_name, bm.name, c) in unbuilt:
+                print(".", end="", flush=True)
+                for p in plugins.values():
+                    p.end_config(hfac, size, bm, i, c, j, False)
+                continue
             if skip_oom is not None and oomed_count[c] >= skip_oom:
                 print(".", end="", flush=True)
                 for p in plugins.values():
@@ -633,6 +653,30 @@ def rsync(log_dir):
         system("rsync -ae ssh {}/ {}:{}".format(log_dir, remote_host, log_dir))
 
 
+def prebuild(benchmarks, suites, configs: List[str],
+             runtime_by_config: Dict[str, Runtime]) -> Dict[Tuple[str, str, str], str]:
+    """Build every (benchmark, runtime) pair once; return the failed ones with why."""
+    prepared: Set[Tuple[str, str, str]] = set()
+    build_failed: Dict[Tuple[str, str, str], str] = {}
+    for suite_name, bms in benchmarks.items():
+        _ = suites[suite_name]
+        for bm in bms:
+            for c in configs:
+                runtime = runtime_by_config[c]
+                key = (suite_name, bm.name, runtime.name)
+                if key in prepared or key in build_failed:
+                    continue
+                try:
+                    bm.prepare(runtime)
+                except Exception as e:
+                    logging.warning("Build failed for %s/%s with runtime %s: %s",
+                                    suite_name, bm.name, runtime.name, e)
+                    build_failed[key] = str(e).splitlines()[0] if str(e) else type(e).__name__
+                    continue
+                prepared.add(key)
+    return build_failed
+
+
 def run(args):
     if args.get("which") != "runbms":
         return False
@@ -763,31 +807,20 @@ def run(args):
         runtime_by_config: Dict[str, Runtime] = {}
         for c in configs:
             runtime_by_config[c], _ = parse_config_str(configuration, c)
-        prepared: Set[Tuple[str, str, str]] = set()
-        build_failed: Set[Tuple[str, str, str]] = set()
-        for suite_name, bms in benchmarks.items():
-            _ = suites[suite_name]
-            for bm in bms:
-                for c in configs:
-                    runtime = runtime_by_config[c]
-                    key = (suite_name, bm.name, runtime.name)
-                    if key in prepared or key in build_failed:
-                        continue
-                    try:
-                        bm.prepare(runtime)
-                    except Exception as e:
-                        logging.warning(
-                            "Build failed for %s/%s with runtime %s: %s — skipping.",
-                            suite_name, bm.name, runtime.name, e,
-                        )
-                        build_failed.add(key)
-                        continue
-                    prepared.add(key)
-
+        set_retry_failed_builds(bool(args.get("retry_failed_builds")))
+        unbuilt.clear()
+        build_failed = prebuild(benchmarks, suites, configs, runtime_by_config)
         if build_failed:
+            skip = bool(args.get("skip_build_failures"))
             print("\n--- Build failures ({}) ---".format(len(build_failed)))
-            for suite_name, bm_name, rt_name in sorted(build_failed):
-                print("  SKIP {}/{} [{}]".format(suite_name, bm_name, rt_name))
+            for (suite_name, bm_name, rt_name), why in sorted(build_failed.items()):
+                print("  {} {}/{} [{}]: {}".format(
+                    "SKIP" if skip else "FAILED", suite_name, bm_name, rt_name, why))
+            unbuilt.update((s_, b_, c) for (s_, b_, r_) in build_failed
+                           for c in configs if runtime_by_config[c].name == r_)
+            if not skip:
+                print("---\nStopping before any run (--skip-build-failures runs what built).")
+                sys.exit(1)
             print("---\nContinuing with remaining benchmarks.\n")
 
         def run_hfacs(hfacs):
