@@ -120,11 +120,7 @@ suites:
       alt_ergo_unsat_smt2:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo"
         build_script: "alt-ergo.build.sh"
-        args: "--timelimit 15 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/unsat.smt2"
-        # --timelimit kills the process with SIGVTALRM every run (exit 142) by design;
-        # without expected_exit the runner counts it as a crash and the contract emitter
-        # drops the invocation. Keep in sync with macro-benches benchmarks/manifest.yml.
-        expected_exit: 142
+        args: "--steps-bound 12000 ${RUNNING_MACRO_BENCH_DIR}/benchmarks/alt-ergo/unsat.smt2"
 
   # Wrapper arg selects the workload: "t" (zlib t.c) or "sqlite [precision]" (SQLite
   # amalgamation, the ocaml#11733 ephemeron reproducer). Ladder axis is -eva-precision;
@@ -1692,7 +1688,7 @@ tags:
       - "perf 5.5.0, share of cycles: pplacer_like_small gemmish_c 61.6%; zarith_pi_small 66.7% in libgmp; irmin_mem_rw_small blake2b_compress + digestif_* 38.1%"
       - "perf 5.5.0 by DSO: owl_gc_small 97.8% in libopenblasp, devkit_gzip 66.9% in libz; cpdf_squeeze_small links miniz into the exe (tdefl_compress 3.6% of cycles)"
       - "perf 5.5.0: alt_ergo_unsat_smt2 ml_z_gcd 5.0% + Z.mul 2.7% + ml_z_sign 2.2% (Q/Z simplex arithmetic), against no GMP at all in alt_ergo_chain_small"
-      - "alt_ergo_unsat_smt2 never proves its goal: every invocation ends at 15.01 CPU-seconds on the --timelimit 15 SIGVTALRM, so it measures 15s of solver work, not a fixed amount of it"
+      - "alt_ergo_unsat_smt2 never proves its goal: it stops after --steps-bound 12000, a fixed amount of solver work (~15 s on 5.4.1)"
       - "dune-overlays/infer/infer/src/base/dune — infer links sqlite3 and zip; analyze reads and writes capture.db"
 
   off_heap_accounting:

@@ -165,8 +165,8 @@ class Benchmark(object):
     def _exit_is_expected(self, returncode: Optional[int]) -> bool:
         """True if `returncode` is None (still running) or equals `expected_exit`.
 
-        Some workloads exit non-zero by design (alt_ergo_unsat_smt2 dies of its
-        own SIGVTALRM, 142); the field is spelled as in macro-benches' manifest.yml.
+        For workloads that exit non-zero by design; the field is spelled as in
+        macro-benches' manifest.yml.
         """
         if returncode is None:
             return True

@@ -522,10 +522,12 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   `SubprocessrExit.Error`, and `contract/native.py` drops crashed invocations
   wholesale — so without the declaration the cell's olly/perf data is silently
   absent from `contract/`, while the legacy adapter (which reads the sidecars)
-  keeps it. That divergence is invisible unless you diff the two paths. Only
-  `alt_ergo_unsat_smt2` needs it today (142 = 128+14, its own SIGVTALRM from
-  `--timelimit 15`); the field name and exact-equality semantics match
-  macro-benches' `benchmarks/manifest.yml`, so keep the two in sync.
+  keeps it. That divergence is invisible unless you diff the two paths. No
+  benchmark needs it today: `alt_ergo_unsat_smt2` exited 142 under
+  `--timelimit 15` until 2026-10-06, and now stops at `--steps-bound 12000`
+  and exits 0 (a timeout raised from a signal handler is fatal on OxCaml). The
+  field name and exact-equality semantics match macro-benches'
+  `benchmarks/manifest.yml`, so keep the two in sync.
 - **memtrace is opt-in per benchmark, and silently so.** `MemtraceAttach` only
   exports `MEMTRACE`/`MEMTRACE_RATE`; tracing happens only if the binary itself
   calls `Memtrace.trace_if_requested ()` (macro-benches patches this into
