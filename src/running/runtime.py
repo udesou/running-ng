@@ -286,7 +286,7 @@ class OCaml(Runtime):
         from running import switches
         r = subprocess.run(
             [OCaml._find_opam(), "var", "bin", "--switch", switches.TOOLS_SWITCH],
-            capture_output=True, text=True)
+            capture_output=True, text=True, env=switches.tools_env())
         if r.returncode == 0:
             candidate = Path(r.stdout.strip()) / "opam-compiler"
             if candidate.is_file():
@@ -295,7 +295,8 @@ class OCaml(Runtime):
         if found:
             return found
         raise RuntimeError(
-            "opam-compiler not found in the {} switch or on PATH. Run "
+            "opam-compiler not found in the {} switch of running-ng's opam "
+            "root, or on PATH. Run "
             "install_deps.sh, or set RUNNING_OPAM_COMPILER to the binary."
             .format(switches.TOOLS_SWITCH))
 

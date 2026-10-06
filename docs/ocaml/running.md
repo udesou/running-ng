@@ -106,6 +106,7 @@ The `memtrace_*` files appear only under a `MemtraceAttach` modifier, see
 | `TOOLS_SWITCH` | first opam switch with `dune`, else `running-ng-tools` | switch providing `dune`/`ocamlfind`/`olly` |
 | `RUNNING_CONTRACT_ADAPTER` | `contract-adapter/bin/adapter` | adapter binary used by `running adapt` |
 | `OPAMROOT` | `~/.opam` | standard opam variable. Two concurrent runs sharing one opam root are refused; point overlapping runs at separate roots. |
+<!-- TODO(docs): RUNNING_REUSE_SWITCHES is gone (each compiler now has its own opam root, reused whenever its identity matches; setting it only logs a warning). New rows: RUNNING_OPAM_ROOTS (where the roots live, default ~/.cache/running-ng/opam-roots; running-ng's own tools/olly switches are in its running-ng/ subdir) and RUNNING_OPAM_COMPILER (the opam-compiler binary, default the tools switch's). Also RUNNING_NG_STATE_DIR now defaults to that running-ng/ root dir, not ~/.cache/running-ng/. The OPAMROOT row is obsolete: running-ng no longer uses the user's opam root, and concurrent runs are safe (each holds a shared lock on the roots it uses). -->
 
 The installers take `BENCHES_DIR`, `MACRO_BENCHES_DIR` and `OLLY_DIR` too: set
 them to checkouts you already have and nothing is cloned.

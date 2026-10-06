@@ -1,5 +1,6 @@
-"""running-ng's own opam switches (tools and olly), separate from the
-per-runtime switches runtime.py provisions. Two switches because olly needs
+"""running-ng's own opam switches (tools and olly), in running-ng's own opam
+root (``$RUNNING_OPAM_ROOTS/running-ng``), separate from the per-runtime roots
+runtime.py provisions. Two switches because olly needs
 cmdliner >= 2.0 and opam-compiler pins cmdliner < 2.0. A switch is rebuilt
 when its observed identity (package versions, olly checkout SHA) no longer
 matches what was recorded at creation.
@@ -16,6 +17,8 @@ import shutil
 import subprocess
 import sys
 from typing import Dict, List, Optional
+
+from running import opam_roots
 
 #: Overrides where the machine-local state file (what was built, from what) lives.
 STATE_ENV_VAR = "RUNNING_NG_STATE_DIR"
@@ -51,8 +54,25 @@ SWITCHES: Dict[str, Dict] = {
 }
 
 
+def tools_root() -> str:
+    return str(opam_roots.roots_dir() / opam_roots.TOOLS_ROOT)
+
+
+def tools_env() -> Dict[str, str]:
+    """The environment for every opam command here: the tools root, never the user's."""
+    return opam_roots.Root(opam_roots.roots_dir() / opam_roots.TOOLS_ROOT).env()
+
+
+def _ensure_tools_root(opam: str) -> None:
+    root = opam_roots.Root(opam_roots.roots_dir() / opam_roots.TOOLS_ROOT)
+    if (root.path / "config").exists():
+        return
+    logging.info("initialising running-ng's opam root %s", root.path)
+    opam_roots.init_root(opam, root, opam_roots.OPAM_REPOSITORY_COMMIT)
+
+
 def _run(cmd: List[str], check: bool = True) -> str:
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, text=True, env=tools_env())
     if check and p.returncode != 0:
         raise RuntimeError("{} failed ({}): {}".format(
             " ".join(cmd), p.returncode, p.stderr.strip()))
@@ -78,23 +98,9 @@ def find_opam() -> str:
 
 
 def state_dir() -> str:
-    """State dir: RUNNING_NG_STATE_DIR, else under the opam root (the state
-    describes switches of that root, so consumers with separate roots must
-    not share it).
-    """
-    override = os.environ.get(STATE_ENV_VAR)
-    if override:
-        return override
-    # Read $OPAMROOT directly: `opam var root` fails on a root that does not exist yet.
-    env_root = os.environ.get("OPAMROOT")
-    if env_root:
-        return os.path.join(env_root, "running-ng")
-    try:
-        return os.path.join(_run([find_opam(), "var", "root"]), "running-ng")
-    except (RuntimeError, OSError):
-        # no opam at all
-        cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-        return os.path.join(cache, "running-ng")
+    """State dir: RUNNING_NG_STATE_DIR, else the tools root, whose switches the
+    state describes."""
+    return os.environ.get(STATE_ENV_VAR) or tools_root()
 
 
 def state_path() -> str:
@@ -255,6 +261,8 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
     Leaves the previously active switch selected.
     """
     opam = find_opam()
+    if not dry_run:
+        _ensure_tools_root(opam)
     action = plan(opam, name)
     if action == "ok":
         logging.info("opam switch '%s' is up to date", name)
@@ -285,7 +293,7 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
             return "repair"
         previous = _active_switch(opam)
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, env=tools_env())
             _register_plugin(opam, name)
             _record(opam, name)
         finally:
@@ -333,7 +341,7 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
                 logging.info("DRY RUN: %s%s", " ".join(cmd),
                              " (in {})".format(cwd) if cwd and cmd[-1] == "." else "")
                 continue
-            subprocess.run(cmd, check=True,
+            subprocess.run(cmd, check=True, env=tools_env(),
                            cwd=cwd if cmd[-1] == "." else None)
         if not dry_run:
             _register_plugin(opam, name)
@@ -403,7 +411,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m running.switches",
         description="Declare, create and cache running-ng's own opam switches.")
-    parser.add_argument("action", choices=["status", "ensure", "path"])
+    parser.add_argument("action", choices=["status", "ensure", "path", "root"])
     parser.add_argument("--switch", action="append", dest="switches",
                         choices=sorted(SWITCHES),
                         help="limit to this switch (repeatable); default all")
@@ -415,6 +423,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.action == "path":
         print(state_path())
+        return 0
+    if args.action == "root":
+        print(tools_root())
         return 0
     names = args.switches or list(SWITCHES)
     if args.action == "status":

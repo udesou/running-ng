@@ -2,6 +2,7 @@
 
 Each entry in `runtimes:` names a compiler. Non-`executable` runtimes are built by
 `opam compiler create` into a switch named `running-ng-<runtime-name>`.
+<!-- TODO(docs): each runtime now gets its own opam root (under RUNNING_OPAM_ROOTS, default ~/.cache/running-ng/opam-roots) with one switch named `runtime`, built by running the tools switch's opam-compiler at the resolved git SHA; `version:` is resolved to the tag's commit first. -->
 
 ```yaml
 runtimes:
@@ -29,6 +30,7 @@ a GitHub URL, since `opam-compiler` resolves `user/repo:ref`. Use either
 **A switch left over from an earlier run is removed and rebuilt by default**, so
 the compiler and the pinned dune are what this run provisioned rather than
 whatever a previous run installed. For long sweeps over switches you trust set `RUNNING_REUSE_SWITCHES=1`; reuse mode
+<!-- TODO(docs): no leftover-switch rebuild and no RUNNING_REUSE_SWITCHES any more: a root is reused whenever its identity (git SHA, configure_args, dune_version, relocatable, opam-repository commit) matches, and a different identity gets a new root. `python3 -m running.opam_roots list` shows them and `gc --unused-for DAYS` removes old ones. -->
 still refuses a switch whose compiler never finished building. 
 
 Two runs sharing an opam root are refused outright (`$OPAMROOT/running-ng.lock`), because one would
