@@ -51,13 +51,13 @@ runtimes:
     configure_args: ["--enable-frame-pointers", "--enable-flambda"]
 ```
 
-Specifies the compilers to be tested. Each one can be built from a git ref (`version:` for a release tag,
-`commit:` for a sha) into its own opam switch, `running-ng-<name>`. Here both
-<!-- TODO(docs): runtimes are no longer built into a `running-ng-<name>` switch in the user's opam root, but into their own opam root under RUNNING_OPAM_ROOTS, named by the compiler's resolved git SHA, its build settings and the pinned opam-repository commit; two runtimes declaring the same compiler share it. -->
-entries share one source and differ only in `configure_args`, which is what
-makes this a variants experiment. The runtime *name* uniquely tells the builds apart, naming the switch 
-and each the benchmark binary (`<bench>-<name>`) and the series in the results. Adding a third variant is one
-more entry plus one more config string, which `experiments/macro_fp_flambda_5.5.1.yml` defines.
+Specifies the compilers to be tested. Each one is built from a git ref (`version:`
+for a release tag, `commit:` for a sha) into its own opam root (see
+[Runtimes](runtimes.md)). Here both entries share one source and differ only in
+`configure_args`, which is what makes this a variants experiment, and also what
+gives each its own opam root. The runtime *name* tells the builds apart everywhere
+else: it names each benchmark binary (`<bench>-<name>`) and the series in the
+results. Adding a third variant is one more entry plus one more config string, as defined for example in `experiments/macro_fp_flambda_5.5.1.yml`.
 
 ```yaml
 configs:
