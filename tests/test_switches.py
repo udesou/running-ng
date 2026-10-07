@@ -43,9 +43,19 @@ def test_only_the_tools_switch_registers_the_plugin():
 def test_tools_switch_commands():
     cmds = switches.build_commands(switches.TOOLS_SWITCH, compiler="5.4.0")
     assert cmds[0][:3] == ["opam", "switch", "create"]
-    install = cmds[1]
+    install = [c for c in cmds if c[1] == "install"][0]
     assert "--switch" in install and switches.TOOLS_SWITCH in install
     assert {"dune", "ocamlfind", "opam-compiler"} <= set(install)
+
+
+def test_pins_are_applied_before_installing():
+    cmds = switches.build_commands(switches.TOOLS_SWITCH, compiler="5.4.0")
+    pins = switches.SWITCHES[switches.TOOLS_SWITCH]["pins"]
+    pin_cmds = [c for c in cmds if c[1] == "pin"]
+    assert [c[-2:] for c in pin_cmds] == [[p, u] for p, u in pins.items()]
+    assert all("--no-action" in c for c in pin_cmds)
+    first_install = next(i for i, c in enumerate(cmds) if c[1] == "install")
+    assert all(cmds.index(c) < first_install for c in pin_cmds)
 
 
 def test_olly_switch_resolves_deps_from_its_own_opam_file():
@@ -100,13 +110,19 @@ def _fake(monkeypatch, exists, observed):
     monkeypatch.setattr(switches, "missing_packages", lambda opam, n: [])
 
 
+def _tools(**identity):
+    """A tools-switch identity carrying the declared pins."""
+    pins = switches.SWITCHES[switches.TOOLS_SWITCH]["pins"]
+    return dict(identity, **{"pin:" + p: u for p, u in pins.items()})
+
+
 def test_absent_switch_is_created(monkeypatch, state):
     _fake(monkeypatch, False, None)
     assert switches.plan("opam", switches.TOOLS_SWITCH) == "create"
 
 
 def test_unchanged_switch_is_left_alone(monkeypatch, state):
-    ident = {"ocaml": "5.4.0", "dune": "3.24.0"}
+    ident = _tools(ocaml="5.4.0", dune="3.24.0")
     _fake(monkeypatch, True, ident)
     switches.save_state({"version": 1, "switches": {
         switches.TOOLS_SWITCH: {"identity": ident}}})
@@ -114,10 +130,23 @@ def test_unchanged_switch_is_left_alone(monkeypatch, state):
 
 
 def test_changed_identity_triggers_a_rebuild(monkeypatch, state):
-    _fake(monkeypatch, True, {"ocaml": "5.4.0", "dune": "3.24.0"})
+    _fake(monkeypatch, True, _tools(ocaml="5.4.0", dune="3.24.0"))
     switches.save_state({"version": 1, "switches": {
-        switches.TOOLS_SWITCH: {"identity": {"ocaml": "5.4.0", "dune": "3.22.1"}}}})
+        switches.TOOLS_SWITCH: {"identity": _tools(ocaml="5.4.0", dune="3.22.1")}}})
     assert switches.plan("opam", switches.TOOLS_SWITCH) == "rebuild"
+
+
+def test_a_missing_or_moved_pin_is_repaired_in_place(monkeypatch, state):
+    unpinned = {"ocaml": "5.4.0", "dune": "3.24.0"}
+    _fake(monkeypatch, True, unpinned)
+    switches.save_state({"version": 1, "switches": {
+        switches.TOOLS_SWITCH: {"identity": unpinned}}})
+    assert switches.plan("opam", switches.TOOLS_SWITCH) == "repair"
+
+
+def test_an_unrecorded_switch_without_the_pin_is_repaired(monkeypatch, state):
+    _fake(monkeypatch, True, {"ocaml": "5.4.0"})
+    assert switches.plan("opam", switches.TOOLS_SWITCH) == "repair"
 
 
 def test_moving_the_olly_checkout_triggers_a_rebuild(monkeypatch, state):
@@ -130,7 +159,7 @@ def test_moving_the_olly_checkout_triggers_a_rebuild(monkeypatch, state):
 
 def test_a_switch_we_did_not_build_is_adopted_not_destroyed(monkeypatch, state):
     # present but unrecorded: someone else's, or our state was lost
-    _fake(monkeypatch, True, {"ocaml": "5.4.0"})
+    _fake(monkeypatch, True, _tools(ocaml="5.4.0"))
     assert switches.plan("opam", switches.TOOLS_SWITCH) == "adopt"
 
 
