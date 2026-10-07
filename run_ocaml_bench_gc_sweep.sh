@@ -68,22 +68,20 @@ if ! PYTHONPATH="$PYTHONPATH" "$PYTHON" -m running.switches ensure; then
   exit 1
 fi
 
-TOOLS_BIN="$("$_OPAM" var prefix --switch="$TOOLS_SWITCH" 2>/dev/null)/bin"
+# running-ng's own switches live in its own opam root, never the user's.
+TOOLS_OPAMROOT="$(PYTHONPATH="$PYTHONPATH" "$PYTHON" -m running.switches root)"
+TOOLS_BIN="$(OPAMROOT="$TOOLS_OPAMROOT" "$_OPAM" var prefix --switch="$TOOLS_SWITCH" 2>/dev/null)/bin"
 echo "Tools switch: $TOOLS_SWITCH ($TOOLS_BIN)"
 export PATH="$TOOLS_BIN:$PATH"
 
 # Provisioning belongs to install_deps_<os>.sh. Installing here corrupted switches:
 # opam-compiler pins cmdliner < 2.0 (breaks olly: "Unbound module Arg.Conv") and olly's
 # deps pull cmdliner >= 2.0 (evicts opam-compiler), so the two need separate switches.
-_OPAM_PLUGIN_BIN="$("$_OPAM" var root 2>/dev/null)/plugins/bin/opam-compiler"
-# -x is false for a dangling symlink, which a rebuilt tools switch leaves behind.
-if [[ ! -x "$_OPAM_PLUGIN_BIN" ]]; then
-  echo "ERROR: the opam 'compiler' plugin is not registered at" >&2
-  echo "  $_OPAM_PLUGIN_BIN" >&2
-  echo "  Without it no runtime switch can be provisioned: runtime.py runs" >&2
-  echo "  'opam compiler create', which resolves opam-compiler as a plugin," >&2
-  echo "  and fails with \"unknown command 'compiler'\"." >&2
-  echo "  Run install_deps_<os>.sh, which registers it against the tools switch." >&2
+if [[ ! -x "$TOOLS_BIN/opam-compiler" ]]; then
+  echo "ERROR: no opam-compiler at $TOOLS_BIN/opam-compiler." >&2
+  echo "  Without it no runtime's opam root can be built: runtime.py runs it" >&2
+  echo "  directly to create each compiler switch." >&2
+  echo "  Run install_deps_<os>.sh, which provides it in the tools switch." >&2
   exit 1
 fi
 
@@ -107,7 +105,7 @@ else
     cd "$OLLY_DIR"
     # No --set-switch: it would leave the user's global switch pointing at ours on an
     # early exit. Captured, not eval'd inline, so a failure is not swallowed.
-    _olly_env="$("$_OPAM" env --switch="$OLLY_SWITCH")" || exit 1
+    _olly_env="$(OPAMROOT="$TOOLS_OPAMROOT" "$_OPAM" env --switch="$OLLY_SWITCH")" || exit 1
     eval "$_olly_env"
     # No -j: dune defaults to the core count and nproc does not exist on FreeBSD/macOS.
     dune build -p runtime_events_tools @install

@@ -5,7 +5,7 @@ import argparse
 from running.__version__ import __VERSION__
 from running.command import fillin, runbms, buildbms, minheap, log_preprocessor, adapt
 from running.suite import set_dry_run
-from running.runtime import OCaml, OpamRootBusyError
+from running.runtime import OCaml
 import sys
 import importlib.resources
 import os
@@ -52,13 +52,7 @@ def main():
                     break
             else:
                 parsers.print_help()
-    except OpamRootBusyError as e:
-        # Actionable condition: report plainly, no traceback.
-        logger.error("%s", e)
-        sys.exit(1)
     finally:
-        # Provisioning/removing switches changes the active one; always restore the user's.
-        OCaml.restore_active_switch()
         OCaml.release_opam_lock()
 
 

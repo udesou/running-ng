@@ -97,15 +97,14 @@ The `memtrace_*` files appear only under a `MemtraceAttach` modifier, see
 | `LOG_DIR` | `<repo>/gc-sweep-logs` | where run directories are created |
 | `PYTHON` | `python3` | interpreter to use, for a virtualenv that is not active |
 | `RUNNING_TAG` | unset | comma-separated tags to filter benchmarks by |
-| `RUNNING_REUSE_SWITCHES` | unset | `1` reuses a `running-ng-*` switch from an earlier run instead of rebuilding it |
 | `RUNNING_NG_COUNTER_BACKEND` | auto-detected | force `linux-perf`, `freebsd-pmc` or `none` |
 | `RUNNING_REQUIRE_PERFORMANCE_GOVERNOR` | unset | `1` makes a non-performance CPU governor fatal instead of a warning |
-| `RUNNING_NG_STATE_DIR` | `~/.cache/running-ng/` | where switch provenance is recorded |
+| `RUNNING_NG_STATE_DIR` | `~/.cache/running-ng/opam-roots/running-ng` | where switch provenance is recorded |
 | `OLLY_DIR` | `../runtime_events_tools`, else `~/runtime_events_tools` | `runtime_events_tools` checkout (version-checked, built if needed) |
 | `OLLY_BIN` | `$OLLY_DIR/_build/install/default/bin` | directory containing the `olly` binary |
-| `TOOLS_SWITCH` | first opam switch with `dune`, else `running-ng-tools` | switch providing `dune`/`ocamlfind`/`olly` |
 | `RUNNING_CONTRACT_ADAPTER` | `contract-adapter/bin/adapter` | adapter binary used by `running adapt` |
-| `OPAMROOT` | `~/.opam` | standard opam variable. Two concurrent runs sharing one opam root are refused; point overlapping runs at separate roots. |
+| `RUNNING_OPAM_ROOTS` | `~/.cache/running-ng/opam-roots` | where each compiler's opam root, and running-ng's own (`running-ng/`), are kept |
+| `RUNNING_OPAM_COMPILER` | the tools switch's `opam-compiler` | opam-compiler binary used to build runtimes |
 
 The installers take `BENCHES_DIR`, `MACRO_BENCHES_DIR` and `OLLY_DIR` too: set
 them to checkouts you already have and nothing is cloned.

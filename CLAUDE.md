@@ -121,14 +121,15 @@ tag filter is *intersection-only* (can't re-enable a program absent from
   `fillin`, `runbms`, `buildbms`, `minheap`, `log_preprocessor`, `adapt`.
   (`genadvice.py` exists but is **not** registered — dead code, not reachable
   as a subcommand.)
-- `src/running/__main__.py` — besides dispatch, owns two run-scoped concerns:
-  it reports `OpamRootBusyError` as a plain message + `exit(1)` rather than a
-  traceback, and its `finally` calls `OCaml.restore_active_switch()` +
-  `OCaml.release_opam_lock()` so an interrupted run still puts the user's opam
-  switch back.
+- `src/running/__main__.py`: besides dispatch, its `finally` calls
+  `OCaml.release_opam_lock()`, which drops the shared locks this run holds on
+  its opam roots.
 - `src/running/`
   - `runtime.py` — `OCaml` / `OxCaml` / `OCamlMMTk` / `NativeExecutable` + the
-    JVM/JS lineage; opam-compiler switch management, satellite switches.
+    JVM/JS lineage; builds each runtime's compiler into its opam root, satellite
+    switches.
+  - `opam_roots.py`: one opam root per compiler identity (see "Opam roots").
+  - `switches.py`: running-ng's own tools and olly switches, in its own root.
   - `benchmark.py` — `OCamlBuiltBinaryBenchmark` (build contract, binary
     caching, `.build-failed` sentinel) and the `PerfAndOllyAttach` run path.
   - `suite.py` — `OCamlBenchmarkSuite`, `OCamlMulticoreBenchmarkSuite`,
@@ -212,35 +213,49 @@ tag filter is *intersection-only* (can't re-enable a program absent from
     for the smallest heap. Needs binaries built; writes RESULT incrementally
     (**resumable** — skips benches already recorded).
 - Runtimes: `OCaml` (`version:` | `commit:`/`hash:` | `executable:`), `OxCaml`,
-  `OCamlMMTk`. Each non-`executable` runtime gets an opam switch
-  `running-ng-<runtime-name>` built by `opam compiler create`; the switch is
-  the cache, so delete the switch (not a temp dir) to force a compiler rebuild.
-  Only **OxCaml** uses `/tmp/running-ng-ocaml-toolchains/` (for source
-  checkouts).
-  `version:`/`commit:` both resolve to a **git ref** — `version: "5.5.0"` →
-  `opam compiler create ocaml/ocaml:5.5.0`, i.e. built from the release tag, not
-  the `ocaml-base-compiler` opam package. That distinction matters: it is what
-  keeps a runtime switch immune to whatever a shadowing opam repo happens to
-  publish under the same version number.
+  `OCamlMMTk`. Each non-`executable` runtime gets its own opam root (see "Opam
+  roots" below), holding one switch named `runtime`.
+  `version:`/`commit:` both resolve to a **git SHA** before anything is built:
+  `version: "5.5.0"` is the release tag's commit, built with `opam-compiler create
+  ocaml/ocaml:<sha>`, not the `ocaml-base-compiler` opam package. That is what keeps
+  a runtime immune to whatever a shadowing opam repo publishes under the same
+  version number. An abbreviated SHA is refused.
 
-### Switch provisioning (`OCaml._ensure_switch` and friends)
+### Opam roots (`opam_roots.py`)
 
-- **A switch left over from an earlier run is deleted and rebuilt**, because
-  nothing in a switch records which compiler source or dune version built it.
-  `RUNNING_REUSE_SWITCHES=1` restores the old reuse-if-present behaviour (worth
-  it for long sweeps — a rebuild recompiles the compiler, ~10–20 min per
-  runtime). Switches provisioned earlier in the *same* run are always reused
-  (`_switches_created_this_run`).
-- **Reuse mode refuses a half-built switch** (`_assert_switch_usable`). opam
-  registers a switch name *before* its compiler finishes building, so an
-  interrupted provisioning leaves the name present with no `bin/ocamlc` behind
-  it. A normal run heals that by rebuilding; reuse mode can't — it holds only a
-  **shared** lock and must not delete a switch a concurrent run may be using —
-  so it raises with the two ways out (rerun without `RUNNING_REUSE_SWITCHES`, or
-  `opam switch remove`). Without the check the empty shell reached the build
-  scripts and surfaced as a benchmark build failure, nowhere near the cause.
-  The check is compiler-only on purpose: `OCamlMMTk` shares this code path and
-  deliberately installs no dune.
+- **One opam root per compiler identity**, under `$RUNNING_OPAM_ROOTS` (default
+  `~/.cache/running-ng/opam-roots/`; the bench service points it under its state
+  dir). The identity is everything that determines the root's contents: runtime
+  type, repo, the compiler's git SHA, `configure_args`, the dune version,
+  `relocatable`, and the opam-repository commit the root is initialised from
+  (`opam_roots.OPAM_REPOSITORY_COMMIT`, bumped by PR; `opam_repository:` on a
+  runtime overrides it). The directory name is `<type>-<sha12>-<hash>`, and
+  `root.json` records the identity in full, so two runs with different pins never
+  share a root. The runtime's *config name* is not part of it: two runtimes
+  declaring the same compiler share a root.
+- **Reused whenever the identity matches**, never rebuilt: there is no leftover
+  switch to guess about, so `RUNNING_REUSE_SWITCHES` is gone (a warning if set).
+  To force a rebuild, delete the root (`python3 -m running.opam_roots list`).
+- **Built in place, not moved into place**: a compiler records its install path,
+  so a root cannot be built elsewhere and renamed. It is built at its final path
+  under `<key>.create.lock`, and `root.json` is written last; a root without it is
+  incomplete (an interrupted build) and is wiped and rebuilt by the next run.
+- **Locks are per root**: a run holds `<key>.use.lock` shared for as long as it
+  uses the root; `gc` takes both locks without waiting and skips busy roots.
+  Separate create/use locks are deliberate: one lock taken shared and upgraded to
+  build would deadlock two runs that both find the root missing.
+- **The download cache is shared** (`$RUNNING_OPAM_ROOTS/download-cache`, a
+  symlink from each root): opam addresses it by checksum.
+- **opam-compiler is run directly** from the tools switch (`RUNNING_OPAM_COMPILER`
+  overrides it): a runtime root registers no plugins.
+- **running-ng's own switches** (tools, olly) live in their own root,
+  `$RUNNING_OPAM_ROOTS/running-ng`, initialised from the same pinned commit;
+  `python3 -m running.switches root` prints it. Nothing running-ng does touches
+  the user's `~/.opam` any more; old `running-ng-*` switches there are unused.
+- `python3 -m running.opam_roots list` shows each root and what built it; `gc
+  --unused-for DAYS [--dry-run]` removes roots unused that long. Manual only.
+- Disk: ~0.1 GB of repository metadata per root plus the compiler switch
+  (~0.7 GB for 5.4.1); first build of a 5.4.1 root ~100 s on 32 cores.
 - **`OCaml.DUNE_VERSION` (3.24.0) is pinned** so switches provisioned months
   apart — and two switches compared within one run — get the same build tool,
   and a **failure to install it is fatal**. It used to be 3.22.1 with a warn-and
@@ -255,12 +270,6 @@ tag filter is *intersection-only* (can't re-enable a program absent from
   the candidate, confirm it bootstraps on **trunk** and not just the release, and
   note that an already-populated `macro-benches/duniverse/` keeps its old
   `dune-project` until `make setup` is re-run.
-- **The opam root is locked** (`$OPAMROOT/running-ng.lock`, `flock`): exclusive
-  for a normal run, shared under `RUNNING_REUSE_SWITCHES=1`, skipped for dry
-  runs. A second run that would delete switches the first is using is refused
-  with `OpamRootBusyError` rather than allowed to corrupt both. The kernel drops
-  the lock on process exit, so a crash never wedges it. Two campaigns at once →
-  give each its own `OPAMROOT`.
 - The overlay repo is **opt-in** (`relocatable: true`) and scoped to one switch.
   It used to be added to every switch with `--set-default`; see the gotcha below.
 - `configure_args:` is honoured (passed as `--configure-command "./configure …"`).
@@ -278,7 +287,9 @@ build script with `cwd = benchmark_dir`, prefixed by
 | `RUNNING_OCAML_BENCH_DIR` | the benchmark's `path:` |
 | `RUNNING_OCAML_OUTPUT` | `binary:` (with `{benchmark}`/`{runtime}` expanded) else `<benchmark>-<runtime>` under `path:` |
 | `RUNNING_OCAML_RUNTIME_NAME` | the runtime's config-file name |
-| `RUNNING_OCAML_SWITCH` | switch name, when not in `executable:` mode |
+| `RUNNING_OCAML_SWITCH` | switch name (`runtime`), when not in `executable:` mode |
+| `RUNNING_OCAML_SWITCH_PREFIX` | that switch's prefix, likewise |
+| `OPAMROOT` | the runtime's opam root, so `opam var --switch` in a build script resolves there |
 
 Post-conditions and caching:
 - The script **must** create `RUNNING_OCAML_OUTPUT`, or the build is an error.
@@ -292,7 +303,7 @@ Post-conditions and caching:
   `--retry-failed-builds` (the bench service) rebuilds despite a sentinel,
   with a warning. `buildbms` exits 1 too.
 - The sentinel holds the compiler's git SHA (`OCaml.get_compiler_identity()`,
-  from the switch's pinned compiler package). A sentinel from another compiler,
+  resolved before its root was built). A sentinel from another compiler,
   or an empty legacy one, is stale: the build reruns with a warning.
 - In-memory binary cache is keyed on `runtime.get_cache_key()`, which includes
   the runtime's *config name* — so `ocaml-5.4.1` and `ocaml-5.4.1-flambda`
@@ -453,18 +464,17 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   that matches none of these is recorded verbatim, and logs get published.
 - **olly JSON sidecars are JSONL** — one line per invocation; don't infer
   invocation count from filenames.
-- **Constructing an `OCaml` runtime provisions its opam switch.** `__init__`
-  calls `_ensure_switch` eagerly, so `Configuration.resolve_class()` on a
-  config that declares runtimes will create switches, and will WIPE and
-  rebuild an existing one of the same name unless `RUNNING_REUSE_SWITCHES` is
-  set. Parse YAML directly (`yaml.safe_load`) if you only want to inspect a
+- **Constructing an `OCaml` runtime builds its opam root.** `__init__` calls
+  `opam_roots.ensure` eagerly, so `Configuration.resolve_class()` on a config
+  that declares runtimes resolves refs over the network and builds any missing
+  root. Parse YAML directly (`yaml.safe_load`) if you only want to inspect a
   config.
 - **`opam compiler create` rejects a bare version.** `opam compiler create
   5.4.1` fails with `Invalid source: "5.4.1"`. It wants a source spec, which
-  is what `runtime.py`'s `_opam_compiler_source` builds: `ocaml/ocaml:5.4.1`.
+  is what `runtime.py`'s `_opam_compiler_source` builds: `ocaml/ocaml:<sha>`.
   The harness is right; only hand-written probe commands get this wrong.
 - **running-ng's own opam switches are declared in `switches.py`**, not
-  discovered. `python3 -m running.switches status` says what exists and
+  discovered, and live in running-ng's own root (`python3 -m running.switches root`). `python3 -m running.switches status` says what exists and
   whether it matches what it was built from; `ensure` creates or rebuilds and
   puts the active switch back. Invalidation is by observed identity, which for
   the olly switch includes the checkout's git SHA, so moving the checkout
@@ -511,12 +521,12 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   Configs now use a bare `perf_grp1` (lavyek still adds `re_par|md_par|pin_lavyek`);
   one specialised lab config still carries `re-25` but the suite values override it.
   Values are 5.5.0/32-core minimums — re-probe on a very different farm.
-- **`-d` (dry run) still provisions compilers.** `_ensure_switch` is called from
+- **`-d` (dry run) still builds compilers.** `opam_roots.ensure` is called from
   `OCaml.__init__`, which `Configuration.resolve_class()` runs before any
   dry-run check — so `-d` on a config with an unbuilt runtime compiles a
   compiler from source before printing anything. It *is* honoured for contract
-  emission (`schema_version and not is_dry_run()`) and for the opam lock. Use a
-  config whose switches already exist if you only want to expand the grid.
+  emission (`schema_version and not is_dry_run()`). Use a config whose roots
+  already exist if you only want to expand the grid.
 - **A benchmark whose success is a non-zero exit needs `expected_exit:`.** The
   runner classifies any `returncode != expected_exit` (default 0) as
   `SubprocessrExit.Error`, and `contract/native.py` drops crashed invocations
@@ -549,12 +559,11 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   test build. Now opt-in via `relocatable: true`, switch-scoped. To audit a
   machine: `opam repo list --all`, then
   `opam repo remove relocatable -a --set-default`.
-- **The `opam-compiler` plugin lives in `$(opam var root)/plugins/bin/`,
-  symlinked into the switch that installed it** — so rebuilding the tools switch
-  leaves it dangling and the next run dies in `runtime.py` with
-  `CalledProcessError` whose real cause (`unknown command 'compiler'`) is only on
-  the plugin's stderr. Both launch scripts now re-install it when the resolved
-  binary is missing.
+- **opam-compiler is run as a binary, not as an opam plugin**: a runtime root has
+  no `plugins/bin`, so `opam compiler create` would fail there with `unknown
+  command 'compiler'`. `runtime.py` runs `<tools switch>/bin/opam-compiler` with
+  the runtime root's `OPAMROOT`; opam-compiler shells out to `opam`, which
+  inherits it. Both launch scripts check the binary exists.
 - **`PerfAndOllyAttach` PID discovery.** The benchmark runs behind a
   `python3 -c` wrapper that blocks on a pipe so perf can attach pre-`exec`;
   olly then needs the *right* `.events` file. Wrapper scripts that run OCaml
@@ -589,11 +598,11 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
      a bare `-lmmtk_ocaml` into `ocamlc -config`'s c_libraries, so third-party
      dune-configurator probes (lwt pthread, ctypes machdep, owl cblas) fail to
      link and mis-detect features without it. Proper fix belongs upstream.
-  3. `_ensure_switch` swaps opam's global `wrap-build-commands` /
-     `wrap-install-commands` to `["setarch" "<arch>" "-R"]` for the compiler
-     build only, then restores them — bubblewrap blocks cargo's network *and*
-     resets the no-randomize personality, so the bit must be re-applied on the
-     build command itself.
+  3. `_build_root` sets its root's `wrap-build-commands` /
+     `wrap-install-commands` to `["setarch" "<arch>" "-R"]`: bubblewrap blocks
+     cargo's network *and* resets the no-randomize personality, so the bit must
+     be re-applied on the build command itself. The root is MMTk's alone, so the
+     setting stays (it used to be swapped in and out of the user's root).
   `MMTK_PLAN`/`MMTK_THREADS` are run-time `EnvVar` modifiers (`plan-…`,
   `threads-…` in `macro_base.yml`); prefer those name-value forms over the older
   flag modifiers, which the `config_id` drops.

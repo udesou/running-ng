@@ -3,17 +3,14 @@ from typing import Any, Dict, List, Optional, Set, Union
 from pathlib import Path
 import logging
 from running.util import register
-import fcntl
+from running import opam_roots
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
-
-
-class OpamRootBusyError(RuntimeError):
-    """Another running-ng run holds the opam root this run needs to mutate."""
 
 
 class Runtime(object):
@@ -226,7 +223,6 @@ class JavaScriptCore(JavaScriptRuntime):
 
 @register(Runtime)
 class OCaml(Runtime):
-    SWITCH_PREFIX = "running-ng"
     RELOCATABLE_REPO = "git+https://github.com/dra27/opam-repository.git#relocatable"
     _opam_bin: Optional[str] = None
 
@@ -235,23 +231,6 @@ class OCaml(Runtime):
     # Before raising: build all macro benchmarks on the candidate and confirm
     # it bootstraps on trunk. Override per runtime with `dune_version:`.
     DUNE_VERSION = "3.24.0"
-
-    # Switches provisioned by this process. Nothing records what built a
-    # leftover switch, so by default it is wiped and rebuilt (~10-20 min);
-    # RUNNING_REUSE_SWITCHES=1 reuses it instead.
-    _switches_created_this_run: Set[str] = set()
-
-    # Active switch before this run touched anything; re-selected on exit.
-    _original_switch: Optional[str] = None
-    _original_switch_captured: bool = False
-
-    # Held for the lifetime of the run.
-    _opam_lock_fh: Optional[Any] = None
-    LOCK_BASENAME = "running-ng.lock"
-
-    @staticmethod
-    def _reuse_stale_switches() -> bool:
-        return os.environ.get("RUNNING_REUSE_SWITCHES", "") not in ("", "0")
 
     @staticmethod
     def _safe_key(raw: str) -> str:
@@ -271,7 +250,6 @@ class OCaml(Runtime):
         """Newest available opam binary (~/.opam may have been initialised by a newer opam)."""
         if OCaml._opam_bin is not None:
             return OCaml._opam_bin
-        import shutil
         candidates = []
         seen: set = set()
         search = list(os.environ.get("PATH", "").split(os.pathsep))
@@ -300,334 +278,141 @@ class OCaml(Runtime):
         return OCaml._opam_bin
 
     @staticmethod
-    def _switch_exists(switch_name: str) -> bool:
-        opam = OCaml._find_opam()
+    def _opam_compiler_bin() -> str:
+        """The opam-compiler plugin, run directly: runtime roots register no plugins."""
+        override = os.environ.get("RUNNING_OPAM_COMPILER")
+        if override:
+            return override
+        from running import switches
+        r = subprocess.run(
+            [OCaml._find_opam(), "var", "bin", "--switch", switches.TOOLS_SWITCH],
+            capture_output=True, text=True, env=switches.tools_env())
+        if r.returncode == 0:
+            candidate = Path(r.stdout.strip()) / "opam-compiler"
+            if candidate.is_file():
+                return str(candidate)
+        found = shutil.which("opam-compiler")
+        if found:
+            return found
+        raise RuntimeError(
+            "opam-compiler not found in the {} switch of running-ng's opam "
+            "root, or on PATH. Run "
+            "install_deps.sh, or set RUNNING_OPAM_COMPILER to the binary."
+            .format(switches.TOOLS_SWITCH))
+
+    @staticmethod
+    def release_opam_lock() -> None:
+        """Release the locks on every opam root this run used. Idempotent."""
+        opam_roots.release_all()
+
+    @staticmethod
+    def _switch_exists(root: "opam_roots.Root", switch_name: str) -> bool:
         result = subprocess.run(
-            [opam, "switch", "list", "--short"],
-            capture_output=True, text=True,
+            [OCaml._find_opam(), "switch", "list", "--short"],
+            capture_output=True, text=True, env=root.env(),
         )
         return switch_name in result.stdout.split()
 
     @staticmethod
-    def _acquire_opam_lock() -> None:
-        """Lock the opam root for the run, or fail loudly.
-
-        Exclusive for a run that may delete switches, shared under
-        RUNNING_REUSE_SWITCHES=1 (mutates nothing). flock is released by the
-        kernel on death, so a killed run never wedges it.
-        """
-        if OCaml._opam_lock_fh is not None:
-            return
-        shared = OCaml._reuse_stale_switches()
-        opam_root = OCaml._get_opam_root()
-        # `opam var root` reports the configured path even if it does not exist yet.
-        opam_root.mkdir(parents=True, exist_ok=True)
-        lock_path = opam_root / OCaml.LOCK_BASENAME
-        fh = lock_path.open("a+")
-        mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
-        try:
-            fcntl.flock(fh.fileno(), mode | fcntl.LOCK_NB)
-        except OSError:
-            fh.seek(0)
-            holder = fh.read().strip() or "an unknown process"
-            fh.close()
-            raise OpamRootBusyError(
-                "Another running-ng run is using the opam root {}.\n"
-                "  holder: {}\n"
-                "Refusing to start: this run would remove and rebuild opam "
-                "switches that the other run is using, which would corrupt "
-                "both.\n"
-                "Wait for it to finish, or give this run its own opam root "
-                "via OPAMROOT=/path/to/other/root.".format(
-                    OCaml._get_opam_root(), holder)
-            )
-        OCaml._opam_lock_fh = fh
-        fh.seek(0)
-        fh.truncate()
-        fh.write("pid={} mode={} cmd={}\n".format(
-            os.getpid(), "shared" if shared else "exclusive",
-            " ".join(sys.argv)))
-        fh.flush()
-        logging.debug("Acquired %s running-ng lock on %s",
-                      "shared" if shared else "exclusive", lock_path)
-
-    @staticmethod
-    def release_opam_lock() -> None:
-        """Release the opam-root lock if held. Idempotent."""
-        fh = OCaml._opam_lock_fh
-        if fh is None:
-            return
-        OCaml._opam_lock_fh = None
-        try:
-            fh.seek(0)
-            fh.truncate()
-            fh.flush()
-        except OSError:
-            pass
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        finally:
-            fh.close()
-
-    @staticmethod
-    def _save_active_switch() -> None:
-        """Record the active switch, lazily before the first mutation so runs
-        without opam runtimes never shell out to opam."""
-        if OCaml._original_switch_captured:
-            return
-        OCaml._original_switch_captured = True
-        opam = OCaml._find_opam()
+    def _parse_opam_env(root: "opam_roots.Root", switch: str) -> Dict[str, str]:
+        """The environment with *switch* of *root* activated."""
         result = subprocess.run(
-            [opam, "switch", "show"], capture_output=True, text=True,
+            [OCaml._find_opam(), "env", "--switch={}".format(switch), "--set-switch"],
+            capture_output=True, text=True, check=True, env=root.env(),
         )
-        if result.returncode == 0:
-            OCaml._original_switch = result.stdout.strip() or None
-            logging.debug("Active opam switch before this run: %s",
-                          OCaml._original_switch)
-
-    @staticmethod
-    def restore_active_switch() -> None:
-        """Re-select the switch that was active before this run. Idempotent, never fatal."""
-        original = OCaml._original_switch
-        if original is None:
-            return
-        OCaml._original_switch = None
-        if not OCaml._switch_exists(original):
-            logging.warning(
-                "Not restoring original opam switch '%s': it no longer exists.",
-                original)
-            return
-        opam = OCaml._find_opam()
-        result = subprocess.run(
-            [opam, "switch", "set", original], capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            logging.info("Restored original opam switch '%s'", original)
-        else:
-            logging.warning("Failed to restore original opam switch '%s': %s",
-                            original, result.stderr.strip())
-
-    @staticmethod
-    def _remove_switch(switch_name: str) -> None:
-        opam = OCaml._find_opam()
-        OCaml._run_checked(
-            [opam, "switch", "remove", switch_name, "--yes"])
-
-    @staticmethod
-    def _switch_prefix(switch_name: str) -> Optional[Path]:
-        """Filesystem prefix of ``switch_name`` (asked of opam, so local switches resolve), or None."""
-        opam = OCaml._find_opam()
-        result = subprocess.run(
-            [opam, "var", "prefix", "--switch={}".format(switch_name)],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            return None
-        prefix = result.stdout.strip()
-        return Path(prefix) if prefix else None
-
-    @staticmethod
-    def _assert_switch_usable(switch_name: str) -> None:
-        """Refuse to reuse a switch with no working compiler (an interrupted
-        provisioning leaves the name registered). Not rebuilt here: reuse mode
-        holds only a shared lock and must not mutate.
-        """
-        prefix = OCaml._switch_prefix(switch_name)
-        ocamlc = prefix / "bin" / "ocamlc" if prefix else None
-        if ocamlc is not None and ocamlc.is_file() and os.access(ocamlc, os.X_OK):
-            return
-        raise RuntimeError(
-            "opam switch '{}' is registered but has no usable compiler{}.\n"
-            "RUNNING_REUSE_SWITCHES is set, so this run will not rebuild it — "
-            "reuse mode takes only a shared opam lock and must not delete a "
-            "switch another run may be using.\n"
-            "This usually means an earlier provisioning was interrupted, "
-            "leaving the switch half-built.\n"
-            "Fix it either way:\n"
-            "  - rerun without RUNNING_REUSE_SWITCHES, which rebuilds it from "
-            "scratch; or\n"
-            "  - opam switch remove {} --yes".format(
-                switch_name,
-                " at {}".format(ocamlc) if ocamlc else "",
-                switch_name)
-        )
-
-    @staticmethod
-    def _claim_switch(switch_name: str) -> bool:
-        """True when the caller must create ``switch_name``; a switch from an
-        earlier run is wiped first unless reuse mode is on."""
-        if switch_name in OCaml._switches_created_this_run:
-            logging.info(
-                "Reusing opam switch '%s' (provisioned earlier in this run)",
-                switch_name)
-            return False
-        from running.suite import is_dry_run
-        if not is_dry_run():
-            # Taken here, not at startup, so runs without opam runtimes never need opam.
-            OCaml._acquire_opam_lock()
-        if not OCaml._switch_exists(switch_name):
-            return True
-        if OCaml._reuse_stale_switches():
-            OCaml._assert_switch_usable(switch_name)
-            logging.warning(
-                "Reusing pre-existing opam switch '%s' because "
-                "RUNNING_REUSE_SWITCHES is set; its compiler and dune "
-                "version are whatever an earlier run happened to install.",
-                switch_name)
-            OCaml._switches_created_this_run.add(switch_name)
-            return False
-        if is_dry_run():
-            logging.warning(
-                "Dry run: would remove and rebuild pre-existing opam switch "
-                "'%s'; reusing it as-is instead.", switch_name)
-            return False
-        logging.info(
-            "Removing pre-existing opam switch '%s' so this run provisions it "
-            "from scratch (set RUNNING_REUSE_SWITCHES=1 to reuse instead)",
-            switch_name)
-        OCaml._save_active_switch()
-        OCaml._remove_switch(switch_name)
-        return True
-
-    @staticmethod
-    def _parse_opam_env(switch: str) -> Dict[str, str]:
-        """Parse ``opam env`` output for *switch* into an environment dict."""
-        opam = OCaml._find_opam()
-        result = subprocess.run(
-            [opam, "env", "--switch={}".format(switch), "--set-switch"],
-            capture_output=True, text=True, check=True,
-        )
-        env = dict(os.environ)
+        env = root.env()
         for line in result.stdout.splitlines():
             line = line.strip()
             if "=" not in line or "export" not in line:
                 continue
             part = line.split(";")[0]  # KEY='VALUE'
-            key, _, value = part.partition("=")
-            env[key.strip()] = value.strip().strip("'\"")
+            k, _, value = part.partition("=")
+            env[k.strip()] = value.strip().strip("\'\"")
         return env
 
     @staticmethod
-    def _opam_compiler_source(kwargs: Dict[str, Any]) -> str:
-        """Build the ``opam compiler create`` source spec from config kwargs.
-
-        Maps config fields to the ``user/repo:ref`` format:
-          version: "5.4.0"  ->  "ocaml/ocaml:5.4.0"
-          commit: "abc123"  ->  "ocaml/ocaml:abc123"
-          repo: "https://github.com/user/repo.git"  ->  "user/repo:ref"
-        """
-        version = kwargs.get("version")
-        commit = kwargs.get("commit", kwargs.get("hash"))
-        repo = kwargs.get("repo", "https://github.com/ocaml/ocaml.git")
-
+    def _opam_compiler_source(repo: str, ref: str) -> str:
+        """``user/repo:ref``, the source spec ``opam compiler create`` takes."""
         m = re.match(r"https?://github\.com/([^/]+)/([^/.]+)", repo)
         if not m:
             raise ValueError(
                 "Cannot parse GitHub user/repo from repo URL: {}. "
                 "opam-compiler requires a GitHub repository.".format(repo)
             )
-        user, repo_name = m.group(1), m.group(2)
-        ref = str(version) if version else str(commit)
-        return "{}/{}:{}".format(user, repo_name, ref)
+        return "{}/{}:{}".format(m.group(1), m.group(2), ref)
 
-    @staticmethod
-    def _ensure_switch(kwargs: Dict[str, Any], switch_name: str):
-        """Create an opam switch via ``opam compiler create`` if needed, then install dune and ocamlfind."""
-        if not OCaml._claim_switch(switch_name):
-            return
+    @classmethod
+    def _dune_version(cls, kwargs: Dict[str, Any]) -> Optional[str]:
+        return kwargs.get("dune_version", OCaml.DUNE_VERSION)
 
+    def _identity(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        return opam_roots.identity(
+            type(self).__name__,
+            kwargs.get("repo", "https://github.com/ocaml/ocaml.git"),
+            str(self.version) if self.version else str(self.commit),
+            configure_args=kwargs.get("configure_args"),
+            dune_version=type(self)._dune_version(kwargs),
+            relocatable=bool(kwargs.get("relocatable")),
+            opam_repository=kwargs.get("opam_repository"),
+        )
+
+    @classmethod
+    def _create_command(cls, ident: Dict[str, Any]) -> List[str]:
+        cmd = [OCaml._opam_compiler_bin(), "create",
+               OCaml._opam_compiler_source(ident["repo"], ident["sha"]),
+               "--switch", opam_roots.SWITCH]
+        if ident["configure_args"]:
+            cmd.extend(["--configure-command",
+                        "./configure " + " ".join(ident["configure_args"])])
+        return cmd
+
+    @classmethod
+    def _build_root(cls, ident: Dict[str, Any], root: "opam_roots.Root") -> None:
+        """Build the compiler at the identity's SHA, then dune and ocamlfind."""
         opam = OCaml._find_opam()
-        source = OCaml._opam_compiler_source(kwargs)
-        configure_args = kwargs.get("configure_args", [])
-        OCaml._save_active_switch()
+        OCaml._run_checked(cls._create_command(ident), env=root.env())
 
-        cmd: List[str] = [
-            opam, "compiler", "create", source,
-            "--switch", switch_name,
-        ]
-        if configure_args:
-            configure_cmd = "./configure " + " ".join(configure_args)
-            cmd.extend(["--configure-command", configure_cmd])
-
-        logging.info("Creating opam switch '%s' from source '%s'", switch_name, source)
-        OCaml._run_checked(cmd)
-
-        # The relocatable overlay repo (needed only for satellite switches) is
-        # opt-in and scoped to this switch. Never add it with --set-default:
-        # it shadows opam.ocaml.org for every later switch (ocaml/merlin#2108).
-        if kwargs.get("relocatable"):
-            logging.info("Adding relocatable overlay repo to switch '%s' "
-                         "(relocatable: true)", switch_name)
+        # Overlay repo for satellite switches; scoped to the switch, never
+        # --set-default (it would shadow the pinned repository).
+        if ident["relocatable"]:
             OCaml._run_checked([
                 opam, "repo", "add", "relocatable", OCaml.RELOCATABLE_REPO,
-                "--switch={}".format(switch_name),
-            ])
+                "--switch={}".format(opam_roots.SWITCH),
+            ], env=root.env())
 
-        # A failure here is fatal: falling back to the tools switch's unpinned
-        # dune would silently undo the pin. Use `dune_version:` instead.
-        dune_pkg = "dune.{}".format(
-            kwargs.get("dune_version", OCaml.DUNE_VERSION))
+        # Fatal: falling back to the tools switch's unpinned dune would
+        # silently undo the pin. Use `dune_version:` instead.
+        dune_pkg = "dune.{}".format(ident["dune_version"])
         try:
             OCaml._run_checked([
                 opam, "install", dune_pkg, "ocamlfind",
-                "--switch={}".format(switch_name), "--yes",
-            ])
+                "--switch={}".format(opam_roots.SWITCH), "--yes",
+            ], env=root.env())
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
-                "Failed to install {}/ocamlfind in switch '{}'.\n"
+                "Failed to install {}/ocamlfind in opam root {}.\n"
                 "Refusing to continue: benchmark binaries would be built with "
-                "whatever dune happens to be on PATH (typically the tools "
-                "switch's, which is installed unconstrained), so this run's "
-                "results would not be reproducible and runtimes compared "
-                "against each other could be built by different dune "
-                "versions.\n"
+                "whatever dune happens to be on PATH, so runtimes compared "
+                "against each other could be built by different dune versions.\n"
                 "If this compiler needs a different dune, set `dune_version:` "
-                "on the runtime in your config.".format(dune_pkg, switch_name)
+                "on the runtime in your config.".format(dune_pkg, root.path)
             ) from e
-        OCaml._switches_created_this_run.add(switch_name)
 
-    @staticmethod
-    def _get_opam_root() -> Path:
-        """Return the opam root directory (typically ~/.opam)."""
-        opam = OCaml._find_opam()
-        result = subprocess.run(
-            [opam, "var", "root"],
-            capture_output=True, text=True, check=True,
-        )
-        return Path(result.stdout.strip())
-
-    @staticmethod
-    def _ensure_satellite_switch(base_switch: str, satellite_name: str):
-        """Create a per-benchmark satellite switch: an empty registered switch
-        whose contents are replaced by a copy of the base switch. Requires the
-        base runtime to be declared ``relocatable: true``, or the copied
-        dune/ocamlfind point at the base switch's path.
-        """
-        if OCaml._switch_exists(satellite_name):
+    def _ensure_satellite_switch(self, satellite_name: str) -> None:
+        """A per-benchmark satellite switch in this runtime's root: an empty
+        registered switch whose contents are a copy of the runtime switch.
+        Needs ``relocatable: true``, or the copied dune/ocamlfind point at the
+        runtime switch's path."""
+        root = self._root
+        if OCaml._switch_exists(root, satellite_name):
             logging.info("Reusing existing satellite switch '%s'", satellite_name)
             return
-
-        import shutil
-
-        opam = OCaml._find_opam()
-        opam_root = OCaml._get_opam_root()
-        base_dir = opam_root / base_switch
-        satellite_dir = opam_root / satellite_name
-
-        if not base_dir.is_dir():
-            raise RuntimeError(
-                "Base switch directory not found at {}".format(base_dir)
-            )
-
-        logging.info(
-            "Creating satellite switch '%s' (copying from '%s')",
-            satellite_name, base_switch,
-        )
+        logging.info("Creating satellite switch '%s' in %s", satellite_name, root.path)
         OCaml._run_checked([
-            opam, "switch", "create", satellite_name,
+            OCaml._find_opam(), "switch", "create", satellite_name,
             "--empty", "--no-switch",
-        ])
-
+        ], env=root.env())
+        satellite_dir = root.path / satellite_name
         shutil.rmtree(str(satellite_dir))
 
         def _ignore_heavy(directory: str, contents: List[str]) -> set:
@@ -636,11 +421,8 @@ class OCaml(Runtime):
                 return {c for c in contents if c in ("sources", "build")}
             return set()
 
-        shutil.copytree(
-            str(base_dir), str(satellite_dir),
-            ignore=_ignore_heavy, symlinks=True,
-        )
-        logging.info("Satellite switch '%s' ready", satellite_name)
+        shutil.copytree(str(root.switch_prefix()), str(satellite_dir),
+                        ignore=_ignore_heavy, symlinks=True)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -648,6 +430,7 @@ class OCaml(Runtime):
         self.commit: Optional[str] = kwargs.get("commit", kwargs.get("hash"))
         self._satellite_switches: Dict[str, str] = {}  # benchmark_name -> switch_name
         self._compiler_identity: Optional[str] = None
+        self._root: Optional[opam_roots.Root] = None
 
         executable = kwargs.get("executable")
         if executable:
@@ -664,24 +447,21 @@ class OCaml(Runtime):
                 )
             if self.version and self.commit:
                 raise ValueError("Use either `version` or `commit`/`hash`, not both.")
+            if os.environ.get("RUNNING_REUSE_SWITCHES", "") not in ("", "0"):
+                logging.warning("RUNNING_REUSE_SWITCHES is ignored: a runtime's "
+                                "opam root is reused whenever its identity matches.")
 
-            self._switch_name = "{}-{}".format(self.SWITCH_PREFIX, self.name)
-            # type(self): subclasses override how the switch is built
-            type(self)._ensure_switch(kwargs, self._switch_name)
-
-            opam = OCaml._find_opam()
-            result = subprocess.run(
-                [opam, "var", "bin", "--switch={}".format(self._switch_name)],
-                capture_output=True, text=True, check=True,
-            )
-            bin_dir = Path(result.stdout.strip())
-            self.executable = (bin_dir / "ocaml").absolute()
+            ident = self._identity(kwargs)
+            self._root = opam_roots.ensure(
+                ident, lambda root: type(self)._build_root(ident, root),
+                opam=OCaml._find_opam())
+            self._switch_name = opam_roots.SWITCH
+            self._compiler_identity = ident["sha"]
+            self.executable = (self._root.switch_prefix() / "bin" / "ocaml").absolute()
             if not self.executable.exists():
                 raise RuntimeError(
-                    "Switch '{}' created but ocaml binary not found at {}".format(
-                        self._switch_name, self.executable
-                    )
-                )
+                    "opam root {} is complete but has no ocaml binary at {}".format(
+                        self._root.path, self.executable))
 
     def get_executable(self) -> Path:
         return self.executable
@@ -690,58 +470,45 @@ class OCaml(Runtime):
         """Opam switch name, or None in executable mode."""
         return self._switch_name
 
+    def get_switch_prefix(self) -> Optional[Path]:
+        """Prefix of the runtime's switch, or None in executable mode."""
+        return self._root.switch_prefix() if self._root else None
+
     def get_switch_env(self) -> Dict[str, str]:
         """Environment with the runtime's opam switch activated."""
-        if self._switch_name is None:
+        if self._root is None:
             env = os.environ.copy()
             exe_dir = str(self.executable.parent)
             env["PATH"] = "{}:{}".format(exe_dir, env.get("PATH", ""))
             return env
-        return OCaml._parse_opam_env(self._switch_name)
+        return OCaml._parse_opam_env(self._root, opam_roots.SWITCH)
 
     def ensure_benchmark_switch(self, benchmark_name: str) -> str:
         """Create or reuse a per-benchmark satellite switch; returns its name."""
-        if self._switch_name is None:
+        if self._root is None:
             raise RuntimeError(
                 "Cannot create satellite switches in legacy executable mode"
             )
         cached = self._satellite_switches.get(benchmark_name)
-        if cached and OCaml._switch_exists(cached):
+        if cached and OCaml._switch_exists(self._root, cached):
             return cached
-
-        satellite = "{}-{}".format(self._switch_name, self._safe_key(benchmark_name))
-        OCaml._ensure_satellite_switch(self._switch_name, satellite)
+        satellite = "{}-{}".format(opam_roots.SWITCH, self._safe_key(benchmark_name))
+        self._ensure_satellite_switch(satellite)
         self._satellite_switches[benchmark_name] = satellite
         return satellite
 
     def get_benchmark_switch_env(self, benchmark_name: str) -> Dict[str, str]:
         """Environment with the benchmark's satellite switch activated."""
         satellite = self.ensure_benchmark_switch(benchmark_name)
-        return OCaml._parse_opam_env(satellite)
+        return OCaml._parse_opam_env(self._root, satellite)
 
     def get_compiler_identity(self) -> str:
-        """The compiler's git SHA, from the switch's pinned compiler package
-        (opam compiler create pins it to a commit); the executable's hash when
-        there is no switch."""
+        """The compiler's git SHA (resolved before its root was built); the
+        executable's hash when there is no root."""
         if self._compiler_identity is None:
-            self._compiler_identity = self._resolve_compiler_identity()
+            h = hashlib.sha256(Path(self.executable).read_bytes()).hexdigest()
+            self._compiler_identity = "executable:{}".format(h[:16])
         return self._compiler_identity
-
-    def _resolve_compiler_identity(self) -> str:
-        if self._switch_name:
-            out = subprocess.run(
-                [OCaml._find_opam(), "pin", "list", "--color=never",
-                 "--switch={}".format(self._switch_name)],
-                capture_output=True, text=True,
-            ).stdout
-            for line in out.splitlines():
-                if line.startswith(("ocaml-variants.", "oxcaml-compiler.")):
-                    m = re.search(r"\(at ([0-9a-f]{40})\)", line)
-                    if m:
-                        return m.group(1)
-            return self.commit or "version:{}".format(self.version)
-        h = hashlib.sha256(Path(self.executable).read_bytes()).hexdigest()
-        return "executable:{}".format(h[:16])
 
     def get_benchmark_switch_name(self, benchmark_name: str) -> Optional[str]:
         """Satellite switch name for a benchmark, or None if not created."""
@@ -820,7 +587,7 @@ class OCamlMMTk(OCaml):
 
     def get_command_prefix(self) -> List[str]:
         # ASLR off for every MMTk process; the compiler build handles it via
-        # opam's wrap-build-commands (see _ensure_switch).
+        # its root's wrap-build-commands (see _build_root).
         return ["setarch", os.uname().machine, "-R"]
 
     # Config modifiers apply only at run time, so builds need their own
@@ -852,77 +619,29 @@ class OCamlMMTk(OCaml):
             val=str(size),
         )
 
-    # Replacing opam's sandbox wrapper with `setarch -R` does two things: drops
-    # bubblewrap's --unshare-net so cargo can fetch crates during make, and
-    # re-applies no-randomize on the build command itself (opam and bubblewrap
-    # both reset the personality, so wrapping the outer opam is useless).
-    _WRAP_KEYS = ("wrap-build-commands", "wrap-install-commands")
-
-    @staticmethod
-    def _set_opam_wrappers(opam: str, value: Optional[str],
-                           saved: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
-        """Set the global build/install wrappers to *value* (an opam list literal),
-        returning a snapshot; ``value=None`` with the snapshot restores them."""
-        if value is not None:
-            snap: Dict[str, str] = {}
-            for k in OCamlMMTk._WRAP_KEYS:
-                r = subprocess.run(
-                    [opam, "option", "--global", k],
-                    capture_output=True, text=True,
-                )
-                snap[k] = r.stdout.strip()
-                subprocess.run(
-                    [opam, "option", "--global", "{}={}".format(k, value)],
-                    check=True, capture_output=True, text=True,
-                )
-            return snap
-        for k in OCamlMMTk._WRAP_KEYS:
-            orig = (saved or {}).get(k) or "[]"
-            subprocess.run(
-                [opam, "option", "--global", "{}={}".format(k, orig)],
-                capture_output=True, text=True,
-            )
+    @classmethod
+    def _dune_version(cls, kwargs: Dict[str, Any]) -> Optional[str]:
+        # Builds use the tools switch's dune; nothing is installed here.
         return None
 
-    @staticmethod
-    def _ensure_switch(kwargs: Dict[str, Any], switch_name: str):
-        """Build the MMTk compiler switch with opam's wrappers temporarily set
-        to ``setarch -R`` (see ``_WRAP_KEYS``). dune/ocamlfind are deliberately
-        not installed here; builds use the tools switch's dune.
-        """
-        if not OCaml._claim_switch(switch_name):
-            return
-
+    @classmethod
+    def _build_root(cls, ident: Dict[str, Any], root: "opam_roots.Root") -> None:
+        """Build the MMTk compiler with this root's build/install wrappers set
+        to ``setarch -R``: that drops bubblewrap's --unshare-net so cargo can
+        fetch crates, and re-applies no-randomize on the build command itself
+        (opam and bubblewrap both reset the personality). The root is MMTk's
+        alone, so the wrappers stay set."""
         opam = OCaml._find_opam()
-        source = OCaml._opam_compiler_source(kwargs)
-        configure_args = kwargs.get("configure_args", [])
-        OCaml._save_active_switch()
         machine = os.uname().machine
-
-        cmd: List[str] = [
-            opam, "compiler", "create", source, "--switch", switch_name,
-        ]
-        if configure_args:
-            cmd.extend(["--configure-command",
-                        "./configure " + " ".join(configure_args)])
-
-        env = dict(os.environ)
+        for k in ("wrap-build-commands", "wrap-install-commands"):
+            OCaml._run_checked([opam, "option", "--global",
+                                '{}=["setarch" "{}" "-R"]'.format(k, machine)],
+                               env=root.env())
+        env = root.env()
         cargo_bin = os.path.join(os.path.expanduser("~"), ".cargo", "bin")
         env["PATH"] = "{}:{}".format(cargo_bin, env.get("PATH", ""))
         env.setdefault("MMTK_HEAP_SIZE_MB", "8192")
-
-        wrapper = '["setarch" "{}" "-R"]'.format(machine)
-        saved = OCamlMMTk._set_opam_wrappers(opam, wrapper)
-        try:
-            logging.info(
-                "Building MMTk compiler switch '%s' from '%s' "
-                "(build wrapped in `setarch %s -R`, cargo on PATH)",
-                switch_name, source, machine,
-            )
-            OCaml._run_checked(cmd, env=env)
-            OCaml._switches_created_this_run.add(switch_name)
-        finally:
-            OCamlMMTk._set_opam_wrappers(opam, None, saved=saved)
+        OCaml._run_checked(cls._create_command(ident), env=env)
 
 
 @register(Runtime)

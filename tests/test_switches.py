@@ -97,6 +97,7 @@ def test_state_is_not_written_into_the_repo(monkeypatch):
 def _fake(monkeypatch, exists, observed):
     monkeypatch.setattr(switches, "switch_exists", lambda opam, n: exists)
     monkeypatch.setattr(switches, "observe", lambda opam, n: observed)
+    monkeypatch.setattr(switches, "missing_packages", lambda opam, n: [])
 
 
 def test_absent_switch_is_created(monkeypatch, state):
@@ -243,42 +244,46 @@ def test_switches_module_is_not_importable_without_the_path(tmp_path):
     assert "No module named" in p.stderr
 
 
-# --- the state file follows the opam root --------------------------------------
+# --- the state file lives in running-ng's own opam root ---------------------------
 
-def test_state_follows_opamroot(monkeypatch, tmp_path):
+def test_state_lives_in_the_tools_root(monkeypatch, tmp_path):
     monkeypatch.delenv(switches.STATE_ENV_VAR, raising=False)
-    monkeypatch.setenv("OPAMROOT", str(tmp_path / "agent-root"))
-    assert switches.state_path().startswith(str(tmp_path / "agent-root"))
+    monkeypatch.setenv("RUNNING_OPAM_ROOTS", str(tmp_path / "roots"))
+    assert switches.state_path() == str(tmp_path / "roots" / "running-ng" / "switches.json")
 
 
-def test_separate_roots_get_separate_state(monkeypatch, tmp_path):
+def test_separate_roots_dirs_get_separate_state(monkeypatch, tmp_path):
     monkeypatch.delenv(switches.STATE_ENV_VAR, raising=False)
-    monkeypatch.setenv("OPAMROOT", str(tmp_path / "a"))
+    monkeypatch.setenv("RUNNING_OPAM_ROOTS", str(tmp_path / "a"))
     a = switches.state_path()
-    monkeypatch.setenv("OPAMROOT", str(tmp_path / "b"))
-    b = switches.state_path()
-    assert a != b, "two opam roots must not share one state file"
+    monkeypatch.setenv("RUNNING_OPAM_ROOTS", str(tmp_path / "b"))
+    assert a != switches.state_path()
 
 
-def test_a_root_that_does_not_exist_yet_still_gets_its_own_state(monkeypatch, tmp_path):
-    """`opam var root` fails on a root not yet created; the state must not fall back to the shared cache."""
+def test_the_users_opamroot_does_not_move_the_state(monkeypatch, tmp_path):
     monkeypatch.delenv(switches.STATE_ENV_VAR, raising=False)
-    root = tmp_path / "not-created-yet"
-    assert not root.exists()
-    monkeypatch.setenv("OPAMROOT", str(root))
-    assert switches.state_path().startswith(str(root))
+    monkeypatch.setenv("RUNNING_OPAM_ROOTS", str(tmp_path / "roots"))
+    monkeypatch.setenv("OPAMROOT", str(tmp_path / "user-root"))
+    assert switches.state_path().startswith(str(tmp_path / "roots"))
 
 
 def test_explicit_state_dir_still_wins(monkeypatch, tmp_path):
-    monkeypatch.setenv("OPAMROOT", str(tmp_path / "root"))
+    monkeypatch.setenv("RUNNING_OPAM_ROOTS", str(tmp_path / "roots"))
     monkeypatch.setenv(switches.STATE_ENV_VAR, str(tmp_path / "explicit"))
     assert switches.state_path().startswith(str(tmp_path / "explicit"))
 
 
-def test_no_opam_at_all_is_not_fatal(monkeypatch, tmp_path):
+def test_locating_the_state_needs_no_opam(monkeypatch, tmp_path):
     monkeypatch.delenv(switches.STATE_ENV_VAR, raising=False)
-    monkeypatch.delenv("OPAMROOT", raising=False)
+    monkeypatch.delenv("RUNNING_OPAM_ROOTS", raising=False)
     monkeypatch.setattr(switches, "find_opam",
                         lambda: (_ for _ in ()).throw(RuntimeError("no opam")))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     assert switches.state_path().startswith(str(tmp_path / "cache"))
+
+
+def test_tools_commands_never_use_the_users_root(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUNNING_OPAM_ROOTS", str(tmp_path / "roots"))
+    monkeypatch.setenv("OPAMROOT", str(tmp_path / "user-root"))
+    assert switches.tools_env()["OPAMROOT"] == str(tmp_path / "roots" / "running-ng")
+

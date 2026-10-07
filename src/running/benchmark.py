@@ -813,6 +813,9 @@ class OCamlBuiltBinaryBenchmark(Benchmark):
         env["RUNNING_OCAML_RUNTIME_NAME"] = runtime.name
         if switch_name:
             env["RUNNING_OCAML_SWITCH"] = switch_name
+            prefix = runtime.get_switch_prefix()
+            if prefix is not None and not self.isolated_switch:
+                env["RUNNING_OCAML_SWITCH_PREFIX"] = str(prefix)
 
         build_script = self._resolve_build_script()
         if not build_script.exists():

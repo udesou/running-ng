@@ -217,6 +217,8 @@ step "Provisioning running-ng's opam switches"
 OPAM_BIN="$OPAM_BIN" OLLY_DIR="$OLLY_DIR" \
     PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches ensure \
         --compiler "$OCAML_VERSION"
+# The rest concerns running-ng's own switches, which live in its own opam root.
+export OPAMROOT="$(PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches root)"
 
 # Optional: ocaml-processor-dump gives P/E-core and socket topology to CpuPin and the
 # manifest; running-ng falls back to the kernel view, so a failure must not abort.
@@ -282,7 +284,7 @@ clone_if_missing https://github.com/ocaml-bench/macro-benches.git "$MACRO_BENCHE
 echo ""
 step "Done. To use this environment:"
 echo "  export PATH=\"$LOCAL_BIN:\$PATH\""
-echo "  eval \$($OPAM_BIN env --switch=$OPAM_SWITCH --set-switch)"
+echo "  export OPAMROOT=$OPAMROOT; eval \$($OPAM_BIN env --switch=$OPAM_SWITCH --set-switch)"
 if [ -n "$OLLY_EXE" ]; then
     echo "  export PATH=\"$OLLY_DIR/_build/install/default/bin:\$PATH\""
 fi

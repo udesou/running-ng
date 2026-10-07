@@ -1,7 +1,6 @@
 # Runtimes
 
-Each entry in `runtimes:` names a compiler. Non-`executable` runtimes are built by
-`opam compiler create` into a switch named `running-ng-<runtime-name>`.
+Each entry in `runtimes:` names a compiler. Runtimes are built with `opam-compiler`, each into its own opam root under `~/.cache/running-ng/opam-roots/` (set `RUNNING_OPAM_ROOTS` to specify where the roots should be located). A `version:` is first resolved to the commit its tag points to, so a runtime can be uniquely identified by its commit SHA.
 
 ```yaml
 runtimes:
@@ -20,21 +19,19 @@ runtimes:
     executable: "/path/to/bin/ocaml"
 ```
 
-`repo:` selects a fork (default `https://github.com/ocaml/ocaml.git`); it must be
-a GitHub URL, since `opam-compiler` resolves `user/repo:ref`. Use either
-`version:` or `commit:`, not both. `dune_version:` pins dune for one runtime.
+`repo:` selects a fork (default `https://github.com/ocaml/ocaml.git`) consisting of a GitHub URL which is used by `opam-compiler` when resolving `user/repo:ref`. Use either
+`version:` or `commit:` to specify a runtime. `dune_version:` pins dune for a runtime.
 
-## Switch provisioning
+## Opam roots
 
-**A switch left over from an earlier run is removed and rebuilt by default**, so
-the compiler and the pinned dune are what this run provisioned rather than
-whatever a previous run installed. For long sweeps over switches you trust set `RUNNING_REUSE_SWITCHES=1`; reuse mode
-still refuses a switch whose compiler never finished building. 
+A runtime's opam root is reused as long as everything that determines its
+contents is unchanged: the compiler commit, `configure_args`, `dune_version`,
+`relocatable`, and the opam-repository commit running-ng pins (`opam_repository:`
+overrides it for one runtime). A change to one of these makes the runtime get a new
+root. Because each run holds a shared lock on the roots it uses, concurrent runs are safe.
 
-Two runs sharing an opam root are refused outright (`$OPAMROOT/running-ng.lock`), because one would
-delete a switch the other is using, for that reason make sure to give concurrent campaigns separate
-`OPAMROOT`s. Whatever switch
-was active before the run is restored afterwards, even on a crash. 
+`python3 -m running.opam_roots list` shows the roots and what built each one. Note that roots take about 1 GB each and are never removed automatically. To delete old roots, run
+`python3 -m running.opam_roots gc --unused-for X`, which removes the ones unused for X days.
 
 ## OxCaml
 

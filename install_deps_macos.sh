@@ -208,6 +208,8 @@ step "Provisioning running-ng's opam switches"
 OPAM_BIN="$OPAM_BIN" OLLY_DIR="$OLLY_DIR" \
     PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches ensure \
         --compiler "$OCAML_VERSION"
+# The rest concerns running-ng's own switches, which live in its own opam root.
+export OPAMROOT="$(PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches root)"
 
 step "Pre-installing benchmark packages in $OPAM_SWITCH"
 
@@ -375,12 +377,13 @@ if [[ $ERRORS -eq 0 ]]; then
     echo "  - perf is not available on macOS. Make sure your config uses"
     echo "    olly_gc or time_stats modifiers instead of perf_grp1/2/3."
     echo "  - The first run will take longer as it builds OCaml/OxCaml runtimes."
-    echo "    Subsequent runs reuse cached toolchains in /tmp/running-ng-ocaml-toolchains/."
+    echo "    Each compiler gets its own opam root under ~/.cache/running-ng/opam-roots/,"
+    echo "    reused while its identity matches (python3 -m running.opam_roots list)."
     echo "  - Edit the config file to enable/disable benchmark suites:"
     echo "    $ROOT_DIR/src/running/config/examples/baseline_micro.yml"
     echo "  - The opam switch '$OPAM_SWITCH' should be active when running benchmarks"
     echo "    that need dune/ocamlfind (with_packages, with_deps, multicore suites)."
-    echo "    Run: eval \$($OPAM_BIN env --switch=$OPAM_SWITCH --set-switch)"
+    echo "    Run: export OPAMROOT=$OPAMROOT; eval \$($OPAM_BIN env --switch=$OPAM_SWITCH --set-switch)"
 else
     red "$ERRORS dependency check(s) failed — see above for details."
     exit 1
