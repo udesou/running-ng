@@ -35,25 +35,25 @@ root. Because each run holds a shared lock on the roots it uses, concurrent runs
 
 ## OxCaml
 
-<!-- TODO(docs): this section describes an implementation that no longer exists. An OxCaml runtime gets its own opam root like any other runtime, built by `opam-compiler create oxcaml/oxcaml:<commit>` with the opam-compiler from ocaml-opam/opam-compiler#42 (pinned in the tools switch until released). The plugin borrows an `oxcaml-compiler` recipe from oxcaml/opam-repository, which already configures flambda2, runtime5, `--enable-multidomain` and `--enable-poll-insertion`. `configure_args` is rejected for OxCaml, there is no bootstrap_version, no /tmp/running-ng-ocaml-toolchains and no running-ng-oxcaml-build switch. dune defaults to 3.22.2+ox; running-ng refuses a compiler that rejects mode syntax. The example should drop configure_args. -->
-
 ```yaml
 oxcaml-trunk:
   type: OxCaml
   commit: "<sha>"
-  configure_args: ["--enable-poll-insertion", "--enable-multidomain"]
+  # configure_args: ["--enable-frame-pointers"]   # optional
 ```
 
-Handles OxCaml's different build system (autoconf, `--enable-runtime5`, Dune-based
-`make install`) and builds a stock bootstrap compiler if needed
-(`bootstrap_version`, default `5.4.0`). Default repo is
-`https://github.com/oxcaml/oxcaml.git`. Source checkouts are cached under
-`/tmp/running-ng-ocaml-toolchains/`, and the build gets its own opam switch
-(`running-ng-oxcaml-build`).
+An OxCaml runtime gets its own opam root. The compiler is built by
+`opam-compiler create oxcaml/oxcaml:<commit>`, currently using `opam-compiler` from
+ocaml-opam/opam-compiler#42 (pinned in the tools switch until it is released).
+The compiler is configured by the `oxcaml-compiler` recipe in
+oxcaml/opam-repository, which already enables flambda2, runtime 5, multidomain
+and poll insertion (multicore needs the last two). `configure_args` are added
+after the recipe's own flags, so they can also override them. The default repo
+is `https://github.com/oxcaml/oxcaml.git`, and dune defaults to `3.22.2+ox`.
 
-**Multicore on OxCaml requires both `--enable-poll-insertion` and
-`--enable-multidomain`**; without them domain creation fails at run time with
-`failed to allocate domain`.
+running-ng checks that the compiler accepts OxCaml's mode syntax and refuses to
+use it otherwise. Set `GITHUB_TOKEN` to avoid GitHub's API rate limit while the
+recipe is fetched.
 
 ## MMTk
 
