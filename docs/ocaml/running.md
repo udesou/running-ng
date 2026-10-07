@@ -11,6 +11,7 @@ python3 -m running runbms        this repo: config resolution, compiler builds,
         ▼
 benches/ · macro-benches/        the benchmark programs and their build scripts
 ```
+<!-- TODO(docs): the shell entry point no longer builds olly or puts it on PATH; runbms builds olly per runtime (before the benchmark builds) when a config attaches it. -->
 
 To run an experiment, execute:
 
@@ -32,6 +33,7 @@ opam 2.2+, and [`olly`](https://github.com/tarides/runtime_events_tools) recent
 enough to emit `max_rss_kb` from `olly gc-stats --json` (commit `977e33b`,
 [PR #85](https://github.com/tarides/runtime_events_tools/pull/85)); the launch
 script refuses to start on an older checkout.
+<!-- TODO(docs): olly is no longer a prerequisite and there is no version check. runbms fetches the pinned commit (running/olly COMMIT) with its vendored dependencies and builds it with each runtime's compiler, into that runtime's opam root; a failed olly build stops the run before anything runs. Building it needs cmake and libffi (the installers add them). -->
 
 Hardware counters are optional and per-OS: Linux uses `perf` (`perf stat ls` to
 check access, `sudo sysctl kernel.perf_event_paranoid=1` if denied), FreeBSD uses
@@ -108,3 +110,4 @@ The `memtrace_*` files appear only under a `MemtraceAttach` modifier, see
 
 The installers take `BENCHES_DIR`, `MACRO_BENCHES_DIR` and `OLLY_DIR` too: set
 them to checkouts you already have and nothing is cloned.
+<!-- TODO(docs): table rows: OLLY_COMMIT (new; default: the commit running-ng pins) = olly commit to build, full SHA; re-locks its dependencies into the cache if they changed. OLLY_DIR = build from this working tree instead (default unset; not with OLLY_COMMIT). OLLY_BIN = one existing olly (file or its directory) for every runtime, nothing built (default unset). The installers no longer take OLLY_DIR. -->

@@ -20,6 +20,7 @@ from pathlib import Path
 from copy import deepcopy
 from running import osinfo
 from running import counters
+from running import olly as olly_tool
 import os
 from enum import Enum
 import pty
@@ -245,6 +246,7 @@ class Benchmark(object):
         env_args: Dict[str, str],
         cwd: Optional[Path],
         modifier: 'PerfAndOllyAttach',
+        olly: str = "olly",
     ) -> Tuple[bytes, bytes, SubprocessrExit]:
         """Run with perf stat and olly gc-stats attached.
 
@@ -263,7 +265,7 @@ class Benchmark(object):
             pass
         try:
             return self._run_with_perf_and_olly_in_tmpdir(
-                tmpdir, cmd, env_args, cwd, modifier)
+                tmpdir, cmd, env_args, cwd, modifier, olly)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -274,6 +276,7 @@ class Benchmark(object):
         env_args: Dict[str, str],
         cwd: Optional[Path],
         modifier: 'PerfAndOllyAttach',
+        olly: str = "olly",
     ) -> Tuple[bytes, bytes, SubprocessrExit]:
         """Body of _run_with_perf_and_olly with an externally-owned tmpdir."""
         env_args = env_args.copy()
@@ -381,7 +384,7 @@ class Benchmark(object):
             olly_output = os.path.join(tmpdir, "olly.json")
             olly_p = subprocess.Popen(
                 list(observer_prefix) +
-                ["olly", "gc-stats", "--json", "--output", olly_output,
+                [olly, "gc-stats", "--json", "--output", olly_output,
                  "--attach", "{}:{}".format(tmpdir, ocaml_pid)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -498,7 +501,8 @@ class Benchmark(object):
                     env_args["MEMTRACE_RATE"] = str(self.memtrace_attach.rate)
 
             if self.perf_and_olly_attach is not None:
-                return self._run_with_perf_and_olly(cmd, env_args, effective_cwd, self.perf_and_olly_attach)
+                return self._run_with_perf_and_olly(cmd, env_args, effective_cwd, self.perf_and_olly_attach,
+                                                    olly=olly_tool.binary_for(runtime))
 
             companion_out = b""
             stdout: Optional[bytes]

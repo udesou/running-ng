@@ -1,9 +1,8 @@
-"""running-ng's own opam switches (tools and olly), in running-ng's own opam
-root (``$RUNNING_OPAM_ROOTS/running-ng``), separate from the per-runtime roots
-runtime.py provisions. Two switches because olly needs
-cmdliner >= 2.0 and opam-compiler pins cmdliner < 2.0. A switch is rebuilt
-when its observed identity (package versions, olly checkout SHA) no longer
-matches what was recorded at creation.
+"""running-ng's own opam switch (tools), in running-ng's own opam root
+(``$RUNNING_OPAM_ROOTS/running-ng``), separate from the per-runtime roots
+runtime.py provisions. A switch is rebuilt when its observed identity (package
+versions, pins) no longer matches what was recorded at creation. olly is built
+per runtime (running.olly), not here.
 
 Standard library only, so it can run before running-ng's dependencies are
 installed: `python3 -m running.switches --help`.
@@ -23,11 +22,7 @@ from running import opam_roots
 #: Overrides where the machine-local state file (what was built, from what) lives.
 STATE_ENV_VAR = "RUNNING_NG_STATE_DIR"
 
-#: Where the olly checkout lives.
-OLLY_DIR_ENV_VAR = "OLLY_DIR"
-
 TOOLS_SWITCH = "running-ng-tools"
-OLLY_SWITCH = "running-ng-olly"
 
 DEFAULT_COMPILER = "5.4.0"
 
@@ -38,7 +33,6 @@ SWITCHES: Dict[str, Dict] = {
         "packages": ["dune", "ocamlfind", "opam-compiler"],
         # A change in any of these versions triggers a rebuild.
         "identity_packages": ["ocaml", "dune", "ocamlfind", "opam-compiler"],
-        "source": None,
         # `flags: plugin` packages must be linked into $(opam var root)/plugins/bin
         # or `opam compiler create` cannot resolve them.
         "registers_plugin": "opam-compiler",
@@ -48,15 +42,6 @@ SWITCHES: Dict[str, Dict] = {
             "opam-compiler": "git+https://github.com/udesou/opam-compiler.git"
                              "#a94703a4e0337f49177a2b2be0968c21c091d71a",
         },
-    },
-    OLLY_SWITCH: {
-        "purpose": "olly (runtime_events_tools), which needs cmdliner >= 2.0",
-        # Resolved --deps-only from olly's own opam file.
-        "packages": [],
-        "identity_packages": ["ocaml", "cmdliner"],
-        "source": OLLY_DIR_ENV_VAR,
-        "registers_plugin": None,
-        "pins": {},
     },
 }
 
@@ -159,40 +144,8 @@ def _pins(opam: str, switch: str) -> Dict[str, str]:
     return pins
 
 
-def source_dir(spec: Dict) -> Optional[str]:
-    """The checkout a switch is built from, or None if it has no source.
-
-    Shared by _source_sha and ensure(): if they resolved it separately, a
-    machine with two checkouts would rebuild the switch on alternate runs.
-    """
-    env_var = spec.get("source")
-    if not env_var:
-        return None
-    path = os.environ.get(env_var)
-    if path:
-        return path
-    fallback = os.path.expanduser("~/runtime_events_tools")
-    logging.warning(
-        "$%s is not set; falling back to %s. If that is not the checkout you "
-        "build from, set %s -- otherwise this switch is keyed on the wrong "
-        "revision and will be rebuilt on every other run.",
-        env_var, fallback, env_var)
-    return fallback
-
-
-def _source_sha(spec: Dict) -> Optional[str]:
-    """git SHA of the checkout a switch is built from, if it has one."""
-    path = source_dir(spec)
-    if path is None:
-        return None
-    try:
-        return _run(["git", "-C", path, "rev-parse", "HEAD"])
-    except RuntimeError:
-        return None
-
-
 def observe(opam: str, name: str) -> Optional[Dict]:
-    """The switch's current identity (package versions, source SHA), or None if absent."""
+    """The switch's current identity (package versions, pins), or None if absent."""
     if not switch_exists(opam, name):
         return None
     spec = SWITCHES[name]
@@ -201,9 +154,6 @@ def observe(opam: str, name: str) -> Optional[Dict]:
     # A pinned package keeps its version number when the pin target moves.
     for pkg, target in _pins(opam, name).items():
         identity["pin:" + pkg] = target
-    sha = _source_sha(spec)
-    if sha is not None:
-        identity["source_sha"] = sha
     return identity
 
 
@@ -277,24 +227,7 @@ def build_commands(name: str, compiler: str = DEFAULT_COMPILER) -> List[List[str
     if spec["packages"]:
         cmds.append([opam, "install", "--switch", name, "--yes"]
                     + spec["packages"])
-    if spec["source"]:
-        cmds.append([opam, "install", "--switch", name, "--deps-only", "--yes", "."])
     return cmds
-
-
-def _ensure_cmake_depext_bypass(opam: str) -> None:
-    """Tell opam ``conf-cmake``'s depext is satisfied when cmake is on PATH.
-
-    A user-local cmake is invisible to dpkg/pkg, so opam's depext check would
-    prompt and hang a headless sweep. Global setting; idempotent."""
-    if not shutil.which("cmake"):
-        return
-    current = _run([opam, "option", "--global", "depext-bypass"], check=False)
-    if '"cmake"' in current:
-        return
-    logging.info("registering cmake as an already-satisfied opam depext "
-                 "(usable cmake on PATH, invisible to the package-manager check)")
-    _run([opam, "option", "--global", 'depext-bypass+=["cmake"]'], check=False)
 
 
 def ensure(name: str, compiler: str = DEFAULT_COMPILER,
@@ -355,8 +288,7 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
     previous = _active_switch(opam)
     try:
         if action == "rebuild":
-            # Name the keys that moved: a rebuild recompiles a compiler, and
-            # the usual cause is $OLLY_DIR pointing at a different checkout.
+            # Name the keys that moved: a rebuild recompiles a compiler.
             recorded = (load_state().get("switches", {})
                         .get(name, {}).get("identity") or {})
             observed = observe(opam, name) or {}
@@ -368,32 +300,16 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
                 "opam switch '%s' no longer matches what it was built from; "
                 "rebuilding it (%s)", name, "; ".join(changed) or "no visible "
                 "difference")
-            if any(c.startswith("source_sha") for c in changed):
-                logging.warning(
-                    "  the source checkout moved: %s. If you did not intend "
-                    "that, check $%s -- pointing it at a different checkout "
-                    "than the previous run is what makes this rebuild happen "
-                    "on every run.",
-                    source_dir(SWITCHES[name]), SWITCHES[name].get("source"))
             if dry_run:
                 logging.info("DRY RUN: opam switch remove %s --yes", name)
             else:
                 _run([opam, "switch", "remove", name, "--yes"], check=False)
 
-        cwd = None
-        spec = SWITCHES[name]
-        if spec["source"]:
-            # olly's hdr_histogram dep needs cmake
-            if not dry_run:
-                _ensure_cmake_depext_bypass(opam)
-            cwd = source_dir(spec)
         for cmd in build_commands(name, compiler):
             if dry_run:
-                logging.info("DRY RUN: %s%s", " ".join(cmd),
-                             " (in {})".format(cwd) if cwd and cmd[-1] == "." else "")
+                logging.info("DRY RUN: %s", " ".join(cmd))
                 continue
-            subprocess.run(cmd, check=True, env=tools_env(),
-                           cwd=cwd if cmd[-1] == "." else None)
+            subprocess.run(cmd, check=True, env=tools_env())
         if not dry_run:
             _register_plugin(opam, name)
             _record(opam, name)
@@ -402,6 +318,19 @@ def ensure(name: str, compiler: str = DEFAULT_COMPILER,
             _run([opam, "switch", "set", previous], check=False)
             logging.info("restored the active opam switch to '%s'", previous)
     return action
+
+
+def ensure_tool(exe: str, package: str) -> str:
+    """``exe`` from the tools switch, installing ``package`` (``name.version``)
+    there first if needed. For tools only some runs need, such as opam-monorepo."""
+    opam = find_opam()
+    ensure(TOOLS_SWITCH)
+    name, _, version = package.partition(".")
+    if _package_versions(opam, TOOLS_SWITCH, [name]).get(name) != version:
+        logging.info("installing %s into the tools switch", package)
+        subprocess.run([opam, "install", "--switch", TOOLS_SWITCH, "--yes", package],
+                       check=True, env=tools_env())
+    return os.path.join(tools_root(), TOOLS_SWITCH, "bin", exe)
 
 
 def _register_plugin(opam: str, name: str) -> None:

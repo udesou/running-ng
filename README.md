@@ -29,6 +29,7 @@ Auto-detects the OS and delegates to `install_deps_linux.sh` (apt),
 installs system packages, opam 2.2+, a tools switch, `pyyaml`, and clones as siblings: 
 `benches`, `macro-benches` and `runtime_events_tools` (for `olly`, which the orchestrator
 builds per runtime), skipping any of these that already exists.
+<!-- TODO(docs): the installers no longer clone runtime_events_tools. running-ng fetches olly at its pinned commit (src/running/olly) and builds it with each runtime's compiler on the first run that attaches olly. -->
 
 Note that macro-benches vendors its dependencies once, so when running an experiment with the macro benchmarks also run:
 

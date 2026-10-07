@@ -1,0 +1,49 @@
+diff --git a/lib/olly_gc_stats/dune b/lib/olly_gc_stats/dune
+index 5cf6a6d..98d0fb8 100644
+--- a/lib/olly_gc_stats/dune
++++ b/lib/olly_gc_stats/dune
+@@ -26,15 +26,20 @@
+  (action
+   (copy# %{deps} %{target})))
+ 
++; OxCaml reports a 5.4 version but names the major allocation counter
++; EV_C_MAJOR_SLICE_ALLOC_WORDS.
+ (rule
+- (deps gc_counters_shim.5.3.ml)
++ (deps gc_counters_shim.5.3.ml gc_counters_shim.oxcaml.ml)
+  (target gc_counters_shim.ml)
+  (enabled_if
+   (and
+    (>= %{ocaml_version} 5.3)
+    (< %{ocaml_version} 5.5)))
+  (action
+-  (copy# %{deps} %{target})))
++  (with-stdout-to
++   %{target}
++   (system
++    "case %{ocaml_version} in *+ox*) cat gc_counters_shim.oxcaml.ml ;; *) cat gc_counters_shim.5.3.ml ;; esac"))))
+ 
+ (rule
+  (deps gc_counters_shim.5.5.ml)
+diff --git a/lib/olly_gc_stats/gc_counters_shim.oxcaml.ml b/lib/olly_gc_stats/gc_counters_shim.oxcaml.ml
+new file mode 100644
+index 0000000..56db288
+--- /dev/null
++++ b/lib/olly_gc_stats/gc_counters_shim.oxcaml.ml
+@@ -0,0 +1,16 @@
++(* OxCaml: as 5.3 / 5.4, but the major allocation counter is
++   EV_C_MAJOR_SLICE_ALLOC_WORDS. *)
++let bytes_per_word = Sys.word_size / 8
++
++let runtime_counter ~domain_minor_words ~domain_promoted_words
++    ~domain_major_words ring_id _ts counter_type value =
++  match counter_type with
++  | Runtime_events.EV_C_MINOR_PROMOTED ->
++      domain_promoted_words.(ring_id) <-
++        domain_promoted_words.(ring_id) + (value / bytes_per_word)
++  | Runtime_events.EV_C_MINOR_ALLOCATED ->
++      domain_minor_words.(ring_id) <-
++        domain_minor_words.(ring_id) + (value / bytes_per_word)
++  | Runtime_events.EV_C_MAJOR_SLICE_ALLOC_WORDS ->
++      domain_major_words.(ring_id) <- domain_major_words.(ring_id) + value
++  | _ -> ()

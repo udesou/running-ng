@@ -28,8 +28,8 @@ hard-won gotchas, and the current list of known-broken files.
   time.
 - Entry points: `run_ocaml_bench_gc_sweep.sh` (build **+ run**) and
   `build_ocaml_binaries_gc_sweep.sh` (build **only**) → both find/create a tools
-  switch (dune/ocamlfind), build/verify olly, put both on `PATH`, then call
-  `python3 -m running <cmd> …`.
+  switch (dune/ocamlfind), put it on `PATH`, then call `python3 -m running <cmd> …`.
+  `runbms` builds olly per runtime itself (see "olly" below).
 - Consumers: `~/ocaml-bench-dashboard` (owns the data contract + ingestor +
   dashboard), `notebooks/`, `scripts/plot_gc_sweep.py`.
 
@@ -129,7 +129,9 @@ tag filter is *intersection-only* (can't re-enable a program absent from
     JVM/JS lineage; builds each runtime's compiler into its opam root, satellite
     switches.
   - `opam_roots.py`: one opam root per compiler identity (see "Opam roots").
-  - `switches.py`: running-ng's own tools and olly switches, in its own root.
+  - `switches.py`: running-ng's own tools switch, in its own root.
+  - `olly/`: olly built per runtime, with its dependency lock, overlays and
+    patches (see "olly" below).
   - `benchmark.py` — `OCamlBuiltBinaryBenchmark` (build contract, binary
     caching, `.build-failed` sentinel) and the `PerfAndOllyAttach` run path.
   - `suite.py` — `OCamlBenchmarkSuite`, `OCamlMulticoreBenchmarkSuite`,
@@ -173,15 +175,13 @@ tag filter is *intersection-only* (can't re-enable a program absent from
 - `run_ocaml_bench_gc_sweep.sh`, `build_ocaml_binaries_gc_sweep.sh`,
   `install_deps{,_linux,_macos,_freebsd}.sh`, `scripts/plot_gc_sweep.py`,
   `scripts/portability_probe.sh`, `notebooks/`.
-  The three `install_deps_<os>.sh` clone `benches`, `macro-benches` and
-  `runtime_events_tools` **beside this repo** if they are absent, and skip any
-  directory that already exists; `BENCHES_DIR` / `MACRO_BENCHES_DIR` /
-  `OLLY_DIR` redirect them. `OLLY_DIR`'s default follows the launch scripts'
-  search order (sibling, then `~/runtime_events_tools`), so all four agree on
-  one checkout. They deliberately do **not** run macro-benches' `make setup`
-  (slow, and it fails for reasons unrelated to this repo). The bench service is
-  unaffected either way: its agent passes explicit `RUNNING_*_BENCH_DIR` and
-  `OLLY_DIR` pointing at its own pinned checkouts under `$BENCH_AGENT_STATE`.
+  The three `install_deps_<os>.sh` clone `benches` and `macro-benches`
+  **beside this repo** if they are absent, and skip any directory that already
+  exists; `BENCHES_DIR` / `MACRO_BENCHES_DIR` redirect them. They install cmake
+  and libffi for olly but do not build it. They deliberately do **not** run
+  macro-benches' `make setup` (slow, and it fails for reasons unrelated to this
+  repo). The bench service passes explicit `RUNNING_*_BENCH_DIR` pointing at its
+  own pinned checkouts under `$BENCH_AGENT_STATE`.
 - `README.md` — deliberately short: what this is, quick start, and links out.
   Reference material lives in `docs/ocaml/` (`running.md` covers the scripts,
   subcommands, env vars and output layout; then `configs.md`, `runtimes.md`,
@@ -260,7 +260,7 @@ tag filter is *intersection-only* (can't re-enable a program absent from
   symlink from each root): opam addresses it by checksum.
 - **opam-compiler is run directly** from the tools switch (`RUNNING_OPAM_COMPILER`
   overrides it): a runtime root registers no plugins.
-- **running-ng's own switches** (tools, olly) live in their own root,
+- **running-ng's own switch** (tools) lives in its own root,
   `$RUNNING_OPAM_ROOTS/running-ng`, initialised from the same pinned commit;
   `python3 -m running.switches root` prints it. Nothing running-ng does touches
   the user's `~/.opam` any more; old `running-ng-*` switches there are unused.
@@ -285,6 +285,54 @@ tag filter is *intersection-only* (can't re-enable a program absent from
   It used to be added to every switch with `--set-default`; see the gotcha below.
 - `configure_args:` is honoured (passed as `--configure-command "./configure …"`).
   `make_targets:` is **not implemented** — don't put it in a config.
+
+### olly (`src/running/olly/`)
+
+- **Built per runtime, with that runtime's compiler**, because olly reads the
+  runtime's runtime_events counters and their enum differs between compilers
+  (OxCaml shifted it; a stock-built olly misread OxCaml's major words). Nothing
+  is installed in the runtime's switch.
+- **Which olly:** `COMMIT` in `olly/__init__.py` by default. `OLLY_COMMIT=<sha>`
+  overrides it for a run (the bench agent passes its pin this way) without
+  touching anything tracked; `OLLY_DIR` builds a working tree as-is (uncommitted
+  changes included, keyed on their content); `OLLY_BIN` (a binary or its
+  directory) uses one olly for every runtime and builds nothing. `OLLY_DIR`
+  with `OLLY_COMMIT` is an error.
+- **Sources are prepared once per olly + inputs** under
+  `$RUNNING_OPAM_ROOTS/olly/src/<sha12>-<hash>`: olly from a cached bare clone
+  (`olly/git`), the lock's archives (sha256-checked, cached in
+  `olly/downloads`) into `duniverse/`, plus `duniverse/dune` = `(vendored_dirs
+  *)` (without it, warnings in vendored code are errors), the overlays and the
+  patches. The hash covers the lock, overlays, patches and `PREPARE_VERSION`
+  (bump it when `prepare()` changes what it writes).
+  `.running-ng-olly.json` is written last.
+- **Built into `<runtime root>/olly/<key>/`** with `dune build --profile release`
+  in the runtime's switch env, by `runbms` before the benchmark builds, only for
+  runtimes whose configs attach olly (`PerfAndOllyAttach`). A failure is fatal
+  before any run; the log is `<root>/olly/<key>.build.log`. Executable-mode
+  runtimes build under `olly/builds/<hash of the executable>/`. A root's builds
+  go with it on `opam_roots gc`; `olly/` itself is never collected.
+- **The lock** (`olly-deps.opam.locked`, opam-monorepo format) is for `COMMIT`'s
+  depends, snapshotted in `olly-depends`. A commit whose depends differ is
+  re-locked into `olly/locks/` (installs `opam-monorepo.0.4.3` into the tools
+  switch on first use; 0.5 needs dune >= 3.24). `dune` and `dune-configurator`
+  are held < 3.23 because OxCaml roots use dune 3.22.2+ox. Python fetches the
+  archives itself, so a normal run needs no opam-monorepo.
+- **To bump olly:** `python -m running.olly lock <sha>`, set `COMMIT`, check the
+  patches still apply (`python -m running.olly prepare`), run a config with
+  `perf_grp1` on stock and OxCaml.
+- **Overlays:** jsont and bytesrw >= 0.4 have no dune port, so they come from
+  their release tarballs (`OVERLAY_SOURCES`) with the dune files in
+  `olly/overlays/`. A re-lock refuses an olly whose constraint on either changed.
+- **Patches** (`olly/patches/`, all meant to go upstream, udesou/running-ng#36):
+  hdr_histogram's ctypes stanza cannot find ctypes' headers when ctypes is
+  vendored; ctypes needs an eta-expansion on OxCaml; olly's 5.3/5.4 counter
+  shim names `EV_C_MAJOR_ALLOCATED_WORDS`, which OxCaml (reporting `5.4.0+ox`)
+  calls `EV_C_MAJOR_SLICE_ALLOC_WORDS`, so the patch picks a shim on the `+ox`
+  suffix. A patch that no longer applies is fatal; drop it once upstream.
+- olly's allocation counters are emitted at minor GCs, so a run with none
+  reports zero (OxCaml's almabench at -O3 allocates ~1100 words and never
+  collects).
 
 ### Benchmark build contract
 
@@ -487,16 +535,11 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
 - **running-ng's own opam switches are declared in `switches.py`**, not
   discovered, and live in running-ng's own root (`python3 -m running.switches root`). `python3 -m running.switches status` says what exists and
   whether it matches what it was built from; `ensure` creates or rebuilds and
-  puts the active switch back. Invalidation is by observed identity, which for
-  the olly switch includes the checkout's git SHA, so moving the checkout
-  rebuilds olly. The state file is machine-local (`~/.cache/running-ng/`),
-  deliberately not in the repo. Note the installers still create these
-  switches inline and should delegate here.
-- **The sweep wrapper no longer provisions anything.** It verifies the
-  opam-compiler plugin and olly, then points at `install_deps_<os>.sh`. It
-  used to install both into whichever switch it picked, which since the
-  two-switch split could corrupt either one: opam-compiler downgrades the olly
-  switch's cmdliner, olly's deps evict opam-compiler from the tools switch.
+  puts the active switch back. Invalidation is by observed identity (package
+  versions and pins). The state file is machine-local (`~/.cache/running-ng/`),
+  deliberately not in the repo. There used to be a second, olly switch, because
+  olly needs cmdliner >= 2.0 and opam-compiler pins < 2.0; olly is now built per
+  runtime from vendored sources, so the conflict is gone.
 - **Don't add a FreeBSD PMC event name you have not run on FreeBSD.** pmcstat
   allocates all-or-nothing, so one unresolvable name silently costs the whole
   group its counters. `tests/test_freebsd_event_groups.py` pins the verified
@@ -621,8 +664,9 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   (`OCamlMacroBenchmarkSuite`, dra27 relocatable overlay added to every
   `_ensure_switch`) but the *active* macro path is the `~/macro-benches`
   monorepo via plain `OCamlBenchmarkSuite` — no satellite switches.
-- **olly has no `--version`** — the contract derives its version from the
-  binary's owning opam switch or git checkout (`contract/native.py`).
+- **olly has no `--version`**: the contract's `tool_versions.olly` is the commit
+  it was built from (`olly.version()`), or `git describe` of the `OLLY_DIR`
+  tree or of the checkout an `OLLY_BIN` lives in.
 
 ## Known-broken / inconsistent files (fix or avoid)
 

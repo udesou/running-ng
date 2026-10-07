@@ -42,8 +42,10 @@ SWITCH = "runtime"
 RECORD = "root.json"
 LAST_USED = "last-used"
 DOWNLOAD_CACHE = "download-cache"
-#: running-ng's own root (tools and olly switches), not a runtime root.
+#: running-ng's own root (the tools switch), not a runtime root.
 TOOLS_ROOT = "running-ng"
+#: Prepared olly sources and locks (running.olly), not a root.
+OLLY_CACHE = "olly"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -260,7 +262,7 @@ def list_roots(base: Optional[Path] = None) -> List[Dict[str, Any]]:
     if not base.is_dir():
         return out
     for p in sorted(base.iterdir()):
-        if not p.is_dir() or p.name in (DOWNLOAD_CACHE, TOOLS_ROOT):
+        if not p.is_dir() or p.name in (DOWNLOAD_CACHE, TOOLS_ROOT, OLLY_CACHE):
             continue
         root = Root(p)
         entry: Dict[str, Any] = {"key": p.name, "path": str(p),

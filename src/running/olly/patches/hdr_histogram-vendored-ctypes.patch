@@ -1,0 +1,11 @@
+--- a/duniverse/hdr_histogram_ocaml/lib/dune
++++ b/duniverse/hdr_histogram_ocaml/lib/dune
+@@ -11,7 +11,7 @@
+   (external_library_name hdr_histogram)
+   (build_flags_resolver
+    (vendored
+-    (c_flags :standard "-I.")))
++    (c_flags :standard "-I." "-I../../ocaml-ctypes/src/ctypes")))
+   (headers
+    (preamble
+     "#include <hdr_histogram.h>\n     #include <stdio.h>\n\n     static inline bool hdr_record_value_int(struct hdr_histogram* h, int value)\n     { return hdr_record_value(h, value); }\n    "))

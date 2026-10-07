@@ -1,0 +1,17 @@
+--- a/duniverse/ocaml-ctypes/src/ctypes/ctypes_memory.ml
++++ b/duniverse/ocaml-ctypes/src/ctypes/ctypes_memory.ml
+@@ -312,10 +312,10 @@
+     carray: c;
+     dims: d > bigarray_class -> b -> (a, f) Bigarray.kind =
+   function
+-  | Genarray -> Genarray.kind
+-  | Array1 -> Array1.kind
+-  | Array2 -> Array2.kind
+-  | Array3 -> Array3.kind
++  | Genarray -> fun ba -> Genarray.kind ba
++  | Array1 -> fun ba -> Array1.kind ba
++  | Array2 -> fun ba -> Array2.kind ba
++  | Array3 -> fun ba -> Array3.kind ba
+ 
+ let bigarray_start spec ba = _bigarray_start (bigarray_kind spec ba) ba
+ 

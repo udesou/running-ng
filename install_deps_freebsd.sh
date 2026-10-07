@@ -1,10 +1,10 @@
 #!/bin/sh
 # Prepare a FreeBSD host to run running-ng, assuming NO ROOT: nothing is pkg-installed,
 # missing packages are reported for someone with privileges. Installs a user-local opam,
-# a sandbox-free opam root, the running-ng tools and olly switches, builds olly, and
-# clones the two benchmark repos and runtime_events_tools beside this one.
-# Benchmark runtimes are not built here; running-ng provisions them per config.
-# Set BENCHES_DIR / MACRO_BENCHES_DIR / OLLY_DIR to use checkouts you already have;
+# a sandbox-free opam root, the running-ng tools switch, and clones the two benchmark
+# repos beside this one. Benchmark runtimes and olly are not built here; running-ng
+# builds them per config.
+# Set BENCHES_DIR / MACRO_BENCHES_DIR to use checkouts you already have;
 # an existing directory is never touched.
 # Usage: sh install_deps_freebsd.sh [--check]   (--check reports and changes nothing)
 # POSIX sh: FreeBSD base has no bash.
@@ -14,25 +14,11 @@ set -eu
 ROOT_DIR=$(cd "$(dirname "$0")" && pwd)
 OPAM_VERSION="${OPAM_VERSION:-2.5.2}"
 OPAM_SWITCH="${OPAM_SWITCH:-running-ng-tools}"
-# olly needs cmdliner >= 2.0; opam-compiler (tools switch) pins it < 2.0.
-OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
 OCAML_VERSION="${OCAML_VERSION:-5.4.0}"
 LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
 PARENT_DIR=$(cd "$ROOT_DIR/.." && pwd)
 BENCHES_DIR="${BENCHES_DIR:-$PARENT_DIR/benches}"
 MACRO_BENCHES_DIR="${MACRO_BENCHES_DIR:-$PARENT_DIR/macro-benches}"
-# Same search order as the launch scripts, so they find what is cloned here:
-# a sibling checkout wins, an existing ~/runtime_events_tools is kept, and a
-# fresh clone lands beside this repo.
-if [ -z "${OLLY_DIR:-}" ]; then
-    if [ -d "$PARENT_DIR/runtime_events_tools" ]; then
-        OLLY_DIR="$PARENT_DIR/runtime_events_tools"
-    elif [ -d "$HOME/runtime_events_tools" ]; then
-        OLLY_DIR="$HOME/runtime_events_tools"
-    else
-        OLLY_DIR="$PARENT_DIR/runtime_events_tools"
-    fi
-fi
 
 CHECK_ONLY=0
 [ "${1:-}" = "--check" ] && CHECK_ONLY=1
@@ -46,7 +32,7 @@ ok()    { green "    OK: $*"; }
 have()  { command -v "$1" >/dev/null 2>&1; }
 
 # Clone at its default branch, or leave an existing checkout alone: it may be a
-# pinned one (the bench service points OLLY_DIR and the bench dirs at its own).
+# pinned one (the bench service points the bench dirs at its own).
 clone_if_missing() {
     if [ -d "$2" ]; then
         ok "$(basename "$2") at $2"
@@ -66,7 +52,6 @@ fi
 step "Checking system prerequisites (cannot install these without root)"
 
 BLOCKED=""
-NO_CMAKE=0
 need() {
     if have "$1"; then
         ok "$1"
@@ -102,12 +87,16 @@ fi
 if have cmake; then
     ok "cmake"
 else
-    warn "cmake absent: hdr_histogram will not build (it depends on conf-cmake),"
-    warn "and without hdr_histogram olly has no gc-stats subcommand -- which is"
-    warn "exactly what running-ng invokes. Hardware counters and rusage still"
-    warn "work, but there will be no GC metrics. Needs root: pkg install cmake"
+    warn "cmake absent: olly's hdr_histogram will not build, so configs that"
+    warn "attach olly (perf_grp*) stop before running. Needs root: pkg install cmake"
     BLOCKED="$BLOCKED cmake"
-    NO_CMAKE=1
+fi
+if pkg info -e libffi 2>/dev/null; then
+    ok "libffi"
+else
+    warn "libffi absent: olly's ctypes-foreign will not build, so configs that"
+    warn "attach olly (perf_grp*) stop before running. Needs root: pkg install libffi"
+    BLOCKED="$BLOCKED libffi"
 fi
 
 step "Checking the opam compiler plugin"
@@ -149,7 +138,7 @@ if [ -n "$BLOCKED" ]; then
     # Only the hard prerequisites are fatal; gmp/pkgconf only cost benchmarks.
     for pkg in $BLOCKED; do
         case "$pkg" in
-            gmp|pkgconf|cmake) ;;
+            gmp|pkgconf|cmake|libffi) ;;
             *) red "Cannot continue without $pkg."; exit 1 ;;
         esac
     done
@@ -210,11 +199,10 @@ fi
 
 # 4. Switches
 step "Provisioning running-ng's opam switches"
-# running.switches is the single declaration of the tools switch and the separate
-# olly switch (cmdliner >= 2.0 vs opam-compiler's < 2.0 pin); it creates, rebuilds
-# stale ones (olly keyed on the checkout SHA) and restores the active switch.
+# running.switches is the single declaration of the tools switch; it creates or
+# rebuilds it and restores the active switch.
 # Stdlib-only, so plain python3 works before running-ng is installed anywhere.
-OPAM_BIN="$OPAM_BIN" OLLY_DIR="$OLLY_DIR" \
+OPAM_BIN="$OPAM_BIN" \
     PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches ensure \
         --compiler "$OCAML_VERSION"
 # The rest concerns running-ng's own switches, which live in its own opam root.
@@ -244,50 +232,16 @@ if "$OPAM_BIN" compiler create "invalid/source#nope" </dev/null 2>&1 \
 fi
 ok "opam compiler plugin resolves"
 
-# 5. olly
-step "Building olly (runtime_events_tools) in its own switch"
-# The binary is self-contained; only its bin directory needs to be on PATH at run time.
-if [ "$NO_CMAKE" = "1" ]; then
-    warn "SKIPPED: olly needs hdr_histogram, which needs a system cmake."
-    warn "Everything else is installed. Get cmake installed (needs root) and"
-    warn "re-run this script; the switch and packages above will be reused."
-    OLLY_EXE=""
-else
-    clone_if_missing https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
-
-    NCPU=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
-    BUILD_LOG="${TMPDIR:-/tmp}/running-ng-olly-build.log"
-    # Not piped to `tail`, which would mask dune's exit status behind tail's.
-    if ( cd "$OLLY_DIR" && eval "$("$OPAM_BIN" env --switch="$OLLY_SWITCH")" && \
-         dune build -p runtime_events_tools -j "$NCPU" @install ) \
-         > "$BUILD_LOG" 2>&1; then
-        ok "olly built"
-    else
-        red "ERROR: the olly build failed. Last 30 lines of $BUILD_LOG:"
-        tail -30 "$BUILD_LOG"
-        exit 1
-    fi
-    OLLY_EXE="$OLLY_DIR/_build/install/default/bin/olly"
-    if [ ! -x "$OLLY_EXE" ]; then
-        red "ERROR: olly not found at $OLLY_EXE after a successful build"
-        exit 1
-    fi
-    ok "olly at $OLLY_EXE"
-fi
-
-# 6. Benchmarks
+# 5. Benchmarks
 step "Checking the benchmark repositories"
 clone_if_missing https://github.com/ocaml-bench/benches.git "$BENCHES_DIR"
 clone_if_missing https://github.com/ocaml-bench/macro-benches.git "$MACRO_BENCHES_DIR"
 
-# 7. Summary
+# 6. Summary
 echo ""
 step "Done. To use this environment:"
 echo "  export PATH=\"$LOCAL_BIN:\$PATH\""
 echo "  export OPAMROOT=$OPAMROOT; eval \$($OPAM_BIN env --switch=$OPAM_SWITCH --set-switch)"
-if [ -n "$OLLY_EXE" ]; then
-    echo "  export PATH=\"$OLLY_DIR/_build/install/default/bin:\$PATH\""
-fi
 echo ""
 echo "Before the first macro run, vendor macro-benches' dependencies (slow, once):"
 echo "  make -C $MACRO_BENCHES_DIR setup"

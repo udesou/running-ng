@@ -19,18 +19,9 @@ def state(tmp_path, monkeypatch):
 
 # --- the declaration -----------------------------------------------------------
 
-def test_olly_and_the_plugin_are_never_in_the_same_switch():
-    """olly needs cmdliner >= 2.0 and opam-compiler pins < 2.0; each corrupts the other's switch."""
-    tools = switches.SWITCHES[switches.TOOLS_SWITCH]
-    olly = switches.SWITCHES[switches.OLLY_SWITCH]
-    assert "opam-compiler" in tools["packages"]
-    assert "opam-compiler" not in olly["packages"]
-    assert olly["source"] is not None, "olly's deps come from its own opam file"
-    assert tools["source"] is None
-
-
-def test_olly_deps_are_not_hand_listed():
-    assert switches.SWITCHES[switches.OLLY_SWITCH]["packages"] == []
+def test_olly_has_no_switch():
+    """olly is built per runtime (running.olly), not in a switch of its own."""
+    assert list(switches.SWITCHES) == [switches.TOOLS_SWITCH]
 
 
 def test_only_the_tools_switch_registers_the_plugin():
@@ -56,12 +47,6 @@ def test_pins_are_applied_before_installing():
     assert all("--no-action" in c for c in pin_cmds)
     first_install = next(i for i, c in enumerate(cmds) if c[1] == "install")
     assert all(cmds.index(c) < first_install for c in pin_cmds)
-
-
-def test_olly_switch_resolves_deps_from_its_own_opam_file():
-    cmds = switches.build_commands(switches.OLLY_SWITCH)
-    deps = cmds[-1]
-    assert "--deps-only" in deps and deps[-1] == "."
 
 
 def test_every_install_names_its_switch_explicitly():
@@ -149,14 +134,6 @@ def test_an_unrecorded_switch_without_the_pin_is_repaired(monkeypatch, state):
     assert switches.plan("opam", switches.TOOLS_SWITCH) == "repair"
 
 
-def test_moving_the_olly_checkout_triggers_a_rebuild(monkeypatch, state):
-    """A stale olly is silently wrong, not broken; the recorded SHA catches it."""
-    _fake(monkeypatch, True, {"ocaml": "5.4.0", "source_sha": "bbbb"})
-    switches.save_state({"version": 1, "switches": {
-        switches.OLLY_SWITCH: {"identity": {"ocaml": "5.4.0", "source_sha": "aaaa"}}}})
-    assert switches.plan("opam", switches.OLLY_SWITCH) == "rebuild"
-
-
 def test_a_switch_we_did_not_build_is_adopted_not_destroyed(monkeypatch, state):
     # present but unrecorded: someone else's, or our state was lost
     _fake(monkeypatch, True, _tools(ocaml="5.4.0"))
@@ -193,7 +170,7 @@ def test_no_shell_script_creates_an_opam_switch(script):
 
 @pytest.mark.parametrize("script", SHELL_SCRIPTS)
 def test_no_shell_script_installs_opam_compiler(script):
-    # into the olly switch it downgrades cmdliner; without --switch it may do the same
+    # without --switch it may land in whichever switch is current
     offenders = [l for l in _code_lines(script)
                  if "opam-compiler" in l and "install" in l]
     assert not offenders, (

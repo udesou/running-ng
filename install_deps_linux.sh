@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Prepare a clean Ubuntu/Debian host to run run_ocaml_bench_gc_sweep.sh: apt packages
-# (build tools, perf, python3, libgmp), opam >= 2.2, the running-ng tools and olly
-# switches, olly built from source, pyyaml, and clones of the two benchmark repos
-# and of runtime_events_tools beside this one. Needs sudo.
+# (build tools, perf, python3, libgmp), opam >= 2.2, the running-ng tools switch,
+# pyyaml, and clones of the two benchmark repos beside this one. Needs sudo.
+# olly is built per runtime by the first run.
 # Benchmark runtimes are not built here; running-ng provisions them per config.
-# Set BENCHES_DIR / MACRO_BENCHES_DIR / OLLY_DIR to use checkouts you already have;
+# Set BENCHES_DIR / MACRO_BENCHES_DIR to use checkouts you already have;
 # an existing directory is never touched.
 # Usage: bash install_deps_linux.sh   (or bash install_deps.sh, which dispatches)
 
@@ -14,23 +14,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(cd "$ROOT_DIR/.." && pwd)"
 BENCHES_DIR="${BENCHES_DIR:-$PARENT_DIR/benches}"
 MACRO_BENCHES_DIR="${MACRO_BENCHES_DIR:-$PARENT_DIR/macro-benches}"
-# Same search order as the launch scripts, so they find what is cloned here:
-# a sibling checkout wins, an existing ~/runtime_events_tools is kept, and a
-# fresh clone lands beside this repo.
-if [[ -z "${OLLY_DIR:-}" ]]; then
-    if [[ -d "$PARENT_DIR/runtime_events_tools" ]]; then
-        OLLY_DIR="$PARENT_DIR/runtime_events_tools"
-    elif [[ -d "$HOME/runtime_events_tools" ]]; then
-        OLLY_DIR="$HOME/runtime_events_tools"
-    else
-        OLLY_DIR="$PARENT_DIR/runtime_events_tools"
-    fi
-fi
 # Not "5.4.0": this is the name running.switches and the FreeBSD installer declare.
 OPAM_SWITCH="${OPAM_SWITCH:-running-ng-tools}"
 OCAML_VERSION="${OCAML_VERSION:-5.4.0}"
-# olly needs cmdliner >= 2.0; opam-compiler (tools switch) pins it < 2.0.
-OLLY_SWITCH="${OLLY_SWITCH:-running-ng-olly}"
 
 # The ~/.opam directory format requires >= 2.2.
 OPAM_MIN_VERSION="2.2.0"
@@ -44,7 +30,7 @@ step() { blue "==> $*"; }
 ok()   { green "    OK: $*"; }
 
 # Clone at its default branch, or leave an existing checkout alone: it may be a
-# pinned one (the bench service points OLLY_DIR and the bench dirs at its own).
+# pinned one (the bench service points the bench dirs at its own).
 clone_if_missing() {
     local url="$1" dir="$2"
     if [[ -d "$dir" ]]; then
@@ -77,6 +63,9 @@ REQUIRED_PKGS=(
     linux-tools-generic
     libgmp-dev              # zarith, pidigits5
     pkg-config
+    # olly's vendored hdr_histogram and ctypes-foreign
+    cmake
+    libffi-dev
     bubblewrap
     unzip
     rsync
@@ -166,9 +155,8 @@ ok "opam ready"
 # 3. Switches
 
 step "Provisioning running-ng's opam switches"
-# running.switches is the single declaration of the tools switch and the separate
-# olly switch (cmdliner >= 2.0 vs opam-compiler's < 2.0 pin).
-OPAM_BIN="$OPAM_BIN" OLLY_DIR="$OLLY_DIR" \
+# running.switches is the single declaration of the tools switch.
+OPAM_BIN="$OPAM_BIN" \
     PYTHONPATH="$ROOT_DIR/src" python3 -m running.switches ensure \
         --compiler "$OCAML_VERSION"
 # The rest concerns running-ng's own switches, which live in its own opam root.
@@ -182,9 +170,6 @@ BUILD_TOOLS=(
     opam-compiler   # provisions runtime switches via `opam compiler create`
     processor   # ocaml-processor-dump topology for CpuPin and the manifest; optional
 )
-
-# olly's deps are not installed here: they would evict opam-compiler (cmdliner
-# conflict). olly's own switch resolves them from its opam file.
 
 # Pre-warm only: the ~/benches build scripts install their own deps; this speeds up first runs.
 BENCH_PKGS=(
@@ -219,51 +204,19 @@ if "$OPAM_BIN" compiler create "invalid/source#nope" </dev/null 2>&1 \
 fi
 ok "opam compiler plugin resolves"
 
-# 4. olly
-step "Building runtime_events_tools (olly)"
-
-clone_if_missing https://github.com/tarides/runtime_events_tools.git "$OLLY_DIR"
-
-pushd "$OLLY_DIR" >/dev/null
-
-
-# No --set-switch: an early exit would leave the user's global switch changed.
-eval "$("$OPAM_BIN" env --switch="$OLLY_SWITCH")"
-# Not piped to `tail`, which would report tail's exit status rather than dune's.
-BUILD_LOG="${TMPDIR:-/tmp}/running-ng-olly-build.log"
-if ! dune build -p runtime_events_tools -j "$(nproc)" @install > "$BUILD_LOG" 2>&1; then
-    red "ERROR: the olly build failed. Last 30 lines of $BUILD_LOG:"
-    tail -30 "$BUILD_LOG"
-    popd >/dev/null
-    exit 1
-fi
-
-OLLY_EXE="$OLLY_DIR/_build/install/default/bin/olly"
-if [[ -x "$OLLY_EXE" ]]; then
-    ok "olly built at $OLLY_EXE"
-else
-    red "ERROR: olly binary not found after build"
-    echo "  Expected at: $OLLY_EXE"
-    echo "  Check build output above for errors."
-    popd >/dev/null
-    exit 1
-fi
-
-popd >/dev/null
-
-# 5. Python dependencies
+# 4. Python dependencies
 step "Installing Python dependencies"
 
 pip3 install --user --quiet pyyaml 2>/dev/null || pip3 install --quiet pyyaml
 ok "pyyaml installed"
 
-# 6. Benchmarks
+# 5. Benchmarks
 step "Checking benchmark repositories"
 
 clone_if_missing https://github.com/ocaml-bench/benches.git "$BENCHES_DIR"
 clone_if_missing https://github.com/ocaml-bench/macro-benches.git "$MACRO_BENCHES_DIR"
 
-# 7. Verify
+# 6. Verify
 step "Verifying installation"
 
 ERRORS=0
@@ -309,7 +262,6 @@ check_cmd ocamlfind
 check_cmd ocamlopt
 
 echo "  Files:"
-check_file "$OLLY_EXE"
 check_file "$BENCHES_DIR"
 check_file "$MACRO_BENCHES_DIR"
 check_file "$ROOT_DIR/src/running/config/examples/baseline_micro.yml"
