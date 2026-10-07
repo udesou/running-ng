@@ -224,8 +224,9 @@ tag filter is *intersection-only* (can't re-enable a program absent from
   (OxCaml has no compiler opam file in its tree; the released plugin silently
   builds a *stock* compiler from OxCaml's source). Until #42 is released,
   `switches.py` pins the tools switch's opam-compiler to that PR's commit
-  (`pins:`); once released, delete the pin and `running.switches ensure`
-  rebuilds the tools switch. `OxCaml.__init__` refuses a compiler that rejects
+  (`pins:`; the commit is tagged `running-ng-pin-a94703a` on udesou/opam-compiler
+  so it stays fetchable if the PR branch is rewritten); once released, delete
+  the pin and `running.switches ensure` rebuilds the tools switch. `OxCaml.__init__` refuses a compiler that rejects
   mode syntax, and defaults `dune_version:` to `3.22.2+ox` (the only dune
   builds oxcaml/opam-repository's guards admit). `GITHUB_TOKEN` avoids GitHub's
   API rate limit while the plugin picks the recipe. That recipe comes from

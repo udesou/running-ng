@@ -43,9 +43,10 @@ SWITCHES: Dict[str, Dict] = {
         # or `opam compiler create` cannot resolve them.
         "registers_plugin": "opam-compiler",
         # OxCaml support (ocaml-opam/opam-compiler#42); drop once it is released.
+        # Tagged running-ng-pin-a94703a on the fork so it outlives the PR branch.
         "pins": {
             "opam-compiler": "git+https://github.com/udesou/opam-compiler.git"
-                             "#9b9ca6184e8b04f539f1c6308e5dc05a5a6b39d3",
+                             "#a94703a4e0337f49177a2b2be0968c21c091d71a",
         },
     },
     OLLY_SWITCH: {
