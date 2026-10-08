@@ -399,7 +399,7 @@ suites:
   macro-zarith:
     type: OCamlBenchmarkSuite
     ocamlrunparam: "e=25,d=2"   # heaviest ring user; see macro-menhir-monorepo
-    timeout: 900   # for the huge rung
+    timeout: 900   # zarith_pi_large: 347s on rosemary; zarith_pi_huge has its own below
     programs:
       # Legacy input; tag references resolve to it.
       zarith_pi:
@@ -889,7 +889,8 @@ benchmarks:
     - zarith_pi_small
     - zarith_pi_default
     - zarith_pi_large
-    - zarith_pi_huge
+    # 953s standalone on rosemary (Xeon E5-2640 v4), so the suite's 900 killed it.
+    - {name: zarith_pi_huge, bm_name: zarith_pi_huge, timeout: 1800}
 
   macro-owl:
     - owl_gc
