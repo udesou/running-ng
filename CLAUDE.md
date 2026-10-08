@@ -521,6 +521,14 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   `runbms.redact` masks credential-like `name=value` / `--name value` pairs,
   well-known token formats and `user:password@` URLs in all of it. Anything
   that matches none of these is recorded verbatim, and logs get published.
+- **`--resume <run id>`** skips the cells listed in the run dir's `.cells-complete`
+  (a cell is added once all its invocations ran). A cell that is not listed is
+  rerun from invocation 0 after its leftover log, sidecars, memtrace files and
+  contract rows are deleted, so a session killed mid-cell leaves nothing half
+  measured. The contract writer loads the measurements already in `contract/`
+  and adds to them; only a fresh run starts them empty. A run dir from before
+  the list existed is seeded from its logs on resume, which cannot tell a
+  cut-off cell from a finished one (delete that cell's log to rerun it).
 - **olly JSON sidecars are JSONL** — one line per invocation; don't infer
   invocation count from filenames.
 - **Constructing an `OCaml` runtime builds its opam root.** `__init__` calls
