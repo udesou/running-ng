@@ -26,10 +26,10 @@ bash install_deps.sh
 
 Auto-detects the OS and delegates to `install_deps_linux.sh` (apt),
 `install_deps_macos.sh` (Homebrew) or `install_deps_freebsd.sh` (pkg). It
-installs system packages, opam 2.2+, a tools switch, `pyyaml`, and clones as siblings: 
-`benches`, `macro-benches` and `runtime_events_tools` (for `olly`, which the orchestrator
-builds per runtime), skipping any of these that already exists.
-<!-- TODO(docs): the installers no longer clone runtime_events_tools. running-ng fetches olly at its pinned commit (src/running/olly) and builds it with each runtime's compiler on the first run that attaches olly. -->
+installs system packages, opam 2.2+, a tools switch, `pyyaml`, and clones `benches` and
+`macro-benches` as siblings, skipping any that already exists. For `olly`, running-ng
+fetches the commit it pins for `runtime_events_tools` and builds it with each runtime's
+compiler the first time a run needs it.
 
 Note that macro-benches vendors its dependencies once, so when running an experiment with the macro benchmarks also run:
 
