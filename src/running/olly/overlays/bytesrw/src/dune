@@ -1,0 +1,2 @@
+(data_only_dirs blake3 crypto md sysrandom tls unix websocket xxhash zlib zstd)
+(library (name bytesrw) (public_name bytesrw) (wrapped false) (modules bytesrw bytesrw_fmt bytesrw_utf bytesrw_hex))

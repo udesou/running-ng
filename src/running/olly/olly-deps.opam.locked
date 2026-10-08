@@ -1,0 +1,231 @@
+opam-version: "2.0"
+synopsis: "opam-monorepo generated lockfile"
+maintainer: "opam-monorepo"
+depends: [
+  "base-bigarray" {= "base"}
+  "base-domains" {= "base"}
+  "base-effects" {= "base"}
+  "base-nnp" {= "base"}
+  "base-threads" {= "base"}
+  "base-unix" {= "base"}
+  "cmdliner" {= "2.1.1+dune" & ?vendor}
+  "conf-cmake" {= "1"}
+  "conf-libffi" {= "2.0.0"}
+  "conf-pkg-config" {= "5"}
+  "conf-zlib" {= "1"}
+  "csexp" {= "1.5.2" & ?vendor}
+  "ctypes" {= "0.24.0" & ?vendor}
+  "ctypes-foreign" {= "0.24.0" & ?vendor}
+  "dune" {= "3.22.2"}
+  "dune-configurator" {= "3.22.2" & ?vendor}
+  "hdr_histogram" {= "0.0.6" & ?vendor}
+  "integers" {= "0.8.0" & ?vendor}
+  "mtime" {= "2.2.0+dune" & ?vendor}
+  "ocaml" {= "5.4.1"}
+  "ocaml-base-compiler" {= "5.4.1"}
+  "ocaml-compiler" {= "5.4.1"}
+  "ocaml-config" {= "3"}
+  "ocaml-options-vanilla" {= "1"}
+  "stdlib-shims" {= "0.3.0" & ?vendor}
+  "trace" {= "0.12" & ?vendor}
+  "trace-fuchsia" {= "0.12" & ?vendor}
+]
+depexts: [
+  ["cmake"] {os-distribution = "alpine"}
+  ["cmake"] {os-distribution = "arch"}
+  ["cmake"] {os-distribution = "cygwin"}
+  ["cmake"] {os-distribution = "nixos"}
+  ["cmake"] {os-distribution = "ol"}
+  ["cmake"] {os-family = "debian"}
+  ["cmake"] {os-family = "fedora"}
+  ["cmake"] {os-family = "ubuntu"}
+  ["cmake"] {os-distribution = "homebrew" & os = "macos"}
+  ["cmake"] {os-distribution = "macports" & os = "macos"}
+  ["cmake"] {os-family = "suse" | os-family = "opensuse"}
+  ["cmake3" "epel-release"] {os-distribution = "centos"}
+  ["dev-util/cmake"] {os-distribution = "gentoo"}
+  ["devel/cmake"] {os = "dragonfly"}
+  ["devel/cmake"] {os = "freebsd"}
+  ["devel/cmake"] {os = "netbsd"}
+  ["devel/cmake"] {os = "openbsd"}
+  ["libffi"] {os = "freebsd"}
+  ["libffi"] {os-distribution = "nixos"}
+  ["libffi"] {os = "macos" & os-distribution = "homebrew"}
+  ["libffi"] {os = "macos" & os-distribution = "macports"}
+  ["libffi"] {os = "win32" & os-distribution = "cygwinports"}
+  ["libffi-dev"] {os-distribution = "alpine"}
+  ["libffi-dev"] {os-family = "debian"}
+  ["libffi-dev"] {os-family = "ubuntu"}
+  ["libffi-devel"] {os-distribution = "centos"}
+  ["libffi-devel"] {os-distribution = "mageia"}
+  ["libffi-devel"] {os-distribution = "ol"}
+  ["libffi-devel"] {os-family = "fedora"}
+  ["libffi-devel"] {os-family = "suse" | os-family = "opensuse"}
+  ["pkg-config"] {os-distribution = "nixos"}
+  ["pkg-config"] {os-family = "debian" | os-family = "ubuntu"}
+  ["pkgconf"] {os = "freebsd"}
+  ["pkgconf"] {os-distribution = "alpine"}
+  ["pkgconf"] {os-distribution = "arch"}
+  ["pkgconf"] {os-distribution = "cygwin"}
+  ["pkgconf"] {os = "macos" & os-distribution = "homebrew"}
+  ["pkgconf-pkg-config"] {os-distribution = "mageia"}
+  ["pkgconf-pkg-config"] {os-family = "fedora"}
+  ["pkgconf-pkg-config"] {os-distribution = "centos" & os-version >= "8"}
+  ["pkgconf-pkg-config"] {os-distribution = "ol" & os-version >= "8"}
+  ["pkgconf-pkg-config"] {os-distribution = "rhel" & os-version >= "8"}
+  ["pkgconfig"] {os = "macos" & os-distribution = "macports"}
+  ["pkgconfig"] {os-distribution = "centos" & os-version <= "7"}
+  ["pkgconfig"] {os-distribution = "ol" & os-version <= "7"}
+  ["pkgconfig"] {os-distribution = "rhel" & os-version <= "7"}
+  ["system:cmake"] {os-distribution = "cygwinports"}
+  ["system:pkgconf"] {os = "win32" & os-distribution = "cygwinports"}
+  ["zlib"] {os-distribution = "nixos"}
+  ["zlib"] {os-family = "arch"}
+  ["zlib"] {os = "win32" & os-distribution = "cygwinports"}
+  ["zlib"] {os-distribution = "homebrew" & os = "macos"}
+  ["zlib-dev"] {os-distribution = "alpine"}
+  ["zlib-devel"] {os = "cygwin"}
+  ["zlib-devel"] {os-distribution = "ol"}
+  ["zlib-devel"] {os-family = "fedora" & os-version < "40"}
+  ["zlib-devel"] {os-family = "suse" & os-version < "16"}
+  ["zlib-devel" "zlib-static"]
+    {os-distribution = "centos" & os-version < "10"}
+  ["zlib-ng-compat-devel"] {os-family = "opensuse"}
+  ["zlib-ng-compat-devel"] {os-family = "suse" & os-version >= "16"}
+  ["zlib-ng-compat-devel" "zlib-ng-compat-static"]
+    {os-distribution = "centos" & os-version >= "10"}
+  ["zlib-ng-compat-devel" "zlib-ng-compat-static"]
+    {os-family = "fedora" & os-version >= "40"}
+  ["zlib1g-dev"] {os-family = "debian"}
+  ["zlib1g-dev"] {os-family = "ubuntu"}
+]
+pin-depends: [
+  [
+    "cmdliner.2.1.1+dune"
+    "https://github.com/dune-universe/cmdliner/releases/download/v2.1.1%2Bdune/cmdliner-2.1.1.dune.tbz"
+  ]
+  [
+    "csexp.1.5.2"
+    "https://github.com/ocaml-dune/csexp/releases/download/1.5.2/csexp-1.5.2.tbz"
+  ]
+  [
+    "ctypes.0.24.0"
+    "https://github.com/yallop/ocaml-ctypes/archive/refs/tags/0.24.0.tar.gz"
+  ]
+  [
+    "ctypes-foreign.0.24.0"
+    "https://github.com/yallop/ocaml-ctypes/archive/refs/tags/0.24.0.tar.gz"
+  ]
+  [
+    "dune-configurator.3.22.2"
+    "https://github.com/ocaml/dune/releases/download/3.22.2/dune-3.22.2.tbz"
+  ]
+  [
+    "hdr_histogram.0.0.6"
+    "https://github.com/ocaml-multicore/hdr_histogram_ocaml/releases/download/0.0.6/hdr_histogram-0.0.6.tbz"
+  ]
+  [
+    "integers.0.8.0"
+    "https://github.com/yallop/ocaml-integers/archive/0.8.0.tar.gz"
+  ]
+  [
+    "mtime.2.2.0+dune"
+    "https://github.com/dune-universe/mtime/releases/download/v2.2.0%2Bdune/mtime-2.2.0.dune.tbz"
+  ]
+  [
+    "stdlib-shims.0.3.0"
+    "https://github.com/ocaml/stdlib-shims/releases/download/0.3.0/stdlib-shims-0.3.0.tbz"
+  ]
+  [
+    "trace.0.12"
+    "https://github.com/ocaml-tracing/ocaml-trace/releases/download/v0.12/trace-0.12.tbz"
+  ]
+  [
+    "trace-fuchsia.0.12"
+    "https://github.com/ocaml-tracing/ocaml-trace/releases/download/v0.12/trace-0.12.tbz"
+  ]
+]
+x-opam-monorepo-cli-args: ["--ocaml-version=5.4.1"]
+x-opam-monorepo-duniverse-dirs: [
+  [
+    "https://github.com/dune-universe/cmdliner/releases/download/v2.1.1%2Bdune/cmdliner-2.1.1.dune.tbz"
+    "cmdliner"
+    [
+      "sha256=ff11b7206e0a8469b73b9f419cf59bb386a3b2cd815366fcc5cbaf3283952fd6"
+      "sha512=4e9534d0d2896cc80ae0e3aaa9a64b09044be16f0c571118d8f4367009b912f6d3ebeeeddab2ac4567ec9339d365f9f97802858acf86753e90e500301d019f77"
+    ]
+  ]
+  [
+    "https://github.com/dune-universe/mtime/releases/download/v2.2.0%2Bdune/mtime-2.2.0.dune.tbz"
+    "mtime"
+    [
+      "sha256=63d76322008aa2b27171682ab4bfac7dfc291a9de3081f4dd8dba40b6b4f8a6b"
+      "sha512=0af93bb5d8267ff2b1a97be045a01fdacc128473832f988691df7a69467f9b9cb81f081cbd08d75adf7981cc8e3d742d34351a5edfbb597a02791d1628e850a3"
+    ]
+  ]
+  [
+    "https://github.com/ocaml-dune/csexp/releases/download/1.5.2/csexp-1.5.2.tbz"
+    "csexp"
+    [
+      "sha256=1a14dd04bb4379a41990248550628c77913a9c07f3c35c1370b6960e697787ff"
+      "sha512=be281018bcfc20d4db14894ef51c4b836d6338d2fdfe22e63d46f405f8dea7349e16f1c0ecd65f73d4c85a2a80e618cdbb8c9dafcbb9f229f04f1adca5b1973c"
+    ]
+  ]
+  [
+    "https://github.com/ocaml-multicore/hdr_histogram_ocaml/releases/download/0.0.6/hdr_histogram-0.0.6.tbz"
+    "hdr_histogram_ocaml"
+    [
+      "sha256=86fd5addbe13bb5b489eebbc9908a2209af9f6dd518737507c15dc1e1ada054e"
+      "sha512=9ee7bc9877f8cb0547ae4b3f989c7a924213a3e2549399245321ad7d7e47a8f447025e0b123d31ef4061d1b15ed7e641ea865486e3268b0956833a4c8fa2f63e"
+    ]
+  ]
+  [
+    "https://github.com/ocaml-tracing/ocaml-trace/releases/download/v0.12/trace-0.12.tbz"
+    "ocaml-trace"
+    [
+      "sha256=c173d6bf9433e9eeb41bbddda116a296373d45865841dcbb78bff3be8abd9fd8"
+      "sha512=1105c52112095fdc8d4961d7346b02e416627bde6ac79ddd137bff63ac0ff5cd23fa53192be642614efadb9cb0cbb83b7d571bb5a0d100ad0ae6d10bc61d3bba"
+    ]
+  ]
+  [
+    "https://github.com/ocaml/dune/releases/download/3.22.2/dune-3.22.2.tbz"
+    "dune_"
+    [
+      "sha256=c2ccf8bc6b17afa47c450297357496303aa7c8680e329b79d98c68e35013a118"
+      "sha512=26d3df56a509c6e8937a9333944303bdd8800a41e1b869c3adfb76d1e1fe615b6ec41491d596bd5982e338dcf70b97c18f963f37bfbf2bd581cbd356f3d5f4e5"
+    ]
+  ]
+  [
+    "https://github.com/ocaml/stdlib-shims/releases/download/0.3.0/stdlib-shims-0.3.0.tbz"
+    "stdlib-shims"
+    [
+      "sha256=babf72d3917b86f707885f0c5528e36c63fccb698f4b46cf2bab5c7ccdd6d84a"
+      "sha512=1151d7edc8923516e9a36995a3f8938d323aaade759ad349ed15d6d8501db61ffbe63277e97c4d86149cf371306ac23df0f581ec7e02611f58335126e1870980"
+    ]
+  ]
+  [
+    "https://github.com/yallop/ocaml-ctypes/archive/refs/tags/0.24.0.tar.gz"
+    "ocaml-ctypes"
+    [
+      "sha256=249c5604c8554659761a7282db4ad200aa8c0fdc408cdb53102bd70feeb51955"
+      "md5=064316aaf508a9db203f114bb8401dee"
+    ]
+  ]
+  [
+    "https://github.com/yallop/ocaml-integers/archive/0.8.0.tar.gz"
+    "ocaml-integers"
+    [
+      "sha256=04a1a6d5cc1ecfd3f354a83caed27e59995bb26adec64d88193ccc36268929fa"
+      "md5=5155b252a1143ebe7f895003a7103f5e"
+    ]
+  ]
+]
+x-opam-monorepo-opam-provided: [
+  "conf-cmake" "conf-libffi" "conf-pkg-config" "conf-zlib"
+]
+x-opam-monorepo-opam-repositories: [
+  "git+https://github.com/dune-universe/opam-overlays.git#632df22c65362cb34fd792f701d7d2a6518cdb60"
+  "git+https://github.com/ocaml/opam-repository.git#daca28e1fae6100f9052f4cf4a8b0899fe175b57"
+]
+x-opam-monorepo-root-packages: ["olly-deps"]
+x-opam-monorepo-version: "0.3"

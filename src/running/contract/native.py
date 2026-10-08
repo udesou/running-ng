@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
-from running import osinfo
+from running import olly, osinfo
 from running.contract import emit, vocab
 
 
@@ -49,39 +49,10 @@ def _iso_now():
 
 
 def _olly_version():
-    # olly has no --version flag: derive the version from whatever owns the
-    # binary on PATH (its opam switch, or the git checkout it was built from).
-    w = shutil.which("olly")
-    if not w:
+    try:
+        return olly.version()
+    except Exception:
         return None
-    real = Path(os.path.realpath(w))
-    parts = real.parts
-    # .../.opam/<switch>/bin/olly
-    if ".opam" in parts:
-        i = parts.index(".opam")
-        if i + 1 < len(parts):
-            switch = parts[i + 1]
-            try:
-                out = subprocess.run(
-                    ["opam", "show", "runtime_events_tools", "--field", "version", "--switch", switch],
-                    capture_output=True, text=True, timeout=15)
-                v = out.stdout.strip().strip('"')
-                if v:
-                    return v
-            except Exception:
-                pass
-    for anc in real.parents:
-        if (anc / ".git").exists():
-            try:
-                out = subprocess.run(["git", "-C", str(anc), "describe", "--tags", "--always"],
-                                     capture_output=True, text=True, timeout=10)
-                v = out.stdout.strip()
-                if v:
-                    return v
-            except Exception:
-                pass
-            break
-    return None
 
 
 class NativeEmitter:

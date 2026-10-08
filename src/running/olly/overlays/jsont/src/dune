@@ -1,0 +1,2 @@
+(data_only_dirs brr typegist)
+(library (name jsont) (public_name jsont) (wrapped false) (modules jsont jsont_base))

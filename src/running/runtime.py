@@ -470,6 +470,10 @@ class OCaml(Runtime):
         """Opam switch name, or None in executable mode."""
         return self._switch_name
 
+    def get_root(self) -> Optional["opam_roots.Root"]:
+        """The runtime's opam root, or None in executable mode."""
+        return self._root
+
     def get_switch_prefix(self) -> Optional[Path]:
         """Prefix of the runtime's switch, or None in executable mode."""
         return self._root.switch_prefix() if self._root else None

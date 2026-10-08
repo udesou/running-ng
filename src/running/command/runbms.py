@@ -11,6 +11,8 @@ import socket
 from datetime import datetime
 from running.runtime import Runtime
 from running import osinfo
+from running import olly
+from running.modifier import PerfAndOllyAttach
 import tempfile
 import gzip
 import shutil
@@ -805,8 +807,17 @@ def run(args):
 
         # Pre-build so build logs are not interleaved with progress output.
         runtime_by_config: Dict[str, Runtime] = {}
+        olly_runtimes: Dict[str, Runtime] = {}
         for c in configs:
-            runtime_by_config[c], _ = parse_config_str(configuration, c)
+            runtime_by_config[c], mods = parse_config_str(configuration, c)
+            if any(isinstance(m, PerfAndOllyAttach) for m in mods):
+                olly_runtimes[runtime_by_config[c].name] = runtime_by_config[c]
+        if olly_runtimes and not is_dry_run():
+            try:
+                olly.ensure(list(olly_runtimes.values()))
+            except Exception as e:
+                print("\n--- olly ---\n{}\n---\nStopping before any run.".format(e))
+                sys.exit(1)
         set_retry_failed_builds(bool(args.get("retry_failed_builds")))
         unbuilt.clear()
         build_failed = prebuild(benchmarks, suites, configs, runtime_by_config)

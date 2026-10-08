@@ -3,11 +3,12 @@
 ## The layers
 
 ```
-run_ocaml_bench_gc_sweep.sh     shell entry point: tools switch, olly, PATH, env
+run_ocaml_bench_gc_sweep.sh     shell entry point: tools switch, PATH, env
         │                        (build_ocaml_binaries_gc_sweep.sh = build only)
         ▼
 python3 -m running runbms        this repo: config resolution, compiler builds,
-        │                        benchmark builds, modifier application, run loop
+        │                        olly and benchmark builds, modifier application,
+        │                        run loop
         ▼
 benches/ · macro-benches/        the benchmark programs and their build scripts
 ```
@@ -27,11 +28,8 @@ every runtime before committing to a sweep.
 
 ## Prerequisites
 
-Run `install_deps.sh`. The minimum is Python 3 with `pyyaml`,
-opam 2.2+, and [`olly`](https://github.com/tarides/runtime_events_tools) recent
-enough to emit `max_rss_kb` from `olly gc-stats --json` (commit `977e33b`,
-[PR #85](https://github.com/tarides/runtime_events_tools/pull/85)); the launch
-script refuses to start on an older checkout.
+Run `install_deps.sh`. The minimum is Python 3 with `pyyaml`, opam 2.2+, cmake and
+libffi (to build [`olly`](https://github.com/tarides/runtime_events_tools)).
 
 Hardware counters are optional and per-OS: Linux uses `perf` (`perf stat ls` to
 check access, `sudo sysctl kernel.perf_event_paranoid=1` if denied), FreeBSD uses
@@ -100,11 +98,12 @@ The `memtrace_*` files appear only under a `MemtraceAttach` modifier, see
 | `RUNNING_NG_COUNTER_BACKEND` | auto-detected | force `linux-perf`, `freebsd-pmc` or `none` |
 | `RUNNING_REQUIRE_PERFORMANCE_GOVERNOR` | unset | `1` makes a non-performance CPU governor fatal instead of a warning |
 | `RUNNING_NG_STATE_DIR` | `~/.cache/running-ng/opam-roots/running-ng` | where switch provenance is recorded |
-| `OLLY_DIR` | `../runtime_events_tools`, else `~/runtime_events_tools` | `runtime_events_tools` checkout (version-checked, built if needed) |
-| `OLLY_BIN` | `$OLLY_DIR/_build/install/default/bin` | directory containing the `olly` binary |
+| `OLLY_COMMIT` | the commit running-ng pins | `runtime_events_tools` commit (full SHA) to build olly from, per runtime |
+| `OLLY_DIR` | unset | build olly from this checkout's working tree instead; not with `OLLY_COMMIT` |
+| `OLLY_BIN` | unset | use this `olly` (or the directory holding it) for every runtime; nothing is built |
 | `RUNNING_CONTRACT_ADAPTER` | `contract-adapter/bin/adapter` | adapter binary used by `running adapt` |
 | `RUNNING_OPAM_ROOTS` | `~/.cache/running-ng/opam-roots` | where each compiler's opam root, and running-ng's own (`running-ng/`), are kept |
 | `RUNNING_OPAM_COMPILER` | the tools switch's `opam-compiler` | opam-compiler binary used to build runtimes |
 
-The installers take `BENCHES_DIR`, `MACRO_BENCHES_DIR` and `OLLY_DIR` too: set
-them to checkouts you already have and nothing is cloned.
+The installers take `BENCHES_DIR` and `MACRO_BENCHES_DIR` too: set them to
+checkouts you already have and nothing is cloned.
