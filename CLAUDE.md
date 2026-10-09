@@ -564,9 +564,12 @@ macOS also has no API that binds a process to a core, so `pin_command` returns
   `re-25|md-2` move **out of the config strings** and into the benchmarks that need
   it, so no global value shadows another. A default-ring probe of every heavy rung
   found most tools lose **no** olly events at the default runtime_events ring — they
-  carry nothing. Five suites overflow it and declare **`e=25,d=2`** at the suite
-  level (`macro-{zarith,menhir-monorepo,eio,coq-monorepo,decompress}`; zarith drops
-  ~290M events at default). The `d=2` is **required**, not just a domain cap: OCaml
+  carry nothing. Seven suites overflow it and declare **`e=25,d=2`** at the suite
+  level (`macro-{zarith,menhir-monorepo,eio,coq-monorepo,decompress,owl,ocamlc-self-compile}`;
+  zarith drops ~290M events at default; owl and ocamlc-self-compile added 2026-10-09 after
+  an aarch64 all_benches run showed owl_gc and ocamlc_compile_uucp_large overflowing). The
+  `zarith_pi_huge` rung overflows even e=25, so it carries `e=26,d=2` per-program. The `d=2`
+  is **required**, not just a domain cap: OCaml
   sizes the ring as `max_domains * 2^e`, so `e=25` alone at the default
   `max_domains=128` demands ~4GB and **aborts** (SIGABRT + "olly internal error") —
   `d=2` bounds it (~64MB). `e=25,d=2` is exactly the retired global `re-25|md-2`.
