@@ -319,13 +319,40 @@ def get_filename_completed(bm: Benchmark, hfac: Optional[float], size: Optional[
     return log_filename
 
 
-def get_filename_completed_candidates(bm: Benchmark, hfac: Optional[float], size: Optional[int], config: str) -> List[str]:
-    log_filename = get_filename(bm, hfac, size, config)
-    gz_filename = "{}.gz".format(log_filename)
-    # Resume across runs that changed the compression setting.
-    if compress_logs:
-        return [gz_filename, log_filename]
-    return [log_filename, gz_filename]
+#: Cells whose every invocation ran, one log filename per line; what --resume skips.
+COMPLETE_CELLS = ".cells-complete"
+
+
+def read_complete_cells(log_dir: Path) -> Optional[Set[str]]:
+    """The run's completed cells, or None for a run dir that predates the list."""
+    p = log_dir / COMPLETE_CELLS
+    if not p.exists():
+        return None
+    return {line.strip() for line in p.read_text().splitlines() if line.strip()}
+
+
+def mark_cell_complete(log_dir: Path, log_filename: str) -> None:
+    with (log_dir / COMPLETE_CELLS).open("a") as f:
+        f.write(log_filename + "\n")
+
+
+def discard_partial_cell(log_dir: Path, bm: Benchmark, hfac: Optional[float],
+                         size: Optional[int], config: str) -> None:
+    """Remove what an interrupted session left of a cell, so it reruns cleanly."""
+    stem = get_filename_no_ext(bm, hfac, size, config)
+    names = [stem + ".log"] + [get_tool_json_filename(t, bm, hfac, size, config)
+                               for t in ("olly", "perf")]
+    leftovers = [log_dir / n for n in names] + [log_dir / (n + ".gz") for n in names]
+    leftovers += list(log_dir.glob("memtrace_{}.*".format(stem)))
+    found = [p for p in leftovers if p.exists()]
+    if found:
+        logging.warning("%s [%s] was cut off by an earlier session; rerunning it "
+                        "(removing %s)", bm.name, config,
+                        ", ".join(p.name for p in found))
+    for p in found:
+        p.unlink()
+    if found and _native_emitter is not None:
+        _native_emitter.discard(bm, config)
 
 
 def compress_log_file(log_file: Path):
@@ -504,6 +531,8 @@ def run_one_benchmark(
         logging.warning("More than one user logged in: {}".format(
             " ".join(logged_in_users)))
     ever_ran = [False] * len(configs)
+    already_complete = [False] * len(configs)
+    complete_cells = read_complete_cells(log_dir) if resume else None
     for c in configs:
         if (bm.suite_name, bm.name, c) in unbuilt:
             logging.warning("%s failed to build for %s; not running it.", bm.name, c)
@@ -531,13 +560,15 @@ def run_one_benchmark(
                     p.end_config(hfac, size, bm, i, c, j, False)
                 continue
             if resume:
-                log_filename_completed_candidates = get_filename_completed_candidates(
-                    bm, hfac, size, c)
-                if any((log_dir / f).exists() for f in log_filename_completed_candidates):
+                done = get_filename(bm, hfac, size, c) in (complete_cells or set())
+                if done:
+                    already_complete[j] = True
                     print(config_index_to_chr(j), end="", flush=True)
                     for p in plugins.values():
                         p.end_config(hfac, size, bm, i, c, j, True)
                     continue
+                if i == 0 and not is_dry_run():
+                    discard_partial_cell(log_dir, bm, hfac, size, c)
             log_filename = get_filename(bm, hfac, size, c)
             sidecar_paths = {
                 tool: log_dir / get_tool_json_filename(tool, bm, hfac, size, c)
@@ -607,6 +638,8 @@ def run_one_benchmark(
         p.end_benchmark(hfac, size, bm)
     for j, c in enumerate(configs):
         log_filename = get_filename(bm, hfac, size, c)
+        if not is_dry_run() and ever_ran[j] and not already_complete[j]:
+            mark_cell_complete(log_dir, log_filename)
         if not is_dry_run() and compress_logs and ever_ran[j]:
             compress_log_file(log_dir / log_filename)
             for tool in ("olly", "perf"):
@@ -756,7 +789,8 @@ def run(args):
         if schema_version and not is_dry_run():
             from running.contract import native as _native
             _native_emitter = _native.NativeEmitter(log_dir / "contract", run_id, _raw_runtimes,
-                                                    comparisons=configuration.get("comparisons"))
+                                                    comparisons=configuration.get("comparisons"),
+                                                    resume=bool(resume))
             logging.info("native contract emission enabled (schema_version=%s) -> %s",
                          schema_version, log_dir / "contract")
         # Read from configuration, override with command line arguments if
@@ -786,6 +820,19 @@ def run(args):
             configuration.get("configs"),
             configuration.get("config_sweep")
         )
+        if _native_emitter is not None:
+            _native_emitter.set_config_strings(configs)
+        if resume and not is_dry_run() and read_complete_cells(log_dir) is None:
+            # Seeded the old way, from the logs present: a cell cut off mid-run
+            # there cannot be told apart, and is not rerun.
+            logs = sorted(p.name[:-3] if p.name.endswith(".gz") else p.name
+                          for p in log_dir.iterdir()
+                          if p.name.endswith((".log", ".log.gz")))
+            (log_dir / COMPLETE_CELLS).write_text("".join(n + "\n" for n in logs))
+            logging.warning(
+                "%s predates %s; every cell with a log counts as complete, so one "
+                "cut off mid-run is not rerun. Delete its log to rerun it.",
+                log_dir, COMPLETE_CELLS)
         global remote_host
         remote_host = configuration.get("remote_host")
         if not is_dry_run() and remote_host is not None:

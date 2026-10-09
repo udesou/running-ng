@@ -4,6 +4,7 @@ rather than parsed from filenames.
 """
 import datetime
 import json
+import logging
 import os
 import re
 import shutil
@@ -58,7 +59,7 @@ def _olly_version():
 class NativeEmitter:
     """Accumulates contract artifacts across a run; finalize() writes the manifest."""
 
-    def __init__(self, contract_dir, run_id, runtimes, comparisons=None):
+    def __init__(self, contract_dir, run_id, runtimes, comparisons=None, resume=False):
         # `runtimes` is the raw dict captured before Configuration.resolve_class()
         # turns the values into Runtime objects.
         self.dir = Path(contract_dir)
@@ -69,16 +70,68 @@ class NativeEmitter:
         self.benchmarks = {}      # (name, suite) -> ref
         self._inv = {}            # (bench, config_id) -> next invocation index
         self._cfg_cache = {}      # config_str -> descriptor
+        self._resumed_cids = set()  # config_ids found in a resumed run's rows
+        self._config_strs = {}    # config_id -> config_str, for those rows
         (self.dir / "measurements").mkdir(parents=True, exist_ok=True)
-        # do not append to a prior run's output in the same dir
         for tool in ("olly", "perf"):
-            p = self.dir / "measurements" / (tool + ".ndjson")
-            if p.exists():
+            p = self._ndjson(tool)
+            if not p.exists():
+                continue
+            if resume:
+                self._load(p)
+            else:
+                # do not append to a prior run's output in the same dir
                 p.unlink()
 
-    def _descriptor(self, config_str):
+    def _ndjson(self, tool):
+        return self.dir / "measurements" / (tool + ".ndjson")
+
+    def _rows(self, path):
+        with open(path) as f:
+            for line in f:
+                if line.strip():
+                    yield json.loads(line)
+
+    def _load(self, path):
+        """Pick up the measurements an interrupted session of this run wrote."""
+        for m in self._rows(path):
+            name, suite = m["benchmark"]["name"], m["benchmark"]["suite"]
+            cid = m["config"]["config_id"]
+            self.benchmarks[(name, suite)] = {"name": name, "suite": suite}
+            self._resumed_cids.add(cid)
+            key = (name, cid)
+            self._inv[key] = max(self._inv.get(key, 0), m["invocation"] + 1)
+
+    def set_config_strings(self, config_strs):
+        """The run's config strings, so resumed rows' configs get descriptors."""
+        for c in config_strs:
+            d = self._descriptor(c, register=False)
+            self._config_strs[d["config_id"]] = c
+
+    def discard(self, bm, config_str):
+        """Drop a cell's rows before it is run again from its first invocation."""
+        cid = self._descriptor(config_str, register=False)["config_id"]
+        name, suite = bm.name, bm.suite_name
+        for tool in ("olly", "perf"):
+            p = self._ndjson(tool)
+            if not p.exists():
+                continue
+            keep = [m for m in self._rows(p)
+                    if not (m["benchmark"]["name"] == name
+                            and m["benchmark"]["suite"] == suite
+                            and m["config"]["config_id"] == cid)]
+            tmp = p.with_suffix(".tmp")
+            with open(tmp, "w") as f:
+                for m in keep:
+                    f.write(json.dumps(m, separators=(",", ":")) + "\n")
+            os.replace(tmp, p)
+        self._inv.pop((name, cid), None)
+
+    def _descriptor(self, config_str, register=True):
         d = self._cfg_cache.get(config_str)
         if d is not None:
+            if register:
+                self.configs[d["config_id"]] = d
             return d
         runtime_name = config_str.split("|")[0]
         spec = self.runtimes.get(runtime_name, {}) or {}
@@ -109,7 +162,8 @@ class NativeEmitter:
                                    modifiers=config_str.split("|")[1:],
                                    tools=["olly", "perf"])
         self._cfg_cache[config_str] = d
-        self.configs[d["config_id"]] = d
+        if register:
+            self.configs[d["config_id"]] = d
         return d
 
     def record(self, bm, config_str, companion_out, ok=True):
@@ -136,7 +190,7 @@ class NativeEmitter:
                               ("perf", emit.perf_metrics(data.get("perf")))):
             if data.get(tool) is not None:
                 m = emit.measurement(self.run_id, name, suite, cid, inv, metrics)
-                emit.append_ndjson(str(self.dir / "measurements" / (tool + ".ndjson")), m)
+                emit.append_ndjson(str(self._ndjson(tool)), m)
 
     def _runtime_selector(self, name):
         """Selector isolating runtime `name` by version/options/commit. Options are
@@ -174,6 +228,13 @@ class NativeEmitter:
         return out
 
     def finalize(self):
+        for cid in self._resumed_cids - set(self.configs):
+            if cid in self._config_strs:
+                self._descriptor(self._config_strs[cid])
+            else:
+                logging.warning("resumed measurements name config %s, which this "
+                                "run's configs do not produce; it is left out of "
+                                "the manifest", cid)
         tv = {}
         pv = _tool_version(["perf", "--version"])
         if pv:
