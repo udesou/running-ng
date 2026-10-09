@@ -34,7 +34,7 @@ ROOTS_ENV_VAR = "RUNNING_OPAM_ROOTS"
 #: opam-repository commit every root is initialised from. Bump by PR, like any
 #: other pin; a runtime can override it with ``opam_repository:``.
 OPAM_REPOSITORY_URL = "https://github.com/ocaml/opam-repository"
-OPAM_REPOSITORY_COMMIT = "daca28e1fae6100f9052f4cf4a8b0899fe175b57"
+OPAM_REPOSITORY_COMMIT = "b0f29298c11859482484f6237c75de5d6d4682a7"
 
 #: The single switch inside a runtime root.
 SWITCH = "runtime"
