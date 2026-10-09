@@ -399,7 +399,7 @@ suites:
   macro-zarith:
     type: OCamlBenchmarkSuite
     ocamlrunparam: "e=25,d=2"   # heaviest ring user; see macro-menhir-monorepo
-    timeout: 900   # for the huge rung
+    timeout: 900   # covers up to the large rung; zarith_pi_huge has its own override
     programs:
       # Legacy input; tag references resolve to it.
       zarith_pi:
@@ -423,12 +423,14 @@ suites:
         path: "${RUNNING_MACRO_BENCH_DIR}/benchmarks/zarith"
         build_script: "zarith.build.sh"
         args: "180000"
+        ocamlrunparam: "e=26,d=2"   # huge rung overflows the suite's e=25 (ermine: e=26 reliable, ~1920s)
 
   # Wrapper args = "$LOOP $DIM". owl_gc_* use loop=1 and scale the matrix dim; the live
   # set is off-heap Bigarrays, so read RSS not top_heap. The macro-benches wrapper keeps
   # OpenBLAS to one thread, so pin_bench's single core is safe.
   macro-owl:
     type: OCamlBenchmarkSuite
+    ocamlrunparam: "e=25,d=2"   # owl_gc needs >= e=25 (see owl_gc note); suite had none
     timeout: 900
     programs:
       owl_gc:
@@ -456,6 +458,7 @@ suites:
   # than ocamlopt so the workload is identical across flambda/non-flambda variants.
   macro-ocamlc-self-compile:
     type: OCamlBenchmarkSuite
+    ocamlrunparam: "e=25,d=2"   # uucp_large overflows the default ring (seen on OxCaml)
     timeout: 300
     programs:
       # REPLICAS default 30; OCAMLC_SELF_COMPILE_REPLICAS=130 at build time gives the ~15s/4GB rung.
@@ -889,7 +892,7 @@ benchmarks:
     - zarith_pi_small
     - zarith_pi_default
     - zarith_pi_large
-    - zarith_pi_huge
+    - {name: zarith_pi_huge, bm_name: zarith_pi_huge, timeout: 3600}   # ermine: ~1920s (OxCaml)
 
   macro-owl:
     - owl_gc
@@ -902,7 +905,7 @@ benchmarks:
     - ocamlc_compile_uucp
     - ocamlc_compile_uucp_small
     - ocamlc_compile_uucp_default
-    - {name: ocamlc_compile_uucp_large, bm_name: ocamlc_compile_uucp_large, timeout: 900}
+    - {name: ocamlc_compile_uucp_large, bm_name: ocamlc_compile_uucp_large, timeout: 1800}   # ermine: ~1057s (OxCaml)
 
   macro-liquidsoap-lang:
     - liq_parse_typecheck
